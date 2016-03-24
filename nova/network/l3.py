@@ -31,11 +31,11 @@ class L3Driver(object):
         """Set up basic L3 networking functionality."""
         raise NotImplementedError()
 
-    def initialize_network(self, cidr, is_external):
+    def initialize_network(self, network):
         """Enable rules for a specific network."""
         raise NotImplementedError()
 
-    def initialize_gateway(self, network_ref):
+    def initialize_gateway(self, network):
         """Set up a gateway on this network."""
         raise NotImplementedError()
 
@@ -148,7 +148,7 @@ class NullL3(L3Driver):
     def is_initialized(self):
         return True
 
-    def initialize_network(self, cidr, is_external):
+    def initialize_network(self, cidr):
         pass
 
     def initialize_gateway(self, network_ref):

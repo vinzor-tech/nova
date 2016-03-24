@@ -16,6 +16,7 @@ import tempfile
 
 import mock
 from oslo_concurrency import processutils
+from oslo_config import cfg
 
 from nova import exception
 from nova import test
@@ -25,6 +26,7 @@ from nova.virt.disk.mount import nbd
 from nova.virt.disk.vfs import localfs as vfsimpl
 from nova.virt.image import model as imgmodel
 
+CONF = cfg.CONF
 
 dirs = []
 files = {}

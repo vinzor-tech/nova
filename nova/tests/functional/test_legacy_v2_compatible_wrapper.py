@@ -22,7 +22,7 @@ from nova.tests.unit import fake_network
 
 
 class LegacyV2CompatibleTestBase(test_servers.ServersTestBase):
-    api_major_version = 'v2'
+    _api_version = 'v2'
 
     def setUp(self):
         super(LegacyV2CompatibleTestBase, self).setUp()
@@ -46,7 +46,7 @@ class LegacyV2CompatibleTestBase(test_servers.ServersTestBase):
         self.assertNotIn('type', response.body["keypair"])
 
     def test_request_with_pattern_properties_check(self):
-        fake_network.set_stub_network_methods(self)
+        fake_network.set_stub_network_methods(self.stubs)
         server = self._build_minimal_create_server_request()
         post = {'server': server}
         created_server = self.api.post_server(post)
@@ -56,7 +56,7 @@ class LegacyV2CompatibleTestBase(test_servers.ServersTestBase):
         self.assertEqual(response, {'a': 'b'})
 
     def test_request_with_pattern_properties_with_avoid_metadata(self):
-        fake_network.set_stub_network_methods(self)
+        fake_network.set_stub_network_methods(self.stubs)
         server = self._build_minimal_create_server_request()
         post = {'server': server}
         created_server = self.api.post_server(post)

@@ -4,22 +4,22 @@
 #
 # Translators:
 # OpenStack Infra <zanata@openstack.org>, 2015. #zanata
-# Andreas Jaeger <jaegerandi@gmail.com>, 2016. #zanata
 msgid ""
 msgstr ""
-"Project-Id-Version: nova 13.0.0.0b4.dev129\n"
+"Project-Id-Version: nova 12.0.0.0b4.dev203\n"
 "Report-Msgid-Bugs-To: EMAIL@ADDRESS\n"
-"POT-Creation-Date: 2016-03-10 03:26+0000\n"
+"POT-Creation-Date: 2015-09-16 19:02+0000\n"
+"PO-Revision-Date: 2015-08-30 12:41+0000\n"
+"Last-Translator: openstackjenkins <jenkins@openstack.org>\n"
+"Language-Team: Turkish (Turkey) (http://www.transifex.com/openstack/nova/"
+"language/tr_TR/)\n"
+"Language: tr-TR\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
-"PO-Revision-Date: 2016-01-20 01:49+0000\n"
-"Last-Translator: Andreas Jaeger <jaegerandi@gmail.com>\n"
-"Language: tr-TR\n"
-"Plural-Forms: nplurals=1; plural=0;\n"
 "Generated-By: Babel 2.0\n"
-"X-Generator: Zanata 3.7.3\n"
-"Language-Team: Turkish (Turkey)\n"
+"Plural-Forms: nplurals=1; plural=0;\n"
+"X-Generator: Zanata 3.7.1\n"
 
 msgid "\"Look for the VDIs failed"
 msgstr "\"VDI arama başarısız"
@@ -59,8 +59,20 @@ msgid "An error occurred while refreshing the network cache."
 msgstr "Ağ zulası tazelenirken bir hata oluştu."
 
 #, python-format
+msgid "Attach volume failed: %s"
+msgstr "Mantıksal sürücü ekleme başarısız: %s"
+
+#, python-format
 msgid "Attaching PCI devices %(dev)s to %(dom)s failed."
 msgstr "%(dev)s PCI aygıtlarının %(dom)s e eklenmesi başarısız."
+
+#, python-format
+msgid "Attaching network adapter failed. Exception:  %s"
+msgstr "Ağ bağdaştırıcısı ekleme başarısız. İstisna:  %s"
+
+#, python-format
+msgid "Cannot block migrate instance %s with mapped volumes"
+msgstr "Eşleşmiş mantıksal sürücülerle %s sunucu göçü engellenemez"
 
 msgid "Cannot cleanup migration files"
 msgstr "Göç dosyaları temizlenemiyor"
@@ -185,6 +197,10 @@ msgstr ""
 
 msgid "Environment variable 'NETWORK_ID' must be set."
 msgstr "Çevresel değişken 'NETWORK_ID' ayarlanmış olmalı."
+
+#, python-format
+msgid "Environment: %s"
+msgstr "Ortam: %s"
 
 #, python-format
 msgid "Error copying key: %s"
@@ -331,12 +347,20 @@ msgstr "Sunucu Kurtarılmaya çalışılırken hata"
 msgid "Error trying to reschedule"
 msgstr "Yeniden zamanlama yapmaya çalışılırken hata"
 
+#, python-format
+msgid "Error updating resources for node %(node)s: %(e)s"
+msgstr "%(node)s düğümü için kaynaklar güncellenirken hata: %(e)s"
+
 msgid "Error waiting for responses from neighbor cells"
 msgstr "Komşu hücrelerden yanıt beklerken hata"
 
 #, python-format
 msgid "Error while trying to clean up image %s"
 msgstr "%s imajı temizlenmeye çalışılırken hata"
+
+#, python-format
+msgid "Error writing vm console log file from serial console pipe. Error: %s"
+msgstr "Seri konsol borusundan vm konsol kaydı yazmada hata. Hata: %s"
 
 #, python-format
 msgid "Error: %s"
@@ -414,6 +438,14 @@ msgstr ""
 
 msgid "Failed to check if instance shared"
 msgstr "Sunucunun paylaşılıp paylaşılmadığı kontrolü yapılamadı"
+
+#, python-format
+msgid ""
+"Failed to clean up the parameters on node %(node)s when unprovisioning the "
+"instance %(instance)s"
+msgstr ""
+"%(instance)s sunucusu hazırlığı iptal edilirken %(node)s düğümündeki "
+"parametrelerin temizlenmesi başarısız"
 
 #, python-format
 msgid "Failed to cleanup directory %(target)s: %(e)s"
@@ -494,6 +526,10 @@ msgstr "Varsayılan ağlar alınamadı"
 msgid "Failed to get metadata for instance id: %s"
 msgstr "Sunucu kimliği için metadata alınmada hata: %s"
 
+#, python-format
+msgid "Failed to get metadata for ip: %s"
+msgstr "IP için metadata alma hata ile sonuçlandı: %s"
+
 msgid "Failed to get nw_info"
 msgstr "nw_info alınamadı"
 
@@ -517,7 +553,7 @@ msgstr "%s-api yükleme başarısı"
 msgid ""
 "Failed to mount container filesystem '%(image)s' on '%(target)s': %(errors)s"
 msgstr ""
-"Kap dosya sistemi '%(image)s' '%(target)s' üstüne bağlanamadı: %(errors)s"
+"Kap dosya sistemi '%(image)s' '%(target)s' üstüne bağlanamadı: %(error)s"
 
 msgid "Failed to notify cells of BDM destroy."
 msgstr "BDM silme hücrelerini bilgilendirme başarısız."
@@ -597,6 +633,10 @@ msgstr "Kap dosya sistemi koparılamadı"
 msgid "Failed to umount container filesystem"
 msgstr "Kap dosya sistemi ayırma başarısız"
 
+#, python-format
+msgid "Failed to understand rule %s"
+msgstr "Kural %s anlaşılamadı"
+
 msgid "Failed to unpause instance"
 msgstr "Sunucu sürdürme başarısız"
 
@@ -648,6 +688,12 @@ msgstr "Ekli VDI'ler temizlenmesi başarısız"
 msgid "Fatal Exception running %(name)s %(type)s-hook: %(obj)s"
 msgstr "%(name)s %(type)s-hook çalıştırılırken ölümcül istisna: %(obj)s"
 
+msgid "FaultWrapper error"
+msgstr "FaultWrapper hatası"
+
+msgid "Get version 2 connection error"
+msgstr "Get sürüm 2 bağlantı hatası"
+
 msgid "Guest does not have a console available"
 msgstr "Konuğun kullanılabilir bir konsolu yok"
 
@@ -689,12 +735,20 @@ msgid "Instance type %s not found for deletion"
 msgstr "Silme işlemi için %s örnek türü bulunamadı"
 
 #, python-format
+msgid "Instance update attempted for '%(key)s' on %(instance_uuid)s"
+msgstr "%(instance_uuid)s üzerinde '%(key)s' için sunucu güncellemesi denendi"
+
+#, python-format
 msgid "Interface %s not found"
 msgstr "Arayüz %s bulunamadı"
 
 #, python-format
 msgid "Invalid server_string: %s"
 msgstr "Geçersiz server_string: %s"
+
+#, python-format
+msgid "Keystone failure: %s"
+msgstr "Keystone başarısızlığı: %s"
 
 #, python-format
 msgid "Live Migration failure: %s"
@@ -791,11 +845,19 @@ msgid "No db access allowed in nova-network: %s"
 msgstr "nova-network'de db erişimine izin verilmiyor: %s"
 
 #, python-format
+msgid "No handler for matches of kind %s"
+msgstr "%s türünde eşleşmeler için işleyici yok"
+
+#, python-format
 msgid "No save handler for %s"
 msgstr "%s için kaydetme işleyicisi yok"
 
 msgid "Not all properties needed are implemented in the compute driver"
 msgstr "İhtiyaç duyulan tüm özellikler hesap sürücüsünde uygulanmamış"
+
+#, python-format
+msgid "PCI device %s not found"
+msgstr "PCI aygıtı %s bulunamadı"
 
 msgid ""
 "Periodic sync_power_state task had an error while processing an instance."
@@ -827,6 +889,10 @@ msgid "Read/Write data failed"
 msgstr "Veri okuma/yazma başarısız"
 
 #, python-format
+msgid "Requested VM Generation %s is not supported on  this OS."
+msgstr "İstenen VM Üretimi %s bu  işletim sisteminde desteklenmiyor."
+
+#, python-format
 msgid "Requested VM Generation %s, but provided VHD instead of VHDX."
 msgstr "VM Oluşturma %s istendi, ama VHDX yerine VHD sağlandı."
 
@@ -855,7 +921,7 @@ msgstr ""
 
 #, python-format
 msgid "TIMEOUT: The call to %(method)s timed out. args=%(args)r"
-msgstr "ZAMAN AŞIMI: %(method)s çağrısı zaman aşımına uğradı. args=%(args)r"
+msgstr "ZAMAN AŞIMI: %(method)s çağrısı zaman aşımına uğradı. args=%(arg)r"
 
 #, python-format
 msgid "Temporary directory is invalid: %s"
@@ -864,6 +930,11 @@ msgstr "Geçici dizin geçersiz: %s"
 #, python-format
 msgid "The Quobyte volume at %s is still in use."
 msgstr "%s deki Quobyte mantıksal sürücüsü hala kullanımda."
+
+#, python-format
+msgid ""
+"The agent call to %(method)s returned an an error: %(ret)r. args=%(args)r"
+msgstr "%(method)s ajan çağrısı bir hata döndürdü: %(ret)r. args=%(args)r"
 
 #, python-format
 msgid ""
@@ -882,6 +953,11 @@ msgstr "%(method)s çağrısı bir hata döndürdü: %(e)s. args=%(args)r"
 
 msgid "Transfer data failed"
 msgstr "Veri aktarımı başarısız"
+
+#, python-format
+msgid "Unable to access floating IP %(fixed_ip)s for port %(port_id)s"
+msgstr ""
+"%(port_id)s bağlantı noktası için değişken IP %(fixed_ip)s ye erişilemiyor"
 
 #, python-format
 msgid "Unable to access floating IP %s"
@@ -937,6 +1013,15 @@ msgstr "VDI SR için tanıtılamadı"
 msgid "Unable to introduce VDI on SR"
 msgstr "VDI SR üzerinde tanıtılamadı"
 
+msgid ""
+"Unable to join. It is possible that either another node exists with the same "
+"name, or this node just restarted. We will try again in a short while to "
+"make sure."
+msgstr ""
+"Katılınamıyor. Aynı isimde başka bir düğümün olması, veya bu düğümün henüz "
+"yeniden başlatılmış olması olası. Emin olmak için birazdan tekrar "
+"deneyeceğiz."
+
 msgid "Unable to load the virtualization driver"
 msgstr "Sanallaştırma sürücüsü yüklenemiyor"
 
@@ -956,6 +1041,10 @@ msgid "Unable to parse rrd of %s"
 msgstr "%s rrd'si ayrıştırılamadı"
 
 #, python-format
+msgid "Unable to preallocate image at path: %(path)s"
+msgstr "Şu yoldaki imajın önceden ayrılması başarısız: %(path)s"
+
+#, python-format
 msgid "Unable to retrieve storage policy with name %s"
 msgstr "%s isimli depolama ilkesi alınamadı"
 
@@ -969,6 +1058,10 @@ msgstr "VBD sökülemedi"
 #, python-format
 msgid "Unable to update host of port %s"
 msgstr "%s bağlantı noktasının istemcisi güncellenemiyor"
+
+#, python-format
+msgid "Unexpected %(ex_name)s raised: %(ex_str)s"
+msgstr "Beklenmedik %(ex_name)s yükseltildi: %(ex_str)s"
 
 msgid "Unexpected build failure, not rescheduling build."
 msgstr "Beklenmeyen inşa başarısızlığı, inşa tekrar zamanlanmıyor."
@@ -1035,7 +1128,7 @@ msgstr ""
 
 #, python-format
 msgid "allocate_port_for_instance returned %(ports)s ports"
-msgstr "allocate_port_for_instance %(ports)s bağlantı noktaları döndürdü"
+msgstr "allocate_port_for_instance %(port)s bağlantı noktaları döndürdü"
 
 msgid "attaching network adapter failed."
 msgstr "ağ bağdaştırıcısı ekleme başarısız."

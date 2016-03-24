@@ -16,6 +16,7 @@
 """
 Scheduler host filters
 """
+
 from nova import filters
 
 

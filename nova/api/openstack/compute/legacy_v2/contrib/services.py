@@ -34,8 +34,6 @@ class ServiceController(object):
         self.ext_mgr = ext_mgr
 
     def _get_services(self, req):
-        api_services = ('nova-osapi_compute', 'nova-ec2', 'nova-metadata')
-
         context = req.environ['nova.context']
         authorize(context)
 
@@ -43,11 +41,8 @@ class ServiceController(object):
         # permission checks
         nova_context.require_admin_context(context)
 
-        services = [
-            s
-            for s in self.host_api.service_get_all(context, set_zones=True)
-            if s['binary'] not in api_services
-        ]
+        services = self.host_api.service_get_all(
+            context, set_zones=True)
 
         host = ''
         if 'host' in req.GET:

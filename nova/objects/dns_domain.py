@@ -18,8 +18,10 @@ from nova.objects import base
 from nova.objects import fields
 
 
+# TODO(berrange): Remove NovaObjectDictCompat
 @base.NovaObjectRegistry.register
-class DNSDomain(base.NovaPersistentObject, base.NovaObject):
+class DNSDomain(base.NovaPersistentObject, base.NovaObject,
+                base.NovaObjectDictCompat):
     # Version 1.0: Initial version
     VERSION = '1.0'
 
@@ -33,7 +35,7 @@ class DNSDomain(base.NovaPersistentObject, base.NovaObject):
     @staticmethod
     def _from_db_object(context, vif, db_vif):
         for field in vif.fields:
-            setattr(vif, field, db_vif[field])
+            vif[field] = db_vif[field]
         vif._context = context
         vif.obj_reset_changes()
         return vif
@@ -63,6 +65,9 @@ class DNSDomainList(base.ObjectListBase, base.NovaObject):
     VERSION = '1.0'
     fields = {
         'objects': fields.ListOfObjectsField('DNSDomain'),
+    }
+    obj_relationships = {
+        'objects': [('1.0', '1.0')],
     }
 
     @base.remotable_classmethod

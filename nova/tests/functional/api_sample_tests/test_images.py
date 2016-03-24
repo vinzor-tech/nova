@@ -24,33 +24,35 @@ CONF.import_opt('osapi_compute_extension',
 
 
 class ImagesSampleJsonTest(api_sample_base.ApiSampleTestBaseV21):
-    sample_dir = 'images'
-    # TODO(gmann): This will be removed once all API tests runs for
-    # all extension enable.
-    all_extensions = True
+    extension_name = 'images'
+    extra_extensions_to_load = ["image-metadata"]
 
     def test_images_list(self):
         # Get api sample of images get list request.
         response = self._do_get('images')
-        self._verify_response('images-list-get-resp', {}, response, 200)
+        subs = self._get_regexes()
+        self._verify_response('images-list-get-resp', subs, response, 200)
 
     def test_image_get(self):
         # Get api sample of one single image details request.
         image_id = fake.get_valid_image_id()
         response = self._do_get('images/%s' % image_id)
-        subs = {'image_id': image_id}
+        subs = self._get_regexes()
+        subs['image_id'] = image_id
         self._verify_response('image-get-resp', subs, response, 200)
 
     def test_images_details(self):
         # Get api sample of all images details request.
         response = self._do_get('images/detail')
-        self._verify_response('images-details-get-resp', {}, response, 200)
+        subs = self._get_regexes()
+        self._verify_response('images-details-get-resp', subs, response, 200)
 
     def test_image_metadata_get(self):
         # Get api sample of an image metadata request.
         image_id = fake.get_valid_image_id()
         response = self._do_get('images/%s/metadata' % image_id)
-        subs = {'image_id': image_id}
+        subs = self._get_regexes()
+        subs['image_id'] = image_id
         self._verify_response('image-metadata-get-resp', subs, response, 200)
 
     def test_image_metadata_post(self):
@@ -59,21 +61,24 @@ class ImagesSampleJsonTest(api_sample_base.ApiSampleTestBaseV21):
         response = self._do_post(
                 'images/%s/metadata' % image_id,
                 'image-metadata-post-req', {})
-        self._verify_response('image-metadata-post-resp', {}, response, 200)
+        subs = self._get_regexes()
+        self._verify_response('image-metadata-post-resp', subs, response, 200)
 
     def test_image_metadata_put(self):
         # Get api sample of image metadata put request.
         image_id = fake.get_valid_image_id()
         response = self._do_put('images/%s/metadata' %
                                 (image_id), 'image-metadata-put-req', {})
-        self._verify_response('image-metadata-put-resp', {}, response, 200)
+        subs = self._get_regexes()
+        self._verify_response('image-metadata-put-resp', subs, response, 200)
 
     def test_image_meta_key_get(self):
         # Get api sample of an image metadata key request.
         image_id = fake.get_valid_image_id()
         key = "kernel_id"
         response = self._do_get('images/%s/metadata/%s' % (image_id, key))
-        self._verify_response('image-meta-key-get', {}, response, 200)
+        subs = self._get_regexes()
+        self._verify_response('image-meta-key-get', subs, response, 200)
 
     def test_image_meta_key_put(self):
         # Get api sample of image metadata key put request.
@@ -81,4 +86,5 @@ class ImagesSampleJsonTest(api_sample_base.ApiSampleTestBaseV21):
         key = "auto_disk_config"
         response = self._do_put('images/%s/metadata/%s' % (image_id, key),
                                 'image-meta-key-put-req', {})
-        self._verify_response('image-meta-key-put-resp', {}, response, 200)
+        subs = self._get_regexes()
+        self._verify_response('image-meta-key-put-resp', subs, response, 200)

@@ -377,7 +377,7 @@ def info_from_instance(context, instance, network_info,
 
     def null_safe_isotime(s):
         if isinstance(s, datetime.datetime):
-            return utils.strtime(s)
+            return timeutils.strtime(s)
         else:
             return str(s) if s else ''
 

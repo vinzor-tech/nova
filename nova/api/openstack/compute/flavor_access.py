@@ -107,7 +107,8 @@ class FlavorActionController(wsgi.Controller):
         flavor = common.get_flavor(context, id)
 
         try:
-            if api_version_request.is_supported(req, min_version='2.7'):
+            req_ver = req.api_version_request
+            if req_ver >= api_version_request.APIVersionRequest("2.7"):
                 if flavor.is_public:
                     exp = _("Can not add access to a public flavor.")
                     raise webob.exc.HTTPConflict(explanation=exp)

@@ -12,7 +12,6 @@
 
 import mock
 
-from nova import objects
 from nova.scheduler.filters import availability_zone_filter
 from nova import test
 from nova.tests.unit.scheduler import fakes
@@ -27,9 +26,14 @@ class TestAvailabilityZoneFilter(test.NoDBTestCase):
 
     @staticmethod
     def _make_zone_request(zone):
-        return objects.RequestSpec(
-            context=mock.sentinel.ctx,
-            availability_zone=zone)
+        return {
+            'context': mock.sentinel.ctx,
+            'request_spec': {
+                'instance_properties': {
+                    'availability_zone': zone
+                }
+            }
+        }
 
     def test_availability_zone_filter_same(self, agg_mock):
         agg_mock.return_value = {'availability_zone': 'nova'}

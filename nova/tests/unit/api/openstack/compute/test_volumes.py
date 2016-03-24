@@ -23,7 +23,6 @@ from six.moves import urllib
 import webob
 from webob import exc
 
-from nova.api.openstack import common
 from nova.api.openstack.compute import assisted_volume_snapshots \
         as assisted_snaps_v21
 from nova.api.openstack.compute.legacy_v2.contrib import \
@@ -33,8 +32,8 @@ from nova.api.openstack.compute import volumes as volumes_v21
 from nova.api.openstack import extensions
 from nova.compute import api as compute_api
 from nova.compute import flavors
-from nova.compute import vm_states
 from nova import context
+from nova import db
 from nova import exception
 from nova import objects
 from nova import test
@@ -61,10 +60,7 @@ def fake_get_instance(self, context, instance_id, want_objects=False,
 
 
 def fake_get_volume(self, context, id):
-    return {'id': FAKE_UUID_A,
-            'status': 'available',
-            'attach_status': 'detached'
-            }
+    return {'id': 'woot'}
 
 
 def fake_attach_volume(self, context, instance, volume_id, device):
@@ -133,7 +129,7 @@ class BootFromVolumeTest(test.TestCase):
         super(BootFromVolumeTest, self).setUp()
         self.stubs.Set(compute_api.API, 'create',
                        self._get_fake_compute_api_create())
-        fakes.stub_out_nw_api(self)
+        fakes.stub_out_nw_api(self.stubs)
         self._block_device_mapping_seen = None
         self._legacy_bdm_seen = True
         self.flags(
@@ -179,19 +175,19 @@ class BootFromVolumeTest(test.TestCase):
                 ))
         req = fakes.HTTPRequest.blank('/v2/fake/os-volumes_boot')
         req.method = 'POST'
-        req.body = jsonutils.dump_as_bytes(body)
+        req.body = jsonutils.dumps(body)
         req.headers['content-type'] = 'application/json'
         res = req.get_response(fakes.wsgi_app(
             init_only=('os-volumes_boot', 'servers')))
-        self.assertEqual(202, res.status_int)
+        self.assertEqual(res.status_int, 202)
         server = jsonutils.loads(res.body)['server']
         self.assertEqual(FAKE_UUID, server['id'])
         self.assertEqual(CONF.password_length, len(server['adminPass']))
-        self.assertEqual(1, len(self._block_device_mapping_seen))
+        self.assertEqual(len(self._block_device_mapping_seen), 1)
         self.assertTrue(self._legacy_bdm_seen)
-        self.assertEqual('1', self._block_device_mapping_seen[0]['volume_id'])
-        self.assertEqual('/dev/vda',
-                         self._block_device_mapping_seen[0]['device_name'])
+        self.assertEqual(self._block_device_mapping_seen[0]['volume_id'], '1')
+        self.assertEqual(self._block_device_mapping_seen[0]['device_name'],
+                '/dev/vda')
 
     def test_create_root_volume_bdm_v2(self):
         body = dict(server=dict(
@@ -207,20 +203,21 @@ class BootFromVolumeTest(test.TestCase):
                 ))
         req = fakes.HTTPRequest.blank('/v2/fake/os-volumes_boot')
         req.method = 'POST'
-        req.body = jsonutils.dump_as_bytes(body)
+        req.body = jsonutils.dumps(body)
         req.headers['content-type'] = 'application/json'
         res = req.get_response(fakes.wsgi_app(
             init_only=('os-volumes_boot', 'servers')))
-        self.assertEqual(202, res.status_int)
+        self.assertEqual(res.status_int, 202)
         server = jsonutils.loads(res.body)['server']
         self.assertEqual(FAKE_UUID, server['id'])
         self.assertEqual(CONF.password_length, len(server['adminPass']))
-        self.assertEqual(1, len(self._block_device_mapping_seen))
+        self.assertEqual(len(self._block_device_mapping_seen), 1)
         self.assertFalse(self._legacy_bdm_seen)
-        self.assertEqual('1', self._block_device_mapping_seen[0]['volume_id'])
-        self.assertEqual(0, self._block_device_mapping_seen[0]['boot_index'])
-        self.assertEqual('/dev/vda',
-                         self._block_device_mapping_seen[0]['device_name'])
+        self.assertEqual(self._block_device_mapping_seen[0]['volume_id'], '1')
+        self.assertEqual(self._block_device_mapping_seen[0]['boot_index'],
+                         0)
+        self.assertEqual(self._block_device_mapping_seen[0]['device_name'],
+                '/dev/vda')
 
 
 class VolumeApiTestV21(test.NoDBTestCase):
@@ -228,7 +225,7 @@ class VolumeApiTestV21(test.NoDBTestCase):
 
     def setUp(self):
         super(VolumeApiTestV21, self).setUp()
-        fakes.stub_out_networking(self)
+        fakes.stub_out_networking(self.stubs)
         fakes.stub_out_rate_limiting(self.stubs)
 
         self.stubs.Set(cinder.API, "delete", fakes.stub_volume_delete)
@@ -240,10 +237,10 @@ class VolumeApiTestV21(test.NoDBTestCase):
             osapi_compute_ext_list=['Volumes'])
 
         self.context = context.get_admin_context()
+        self.app = self._get_app()
 
-    @property
-    def app(self):
-        return fakes.wsgi_app_v21(init_only=('os-volumes', 'servers'))
+    def _get_app(self):
+        return fakes.wsgi_app_v21()
 
     def test_volume_create(self):
         self.stubs.Set(cinder.API, "create", fakes.stub_volume_create)
@@ -255,21 +252,22 @@ class VolumeApiTestV21(test.NoDBTestCase):
         body = {"volume": vol}
         req = fakes.HTTPRequest.blank(self.url_prefix + '/os-volumes')
         req.method = 'POST'
-        req.body = jsonutils.dump_as_bytes(body)
+        req.body = jsonutils.dumps(body)
         req.headers['content-type'] = 'application/json'
         resp = req.get_response(self.app)
 
-        self.assertEqual(200, resp.status_int)
+        self.assertEqual(resp.status_int, 200)
 
         resp_dict = jsonutils.loads(resp.body)
         self.assertIn('volume', resp_dict)
-        self.assertEqual(vol['size'], resp_dict['volume']['size'])
-        self.assertEqual(vol['display_name'],
-                         resp_dict['volume']['displayName'])
-        self.assertEqual(vol['display_description'],
-                         resp_dict['volume']['displayDescription'])
-        self.assertEqual(vol['availability_zone'],
-                         resp_dict['volume']['availabilityZone'])
+        self.assertEqual(resp_dict['volume']['size'],
+                         vol['size'])
+        self.assertEqual(resp_dict['volume']['displayName'],
+                         vol['display_name'])
+        self.assertEqual(resp_dict['volume']['displayDescription'],
+                         vol['display_description'])
+        self.assertEqual(resp_dict['volume']['availabilityZone'],
+                         vol['availability_zone'])
 
     def _test_volume_create_bad(self, cinder_exc, api_exc):
         def fake_volume_create(self, context, size, name, description,
@@ -310,31 +308,31 @@ class VolumeApiTestV21(test.NoDBTestCase):
     def test_volume_index(self):
         req = fakes.HTTPRequest.blank(self.url_prefix + '/os-volumes')
         resp = req.get_response(self.app)
-        self.assertEqual(200, resp.status_int)
+        self.assertEqual(resp.status_int, 200)
 
     def test_volume_detail(self):
         req = fakes.HTTPRequest.blank(self.url_prefix + '/os-volumes/detail')
         resp = req.get_response(self.app)
-        self.assertEqual(200, resp.status_int)
+        self.assertEqual(resp.status_int, 200)
 
     def test_volume_show(self):
         req = fakes.HTTPRequest.blank(self.url_prefix + '/os-volumes/123')
         resp = req.get_response(self.app)
-        self.assertEqual(200, resp.status_int)
+        self.assertEqual(resp.status_int, 200)
 
     def test_volume_show_no_volume(self):
         self.stubs.Set(cinder.API, "get", fakes.stub_volume_notfound)
 
         req = fakes.HTTPRequest.blank(self.url_prefix + '/os-volumes/456')
         resp = req.get_response(self.app)
-        self.assertEqual(404, resp.status_int)
+        self.assertEqual(resp.status_int, 404)
         self.assertIn('Volume 456 could not be found.', resp.body)
 
     def test_volume_delete(self):
         req = fakes.HTTPRequest.blank(self.url_prefix + '/os-volumes/123')
         req.method = 'DELETE'
         resp = req.get_response(self.app)
-        self.assertEqual(202, resp.status_int)
+        self.assertEqual(resp.status_int, 202)
 
     def test_volume_delete_no_volume(self):
         self.stubs.Set(cinder.API, "delete", fakes.stub_volume_notfound)
@@ -342,15 +340,24 @@ class VolumeApiTestV21(test.NoDBTestCase):
         req = fakes.HTTPRequest.blank(self.url_prefix + '/os-volumes/456')
         req.method = 'DELETE'
         resp = req.get_response(self.app)
-        self.assertEqual(404, resp.status_int)
+        self.assertEqual(resp.status_int, 404)
         self.assertIn('Volume 456 could not be found.', resp.body)
 
 
 class VolumeApiTestV2(VolumeApiTestV21):
 
-    @property
-    def app(self):
-        return fakes.wsgi_app(init_only=('os-volumes', 'servers'))
+    def setUp(self):
+        super(VolumeApiTestV2, self).setUp()
+        self.flags(
+            osapi_compute_extension=[
+                'nova.api.openstack.compute.contrib.select_extensions'],
+            osapi_compute_ext_list=['Volumes'])
+
+        self.context = context.get_admin_context()
+        self.app = self._get_app()
+
+    def _get_app(self):
+        return fakes.wsgi_app()
 
 
 class VolumeAttachTestsV21(test.NoDBTestCase):
@@ -358,8 +365,8 @@ class VolumeAttachTestsV21(test.NoDBTestCase):
 
     def setUp(self):
         super(VolumeAttachTestsV21, self).setUp()
-        self.stub_out('nova.db.block_device_mapping_get_all_by_instance',
-                      fake_bdms_get_all_by_instance)
+        self.stubs.Set(db, 'block_device_mapping_get_all_by_instance',
+                       fake_bdms_get_all_by_instance)
         self.stubs.Set(compute_api.API, 'get', fake_get_instance)
         self.stubs.Set(cinder.API, 'get', fake_get_volume)
         self.context = context.get_admin_context()
@@ -378,7 +385,7 @@ class VolumeAttachTestsV21(test.NoDBTestCase):
         req = fakes.HTTPRequest.blank(
                   '/v2/servers/id/os-volume_attachments/uuid')
         req.method = 'POST'
-        req.body = jsonutils.dump_as_bytes({})
+        req.body = jsonutils.dumps({})
         req.headers['content-type'] = 'application/json'
         req.environ['nova.context'] = self.context
 
@@ -391,7 +398,7 @@ class VolumeAttachTestsV21(test.NoDBTestCase):
         req = fakes.HTTPRequest.blank(
                   '/v2/servers/id/os-volume_attachments/uuid')
         req.method = 'POST'
-        req.body = jsonutils.dump_as_bytes({})
+        req.body = jsonutils.dumps({})
         req.headers['content-type'] = 'application/json'
         req.environ['nova.context'] = self.context
 
@@ -407,7 +414,7 @@ class VolumeAttachTestsV21(test.NoDBTestCase):
         req = fakes.HTTPRequest.blank(
                   '/v2/servers/id/os-volume_attachments/uuid')
         req.method = 'POST'
-        req.body = jsonutils.dump_as_bytes({})
+        req.body = jsonutils.dumps({})
         req.headers['content-type'] = 'application/json'
         req.environ['nova.context'] = self.context
 
@@ -423,7 +430,7 @@ class VolumeAttachTestsV21(test.NoDBTestCase):
         req = fakes.HTTPRequest.blank(
                   '/v2/servers/id/os-volume_attachments/uuid')
         req.method = 'POST'
-        req.body = jsonutils.dump_as_bytes({})
+        req.body = jsonutils.dumps({})
         req.headers['content-type'] = 'application/json'
         req.environ['nova.context'] = self.context
 
@@ -452,40 +459,6 @@ class VolumeAttachTestsV21(test.NoDBTestCase):
         else:
             status_int = result.status_int
         self.assertEqual(202, status_int)
-
-    @mock.patch.object(common, 'get_instance')
-    def test_detach_vol_shelved_not_supported(self, mock_get_instance):
-        inst = fake_instance.fake_instance_obj(self.context,
-                                               **{'uuid': FAKE_UUID})
-        inst.vm_state = vm_states.SHELVED
-        mock_get_instance.return_value = inst
-        req = fakes.HTTPRequest.blank(
-                  '/v2/servers/id/os-volume_attachments/uuid', version='2.19')
-        req.method = 'DELETE'
-        req.headers['content-type'] = 'application/json'
-        req.environ['nova.context'] = self.context
-        self.assertRaises(webob.exc.HTTPConflict,
-                          self.attachments.delete,
-                          req,
-                          FAKE_UUID,
-                          FAKE_UUID_A)
-
-    @mock.patch.object(compute_api.API, 'detach_volume')
-    @mock.patch.object(common, 'get_instance')
-    def test_detach_vol_shelved_supported(self,
-                                          mock_get_instance,
-                                          mock_detach):
-        inst = fake_instance.fake_instance_obj(self.context,
-                                               **{'uuid': FAKE_UUID})
-        inst.vm_state = vm_states.SHELVED
-        mock_get_instance.return_value = inst
-        req = fakes.HTTPRequest.blank(
-                  '/v2/servers/id/os-volume_attachments/uuid', version='2.20')
-        req.method = 'DELETE'
-        req.headers['content-type'] = 'application/json'
-        req.environ['nova.context'] = self.context
-        self.attachments.delete(req, FAKE_UUID, FAKE_UUID_A)
-        self.assertTrue(mock_detach.called)
 
     def test_detach_vol_not_found(self):
         self.stubs.Set(compute_api.API,
@@ -543,57 +516,12 @@ class VolumeAttachTestsV21(test.NoDBTestCase):
                                     'device': '/dev/fake'}}
         req = fakes.HTTPRequest.blank('/v2/servers/id/os-volume_attachments')
         req.method = 'POST'
-        req.body = jsonutils.dump_as_bytes({})
+        req.body = jsonutils.dumps({})
         req.headers['content-type'] = 'application/json'
         req.environ['nova.context'] = self.context
         result = self.attachments.create(req, FAKE_UUID, body=body)
-        self.assertEqual('00000000-aaaa-aaaa-aaaa-000000000000',
-                         result['volumeAttachment']['id'])
-
-    @mock.patch.object(common, 'get_instance')
-    def test_attach_vol_shelved_not_supported(self, mock_get_instance):
-        body = {'volumeAttachment': {'volumeId': FAKE_UUID_A,
-                                    'device': '/dev/fake'}}
-
-        inst = fake_instance.fake_instance_obj(self.context,
-                                               **{'uuid': FAKE_UUID})
-        inst.vm_state = vm_states.SHELVED
-        mock_get_instance.return_value = inst
-        req = fakes.HTTPRequest.blank('/v2/servers/id/os-volume_attachments',
-                                      version='2.19')
-        req.method = 'POST'
-        req.body = jsonutils.dump_as_bytes({})
-        req.headers['content-type'] = 'application/json'
-        req.environ['nova.context'] = self.context
-        self.assertRaises(webob.exc.HTTPConflict,
-                          self.attachments.create,
-                          req,
-                          FAKE_UUID,
-                          body=body)
-
-    @mock.patch.object(compute_api.API, 'attach_volume',
-                       return_value='/dev/myfake')
-    @mock.patch.object(common, 'get_instance')
-    def test_attach_vol_shelved_supported(self,
-                                          mock_get_instance,
-                                          mock_attach):
-        body = {'volumeAttachment': {'volumeId': FAKE_UUID_A,
-                                    'device': '/dev/fake'}}
-
-        inst = fake_instance.fake_instance_obj(self.context,
-                                               **{'uuid': FAKE_UUID})
-        inst.vm_state = vm_states.SHELVED
-        mock_get_instance.return_value = inst
-        req = fakes.HTTPRequest.blank('/v2/servers/id/os-volume_attachments',
-                                      version='2.20')
-        req.method = 'POST'
-        req.body = jsonutils.dump_as_bytes({})
-        req.headers['content-type'] = 'application/json'
-        req.environ['nova.context'] = self.context
-        result = self.attachments.create(req, FAKE_UUID, body=body)
-        self.assertEqual('00000000-aaaa-aaaa-aaaa-000000000000',
-                         result['volumeAttachment']['id'])
-        self.assertEqual('/dev/myfake', result['volumeAttachment']['device'])
+        self.assertEqual(result['volumeAttachment']['id'],
+            '00000000-aaaa-aaaa-aaaa-000000000000')
 
     @mock.patch.object(compute_api.API, 'attach_volume',
                        return_value='/dev/myfake')
@@ -602,13 +530,14 @@ class VolumeAttachTestsV21(test.NoDBTestCase):
                                     'device': None}}
         req = fakes.HTTPRequest.blank('/v2/servers/id/os-volume_attachments')
         req.method = 'POST'
-        req.body = jsonutils.dump_as_bytes({})
+        req.body = jsonutils.dumps({})
         req.headers['content-type'] = 'application/json'
         req.environ['nova.context'] = self.context
         result = self.attachments.create(req, FAKE_UUID, body=body)
-        self.assertEqual('00000000-aaaa-aaaa-aaaa-000000000000',
-                         result['volumeAttachment']['id'])
-        self.assertEqual('/dev/myfake', result['volumeAttachment']['device'])
+        self.assertEqual(result['volumeAttachment']['id'],
+            '00000000-aaaa-aaaa-aaaa-000000000000')
+        self.assertEqual(result['volumeAttachment']['device'],
+            '/dev/myfake')
 
     def test_attach_volume_to_locked_server(self):
         def fake_attach_volume_to_locked_server(self, context, instance,
@@ -622,7 +551,7 @@ class VolumeAttachTestsV21(test.NoDBTestCase):
                                     'device': '/dev/fake'}}
         req = fakes.HTTPRequest.blank('/v2/servers/id/os-volume_attachments')
         req.method = 'POST'
-        req.body = jsonutils.dump_as_bytes({})
+        req.body = jsonutils.dumps({})
         req.headers['content-type'] = 'application/json'
         req.environ['nova.context'] = self.context
 
@@ -643,7 +572,7 @@ class VolumeAttachTestsV21(test.NoDBTestCase):
 
         req = fakes.HTTPRequest.blank('/v2/servers/id/os-volume_attachments')
         req.method = 'POST'
-        req.body = jsonutils.dump_as_bytes({})
+        req.body = jsonutils.dumps({})
         req.headers['content-type'] = 'application/json'
         req.environ['nova.context'] = self.context
 
@@ -663,7 +592,7 @@ class VolumeAttachTestsV21(test.NoDBTestCase):
 
         req = fakes.HTTPRequest.blank('/v2/servers/id/os-volume_attachments')
         req.method = 'POST'
-        req.body = jsonutils.dump_as_bytes({})
+        req.body = jsonutils.dumps({})
         req.headers['content-type'] = 'application/json'
         req.environ['nova.context'] = self.context
 
@@ -677,7 +606,7 @@ class VolumeAttachTestsV21(test.NoDBTestCase):
 
         req = fakes.HTTPRequest.blank('/v2/servers/id/os-volume_attachments')
         req.method = 'POST'
-        req.body = jsonutils.dump_as_bytes({})
+        req.body = jsonutils.dumps({})
         req.headers['content-type'] = 'application/json'
         req.environ['nova.context'] = self.context
 
@@ -695,7 +624,7 @@ class VolumeAttachTestsV21(test.NoDBTestCase):
         req = fakes.HTTPRequest.blank(
                   '/v2/servers/id/os-volume_attachments/uuid')
         req.method = 'PUT'
-        req.body = jsonutils.dump_as_bytes({})
+        req.body = jsonutils.dumps({})
         req.headers['content-type'] = 'application/json'
         req.environ['nova.context'] = self.context
         return attachments.update(req, FAKE_UUID, uuid, body=body)
@@ -769,12 +698,12 @@ class VolumeAttachTestsV2(VolumeAttachTestsV21):
                                     'extra': 'extra_arg'}}
         req = fakes.HTTPRequest.blank('/v2/servers/id/os-volume_attachments')
         req.method = 'POST'
-        req.body = jsonutils.dump_as_bytes({})
+        req.body = jsonutils.dumps({})
         req.headers['content-type'] = 'application/json'
         req.environ['nova.context'] = self.context
         result = self.attachments.create(req, FAKE_UUID, body=body)
-        self.assertEqual('00000000-aaaa-aaaa-aaaa-000000000000',
-                         result['volumeAttachment']['id'])
+        self.assertEqual(result['volumeAttachment']['id'],
+            '00000000-aaaa-aaaa-aaaa-000000000000')
 
     def test_swap_volume_with_extra_arg(self):
         # NOTE(gmann): V2 does not perform strong input validation.

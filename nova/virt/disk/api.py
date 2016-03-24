@@ -31,10 +31,10 @@ if os.name != 'nt':
     import crypt
 
 from oslo_concurrency import processutils
+from oslo_config import cfg
 from oslo_log import log as logging
 from oslo_serialization import jsonutils
 
-import nova.conf
 from nova import exception
 from nova.i18n import _
 from nova.i18n import _LE
@@ -48,7 +48,33 @@ from nova.virt import images
 
 LOG = logging.getLogger(__name__)
 
-CONF = nova.conf.CONF
+disk_opts = [
+    # NOTE(yamahata): ListOpt won't work because the command may include a
+    #                 comma. For example:
+    #
+    #                 mkfs.ext4 -O dir_index,extent -E stride=8,stripe-width=16
+    #                           --label %(fs_label)s %(target)s
+    #
+    #                 list arguments are comma separated and there is no way to
+    #                 escape such commas.
+    #
+    cfg.MultiStrOpt('virt_mkfs',
+                    default=[],
+                    help='Name of the mkfs commands for ephemeral device. '
+                         'The format is <os_type>=<mkfs command>'),
+
+    cfg.BoolOpt('resize_fs_using_block_device',
+                default=False,
+                help='Attempt to resize the filesystem by accessing the '
+                     'image over a block device. This is done by the host '
+                     'and may not be necessary if the image contains a recent '
+                     'version of cloud-init. Possible mechanisms require '
+                     'the nbd driver (for qcow and raw), or loop (for raw).'),
+    ]
+
+CONF = cfg.CONF
+CONF.register_opts(disk_opts)
+CONF.import_opt('default_ephemeral_format', 'nova.virt.driver')
 
 _MKFS_COMMAND = {}
 _DEFAULT_MKFS_COMMAND = None
@@ -281,8 +307,6 @@ class _DiskImage(object):
             device = self._device_for_path(mount_dir)
             if device:
                 self._reset(device)
-            else:
-                LOG.debug('No device found for path: %s', mount_dir)
 
     @staticmethod
     def _device_for_path(path):
@@ -446,13 +470,10 @@ def teardown_container(container_dir, container_root_device=None):
                 LOG.debug("Release loop device %s", container_root_device)
                 utils.execute('losetup', '--detach', container_root_device,
                               run_as_root=True, attempts=3)
-            elif 'nbd' in container_root_device:
+            else:
                 LOG.debug('Release nbd device %s', container_root_device)
                 utils.execute('qemu-nbd', '-d', container_root_device,
                               run_as_root=True)
-            else:
-                LOG.debug('No release necessary for block device %s' %
-                          container_root_device)
     except Exception:
         LOG.exception(_LE('Failed to teardown container filesystem'))
 

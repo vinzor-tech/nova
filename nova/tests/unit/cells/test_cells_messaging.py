@@ -17,10 +17,12 @@
 Tests For Cells Messaging module
 """
 
+import contextlib
 import uuid
 
 import mock
 from mox3 import mox
+from oslo_config import cfg
 import oslo_messaging
 from oslo_serialization import jsonutils
 from oslo_utils import timeutils
@@ -31,7 +33,6 @@ from nova.cells import rpcapi as cells_rpcapi
 from nova.cells import utils as cells_utils
 from nova.compute import task_states
 from nova.compute import vm_states
-import nova.conf
 from nova import context
 from nova import db
 from nova import exception
@@ -44,10 +45,11 @@ from nova.tests.unit.cells import fakes
 from nova.tests.unit import fake_instance
 from nova.tests.unit import fake_server_actions
 
-CONF = nova.conf.CONF
+CONF = cfg.CONF
+CONF.import_opt('name', 'nova.cells.opts', group='cells')
 
 
-class CellsMessageClassesTestCase(test.NoDBTestCase):
+class CellsMessageClassesTestCase(test.TestCase):
     """Test case for the main Cells Message classes."""
     def setUp(self):
         super(CellsMessageClassesTestCase, self).setUp()
@@ -646,33 +648,7 @@ class CellsMessageClassesTestCase(test.NoDBTestCase):
             self.assertRaises(test.TestingException, response.value_or_raise)
 
 
-class CellsTargetedMethodsWithDatabaseTestCase(test.TestCase):
-    """These tests access the database unlike the others."""
-
-    def setUp(self):
-        super(CellsTargetedMethodsWithDatabaseTestCase, self).setUp()
-        fakes.init(self)
-        self.ctxt = context.RequestContext('fake', 'fake')
-        self._setup_attrs('api-cell', 'api-cell!child-cell2')
-
-    def _setup_attrs(self, source_cell, target_cell):
-        self.tgt_cell_name = target_cell
-        self.src_msg_runner = fakes.get_message_runner(source_cell)
-
-    def test_service_delete(self):
-        fake_service = dict(id=42, host='fake_host', binary='nova-compute',
-                            topic='compute')
-
-        ctxt = self.ctxt.elevated()
-        db.service_create(ctxt, fake_service)
-
-        self.src_msg_runner.service_delete(
-            ctxt, self.tgt_cell_name, fake_service['id'])
-        self.assertRaises(exception.ServiceNotFound,
-                          db.service_get, ctxt, fake_service['id'])
-
-
-class CellsTargetedMethodsTestCase(test.NoDBTestCase):
+class CellsTargetedMethodsTestCase(test.TestCase):
     """Test case for _TargetedMessageMethods class.  Most of these
     tests actually test the full path from the MessageRunner through
     to the functionality of the message method.  Hits 2 birds with 1
@@ -889,6 +865,18 @@ class CellsTargetedMethodsTestCase(test.NoDBTestCase):
         self.assertEqual(jsonutils.to_primitive(fake_service),
                          jsonutils.to_primitive(result))
 
+    def test_service_delete(self):
+        fake_service = dict(id=42, host='fake_host', binary='nova-compute',
+                            topic='compute')
+
+        ctxt = self.ctxt.elevated()
+        db.service_create(ctxt, fake_service)
+
+        self.src_msg_runner.service_delete(
+            ctxt, self.tgt_cell_name, fake_service['id'])
+        self.assertRaises(exception.ServiceNotFound,
+                          db.service_get, ctxt, fake_service['id'])
+
     def test_proxy_rpc_to_manager_call(self):
         fake_topic = 'fake-topic'
         fake_rpc_message = {'method': 'fake_rpc_method', 'args': {}}
@@ -1101,7 +1089,7 @@ class CellsTargetedMethodsTestCase(test.NoDBTestCase):
         instance.uuid = uuidutils.generate_uuid()
         error = exception.InstanceInfoCacheNotFound(
                                             instance_uuid=instance.uuid)
-        with test.nested(
+        with contextlib.nested(
             mock.patch.object(instance, 'refresh',
                               side_effect=error),
             mock.patch.object(self.tgt_compute_api, 'delete')) as (inst,
@@ -1421,7 +1409,7 @@ class CellsTargetedMethodsTestCase(test.NoDBTestCase):
                 {}, False)
 
 
-class CellsBroadcastMethodsTestCase(test.NoDBTestCase):
+class CellsBroadcastMethodsTestCase(test.TestCase):
     """Test case for _BroadcastMessageMethods class.  Most of these
     tests actually test the full path from the MessageRunner through
     to the functionality of the message method.  Hits 2 birds with 1
@@ -2134,7 +2122,7 @@ class CellsBroadcastMethodsTestCase(test.NoDBTestCase):
         self.assertEqual(fake_process.return_value, responses)
 
 
-class CellsPublicInterfacesTestCase(test.NoDBTestCase):
+class CellsPublicInterfacesTestCase(test.TestCase):
     """Test case for the public interfaces into cells messaging."""
     def setUp(self):
         super(CellsPublicInterfacesTestCase, self).setUp()

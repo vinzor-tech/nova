@@ -34,7 +34,6 @@ create = {
                 'display_name': {'type': 'string'},
                 'display_description': {'type': 'string'},
             },
-            'required': ['size'],
             'additionalProperties': False,
         },
     },

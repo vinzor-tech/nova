@@ -77,11 +77,12 @@ LOG = logging.getLogger(__name__)
 def reset():
     for c in _CLASSES:
         _db_content[c] = {}
-    create_host('fake')
+    host = create_host('fake')
     create_vm('fake dom 0',
               'Running',
               is_a_template=False,
-              is_control_domain=True)
+              is_control_domain=True,
+              resident_on=host)
 
 
 def reset_table(table):
@@ -120,7 +121,7 @@ def create_network(name_label, bridge):
 def create_vm(name_label, status, **kwargs):
     if status == 'Running':
         domid = random.randrange(1, 1 << 16)
-        resident_on = list(_db_content['host'])[0]
+        resident_on = _db_content['host'].keys()[0]
     else:
         domid = -1
         resident_on = ''
@@ -342,7 +343,7 @@ def _create_sr(table, obj):
     # Forces fake to support iscsi only
     if sr_type != 'iscsi' and sr_type != 'nfs':
         raise Failure(['SR_UNKNOWN_DRIVER', sr_type])
-    host_ref = list(_db_content['host'])[0]
+    host_ref = _db_content['host'].keys()[0]
     sr_ref = _create_object(table, obj[2])
     if sr_type == 'iscsi':
         vdi_ref = create_vdi('', sr_ref)
@@ -370,7 +371,7 @@ def _create_vlan(pif_ref, vlan_num, network_ref):
 
 
 def get_all(table):
-    return list(_db_content[table].keys())
+    return _db_content[table].keys()
 
 
 def get_all_records(table):
@@ -396,11 +397,11 @@ def _query_matches(record, query):
             matches = matches or _query_matches(record, clause)
         return matches
 
-    if query.startswith('not '):
+    if query[:4] == 'not ':
         return not _query_matches(record, query[4:])
 
     # Now it must be a single field - bad queries never match
-    if not query.startswith('field'):
+    if query[:5] != 'field':
         return False
     (field, value) = query[6:].split('=', 1)
 
@@ -481,7 +482,7 @@ class SessionBase(object):
         xenapi_session.apply_session_helpers(self)
 
     def pool_get_default_SR(self, _1, pool_ref):
-        return list(_db_content['pool'].values())[0]['default-SR']
+        return _db_content['pool'].values()[0]['default-SR']
 
     def VBD_insert(self, _1, vbd_ref, vdi_ref):
         vbd_rec = get_record('VBD', vbd_ref)
@@ -664,7 +665,6 @@ class SessionBase(object):
         return pickle.dumps(None)
 
     _plugin_glance_upload_vhd = _plugin_pickle_noop
-    _plugin_glance_upload_vhd2 = _plugin_pickle_noop
     _plugin_kernel_copy_vdi = _plugin_noop
     _plugin_kernel_create_kernel_ramdisk = _plugin_noop
     _plugin_kernel_remove_kernel_ramdisk = _plugin_noop
@@ -761,7 +761,7 @@ class SessionBase(object):
         return base64.b64encode(zlib.compress("dom_id: %s" % dom_id))
 
     def _plugin_nova_plugin_version_get_version(self, method, args):
-        return pickle.dumps("1.3")
+        return pickle.dumps("1.2")
 
     def _plugin_xenhost_query_gc(self, method, args):
         return pickle.dumps("False")
@@ -820,7 +820,7 @@ class SessionBase(object):
         pass
 
     def host_migrate_receive(self, session, destref, nwref, options):
-        return {"value": "fake_migrate_data"}
+        return "fake_migrate_data"
 
     def VM_assert_can_migrate(self, session, vmref, migrate_data, live,
                               vdi_map, vif_map, options):
@@ -854,7 +854,7 @@ class SessionBase(object):
     def _login(self, method, params):
         self._session = str(uuid.uuid4())
         _session_info = {'uuid': str(uuid.uuid4()),
-                         'this_host': list(_db_content['host'])[0]}
+                         'this_host': _db_content['host'].keys()[0]}
         _db_content['session'][self._session] = _session_info
 
     def _logout(self):

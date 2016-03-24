@@ -15,10 +15,13 @@
 """
 Tests For Chance Scheduler.
 """
-import mock
 
+import random
+
+from mox3 import mox
+
+from nova import context
 from nova import exception
-from nova import objects
 from nova.scheduler import chance
 from nova.tests.unit.scheduler import test_scheduler
 
@@ -34,9 +37,11 @@ class ChanceSchedulerTestCase(test_scheduler.SchedulerTestCase):
         """
 
         hosts = ['host1', 'host2', 'host3']
-        spec_obj = objects.RequestSpec(ignore_hosts=['host2'])
+        request_spec = dict(instance_properties=dict(host='host2'))
+        filter_properties = {'ignore_hosts': ['host2']}
 
-        filtered = self.driver._filter_hosts(hosts, spec_obj=spec_obj)
+        filtered = self.driver._filter_hosts(request_spec, hosts,
+                filter_properties=filter_properties)
         self.assertEqual(filtered, ['host1', 'host3'])
 
     def test_filter_hosts_no_avoid(self):
@@ -45,25 +50,34 @@ class ChanceSchedulerTestCase(test_scheduler.SchedulerTestCase):
         """
 
         hosts = ['host1', 'host2', 'host3']
-        spec_obj = objects.RequestSpec(ignore_hosts=[])
+        request_spec = dict(instance_properties=dict(host='host2'))
+        filter_properties = {'ignore_hosts': []}
 
-        filtered = self.driver._filter_hosts(hosts, spec_obj=spec_obj)
+        filtered = self.driver._filter_hosts(request_spec, hosts,
+                filter_properties=filter_properties)
         self.assertEqual(filtered, hosts)
 
-    @mock.patch('random.choice')
-    def test_select_destinations(self, mock_random_choice):
-        all_hosts = ['host1', 'host2', 'host3', 'host4']
+    def test_select_destinations(self):
+        ctxt = context.RequestContext('fake', 'fake', False)
+        ctxt_elevated = 'fake-context-elevated'
+        request_spec = {'num_instances': 2}
 
-        def _return_hosts(*args, **kwargs):
-            return all_hosts
+        self.mox.StubOutWithMock(ctxt, 'elevated')
+        self.mox.StubOutWithMock(self.driver, 'hosts_up')
+        self.mox.StubOutWithMock(random, 'choice')
 
-        mock_random_choice.side_effect = ['host3', 'host2']
-        self.stub_out('nova.scheduler.chance.ChanceScheduler.hosts_up',
-                      _return_hosts)
+        hosts_full = ['host1', 'host2', 'host3', 'host4']
 
-        spec_obj = objects.RequestSpec(num_instances=2, ignore_hosts=None)
-        dests = self.driver.select_destinations(self.context, spec_obj)
+        ctxt.elevated().AndReturn(ctxt_elevated)
+        self.driver.hosts_up(ctxt_elevated, 'compute').AndReturn(hosts_full)
+        random.choice(hosts_full).AndReturn('host3')
 
+        ctxt.elevated().AndReturn(ctxt_elevated)
+        self.driver.hosts_up(ctxt_elevated, 'compute').AndReturn(hosts_full)
+        random.choice(hosts_full).AndReturn('host2')
+
+        self.mox.ReplayAll()
+        dests = self.driver.select_destinations(ctxt, request_spec, {})
         self.assertEqual(2, len(dests))
         (host, node) = (dests[0]['host'], dests[0]['nodename'])
         self.assertEqual('host3', host)
@@ -72,23 +86,18 @@ class ChanceSchedulerTestCase(test_scheduler.SchedulerTestCase):
         self.assertEqual('host2', host)
         self.assertIsNone(node)
 
-        calls = [mock.call(all_hosts), mock.call(all_hosts)]
-        self.assertEqual(calls, mock_random_choice.call_args_list)
-
     def test_select_destinations_no_valid_host(self):
-
-        def _return_hosts(*args, **kwargs):
-            return ['host1', 'host2']
 
         def _return_no_host(*args, **kwargs):
             return []
 
-        self.stub_out('nova.scheduler.chance.ChanceScheduler.hosts_up',
-                      _return_hosts)
-        self.stub_out('nova.scheduler.chance.ChanceScheduler._filter_hosts',
-                      _return_no_host)
+        self.mox.StubOutWithMock(self.driver, 'hosts_up')
+        self.driver.hosts_up(mox.IgnoreArg(),
+                mox.IgnoreArg()).AndReturn([1, 2])
+        self.stubs.Set(self.driver, '_filter_hosts', _return_no_host)
+        self.mox.ReplayAll()
 
-        spec_obj = objects.RequestSpec(num_instances=1)
+        request_spec = {'num_instances': 1}
         self.assertRaises(exception.NoValidHost,
                           self.driver.select_destinations, self.context,
-                          spec_obj)
+                          request_spec, {})

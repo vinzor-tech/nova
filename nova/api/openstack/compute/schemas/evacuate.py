@@ -12,8 +12,6 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-import copy
-
 from nova.api.validation import parameter_types
 
 
@@ -34,7 +32,3 @@ evacuate = {
     'required': ['evacuate'],
     'additionalProperties': False,
 }
-
-evacuate_v214 = copy.deepcopy(evacuate)
-del evacuate_v214['properties']['evacuate']['properties']['onSharedStorage']
-del evacuate_v214['properties']['evacuate']['required']

@@ -66,7 +66,6 @@ from oslo_db import exception as db_exc
 from oslo_log import log as logging
 import oslo_messaging as messaging
 from oslo_utils import importutils
-from oslo_utils import uuidutils
 import six
 
 from nova.api.ec2 import ec2utils
@@ -96,11 +95,8 @@ CONF.import_opt('vlan_start', 'nova.network.manager')
 CONF.import_opt('vpn_start', 'nova.network.manager')
 CONF.import_opt('default_floating_pool', 'nova.network.floating_ips')
 CONF.import_opt('public_interface', 'nova.network.linux_net')
-CONF.import_opt('connection', 'oslo_db.options', group='database')
 
 QUOTAS = quota.QUOTAS
-
-_EXTRA_DEFAULT_LOG_LEVELS = ['oslo_db=INFO']
 
 
 # Decorators for actions
@@ -109,17 +105,6 @@ def args(*args, **kwargs):
         func.__dict__.setdefault('args', []).insert(0, (args, kwargs))
         return func
     return _decorator
-
-
-def deprecate(msg):
-    """Decorator which print the deprecation message before the decorated
-    function is called
-    """
-    @decorator.decorator
-    def _deprecate(f, *args, **kwargs):
-        print(msg, file=sys.stderr)
-        return f(*args, **kwargs)
-    return _deprecate
 
 
 def param2id(object_id):
@@ -140,10 +125,10 @@ class VpnCommands(object):
     @args('--ip', metavar='<IP Address>', help='IP Address')
     @args('--port', metavar='<Port>', help='Port')
     def change(self, project_id, ip, port):
-        """Change the IP and port for a VPN.
+        """Change the ip and port for a vpn.
 
-        This will update all networks associated with a project
-        not sure if that's the desired behavior or not, patches accepted.
+        this will update all networks associated with a project
+        not sure if that's the desired behavior or not, patches accepted
 
         """
         # TODO(tr3buchet): perhaps this shouldn't update all networks
@@ -236,7 +221,7 @@ def _db_error(caught_exception):
     print(_("The above error may show that the database has not "
             "been created.\nPlease create a database using "
             "'nova-manage db sync' before running this command."))
-    sys.exit(1)
+    exit(1)
 
 
 class ProjectCommands(object):
@@ -328,11 +313,11 @@ AccountCommands = ProjectCommands
 
 
 class FixedIpCommands(object):
-    """Class for managing fixed IP."""
+    """Class for managing fixed ip."""
 
     @args('--host', metavar='<host>', help='Host')
     def list(self, host=None):
-        """Lists all fixed IPs (optionally by host)."""
+        """Lists all fixed ips (optionally by host)."""
         ctxt = context.get_admin_context()
 
         try:
@@ -381,7 +366,7 @@ class FixedIpCommands(object):
                         hostname = instance['hostname']
                         host = instance['host']
                     else:
-                        print(_('WARNING: fixed IP %s allocated to missing'
+                        print(_('WARNING: fixed ip %s allocated to missing'
                                 ' instance') % str(fixed_ip['address']))
                 print("%-18s\t%-15s\t%-15s\t%s" % (
                         network['cidr'],
@@ -393,7 +378,7 @@ class FixedIpCommands(object):
 
     @args('--address', metavar='<ip address>', help='IP address')
     def reserve(self, address):
-        """Mark fixed IP as reserved
+        """Mark fixed ip as reserved
 
         arguments: address
         """
@@ -401,7 +386,7 @@ class FixedIpCommands(object):
 
     @args('--address', metavar='<ip address>', help='IP address')
     def unreserve(self, address):
-        """Mark fixed IP as free to use
+        """Mark fixed ip as free to use
 
         arguments: address
         """
@@ -422,7 +407,7 @@ class FixedIpCommands(object):
 
 
 class FloatingIpCommands(object):
-    """Class for managing floating IP."""
+    """Class for managing floating ip."""
 
     @staticmethod
     def address_to_hosts(addresses):
@@ -454,7 +439,7 @@ class FloatingIpCommands(object):
     @args('--pool', metavar='<pool>', help='Optional pool')
     @args('--interface', metavar='<interface>', help='Optional interface')
     def create(self, ip_range, pool=None, interface=None):
-        """Creates floating IPs for zone by range."""
+        """Creates floating ips for zone by range."""
         admin_context = context.get_admin_context()
         if not pool:
             pool = CONF.default_floating_pool
@@ -474,7 +459,7 @@ class FloatingIpCommands(object):
 
     @args('--ip_range', metavar='<range>', help='IP range')
     def delete(self, ip_range):
-        """Deletes floating IPs by range."""
+        """Deletes floating ips by range."""
         admin_context = context.get_admin_context()
 
         ips = ({'address': str(address)}
@@ -483,7 +468,7 @@ class FloatingIpCommands(object):
 
     @args('--host', metavar='<host>', help='Host')
     def list(self, host=None):
-        """Lists all floating IPs (optionally by host).
+        """Lists all floating ips (optionally by host).
 
         Note: if host is given, only active floating IPs are returned
         """
@@ -548,7 +533,7 @@ class NetworkCommands(object):
     @args('--dns2', metavar="<DNS Address>", help='Second DNS')
     @args('--uuid', metavar="<network uuid>", help='Network UUID')
     @args('--fixed_cidr', metavar='<x.x.x.x/yy>',
-            help='IPv4 subnet for fixed IPs (ex: 10.20.0.0/16)')
+            help='IPv4 subnet for fixed IPS (ex: 10.20.0.0/16)')
     @args('--project_id', metavar="<project id>",
           help='Project id')
     @args('--priority', metavar="<number>", help='Network interface priority')
@@ -558,7 +543,7 @@ class NetworkCommands(object):
                gateway_v6=None, bridge=None, bridge_interface=None,
                dns1=None, dns2=None, project_id=None, priority=None,
                uuid=None, fixed_cidr=None):
-        """Creates fixed IPs for host by range."""
+        """Creates fixed ips for host by range."""
         kwargs = {k: v for k, v in six.iteritems(locals())
                   if v and k != "self"}
         if multi_host is not None:
@@ -716,12 +701,6 @@ class VmCommands(object):
 class ServiceCommands(object):
     """Enable and disable running services."""
 
-    description = ('DEPRECATED: Use the nova service-* commands from '
-                   'python-novaclient instead or the os-services REST '
-                   'resource. The service subcommand will be '
-                   'removed in the 14.0 release.')
-
-    @deprecate(description)
     @args('--host', metavar='<host>', help='Host')
     @args('--service', metavar='<service>', help='Nova service')
     def list(self, host=None, service=None):
@@ -754,7 +733,6 @@ class ServiceCommands(object):
                                   svc['availability_zone'], active, art,
                                   svc['updated_at']))
 
-    @deprecate(description)
     @args('--host', metavar='<host>', help='Host')
     @args('--service', metavar='<service>', help='Nova service')
     def enable(self, host, service):
@@ -769,7 +747,6 @@ class ServiceCommands(object):
         print((_("Service %(service)s on host %(host)s enabled.") %
                {'service': service, 'host': host}))
 
-    @deprecate(description)
     @args('--host', metavar='<host>', help='Host')
     @args('--service', metavar='<service>', help='Nova service')
     def disable(self, host, service):
@@ -838,7 +815,6 @@ class ServiceCommands(object):
 
         return {'resource': resource, 'usage': usage}
 
-    @deprecate(description)
     @args('--host', metavar='<host>', help='Host')
     def describe_resource(self, host):
         """Describes cpu/memory/hdd info for host.
@@ -925,12 +901,6 @@ class HostCommands(object):
 class DbCommands(object):
     """Class for managing the main database."""
 
-    online_migrations = (
-        db.pcidevice_online_data_migration,
-        db.computenode_uuids_online_data_migration,
-        db.aggregate_uuids_online_data_migration,
-    )
-
     def __init__(self):
         pass
 
@@ -939,15 +909,38 @@ class DbCommands(object):
         """Sync the database up to the most recent version."""
         return migration.db_sync(version)
 
+    @args('--dry-run', action='store_true', dest='dry_run',
+          default=False, help='Print SQL statements instead of executing')
+    def expand(self, dry_run):
+        """Expand database schema."""
+        return migration.db_expand(dry_run)
+
+    @args('--dry-run', action='store_true', dest='dry_run',
+          default=False, help='Print SQL statements instead of executing')
+    def migrate(self, dry_run):
+        """Migrate database schema."""
+        return migration.db_migrate(dry_run)
+
+    @args('--dry-run', action='store_true', dest='dry_run',
+          default=False, help='Print SQL statements instead of executing')
+    @args('--force-experimental-contract', action='store_true',
+          dest='force_experimental_contract',
+          help="Force experimental contract operation to run *VOLATILE*")
+    def contract(self, dry_run, force_experimental_contract=False):
+        """Contract database schema."""
+        if force_experimental_contract:
+            return migration.db_contract(dry_run)
+        print('The "contract" command is experimental and potentially '
+              'dangerous. As such, it is disabled by default. Enable using '
+              '"--force-experimental".')
+
     def version(self):
         """Print the current database version."""
         print(migration.db_version())
 
     @args('--max_rows', metavar='<number>',
             help='Maximum number of deleted rows to archive')
-    @args('--verbose', action='store_true', dest='verbose', default=False,
-          help='Print how many rows were archived per table.')
-    def archive_deleted_rows(self, max_rows, verbose=False):
+    def archive_deleted_rows(self, max_rows):
         """Move up to max_rows deleted rows from production tables to shadow
         tables.
         """
@@ -956,17 +949,8 @@ class DbCommands(object):
             if max_rows < 0:
                 print(_("Must supply a positive value for max_rows"))
                 return(1)
-            if max_rows > db.MAX_INT:
-                print(_('max rows must be <= %(max_value)d') %
-                      {'max_value': db.MAX_INT})
-                return(1)
-        table_to_rows_archived = db.archive_deleted_rows(max_rows)
-        if verbose:
-            if table_to_rows_archived:
-                cliutils.print_dict(table_to_rows_archived, _('Table'),
-                                    dict_value=_('Number of Rows Archived'))
-            else:
-                print(_('Nothing was archived.'))
+        admin_context = context.get_admin_context()
+        db.archive_deleted_rows(admin_context, max_rows)
 
     @args('--delete', action='store_true', dest='delete',
           help='If specified, automatically delete any records found where '
@@ -996,49 +980,6 @@ class DbCommands(object):
         if not records_found:
             print(_('There were no records found where '
                     'instance_uuid was NULL.'))
-
-    def _run_migration(self, ctxt, max_count):
-        ran = 0
-        for migration_meth in self.online_migrations:
-            count = max_count - ran
-            try:
-                found, done = migration_meth(ctxt, count)
-            except Exception:
-                print(_("Error attempting to run %(method)s") % dict(
-                      method=migration_meth))
-                found = done = 0
-
-            if found:
-                print(_('%(total)i rows matched query %(meth)s, %(done)i '
-                        'migrated') % {'total': found,
-                                       'meth': migration_meth.__name__,
-                                       'done': done})
-            if max_count is not None:
-                ran += done
-                if ran >= max_count:
-                    break
-        return ran
-
-    @args('--max-count', metavar='<number>', dest='max_count',
-          help='Maximum number of objects to consider')
-    def online_data_migrations(self, max_count=None):
-        ctxt = context.get_admin_context()
-        if max_count is not None:
-            max_count = int(max_count)
-            unlimited = False
-            if max_count < 0:
-                print(_('Must supply a positive value for max_number'))
-                return(1)
-        else:
-            unlimited = True
-            max_count = 50
-            print(_('Running batches of %i until complete') % max_count)
-
-        ran = None
-        while ran is None or ran != 0:
-            ran = self._run_migration(ctxt, max_count)
-            if not unlimited:
-                break
 
 
 class ApiDbCommands(object):
@@ -1332,7 +1273,7 @@ class CellV2Commands(object):
         if cell_uuid is None:
             raise Exception(_("cell_uuid must be set"))
         else:
-            # Validate the cell exists
+            # Validate the the cell exists
             cell_mapping = objects.CellMapping.get_by_uuid(ctxt, cell_uuid)
         filters = {}
         instances = objects.InstanceList.get_by_filters(
@@ -1361,74 +1302,6 @@ class CellV2Commands(object):
         if instances:
             instance = instances[-1]
             print('Next marker: - %s' % instance.uuid)
-
-    # TODO(melwitt): Remove this when the oslo.messaging function
-    # for assembling a transport url from ConfigOpts is available
-    @args('--transport-url', metavar='<transport url>', required=True,
-          dest='transport_url',
-          help='The transport url for the cell message queue')
-    @args('--name', metavar='<name>', help='The name of the cell')
-    @args('--verbose', action='store_true',
-          help='Return and output the uuid of the created cell')
-    def map_cell_and_hosts(self, transport_url, name=None, verbose=False):
-        """EXPERIMENTAL. Create a cell mapping and host mappings for a cell.
-
-        Users not dividing their cloud into multiple cells will be a single
-        cell v2 deployment and should specify:
-
-          nova-manage cell_v2 map_cell_and_hosts --config-file <nova.conf>
-
-        Users running multiple cells can add a cell v2 by specifying:
-
-          nova-manage cell_v2 map_cell_and_hosts --config-file <cell nova.conf>
-        """
-        ctxt = context.RequestContext()
-        cell_mapping_uuid = cell_mapping = None
-        # First, try to detect if a CellMapping has already been created
-        compute_nodes = objects.ComputeNodeList.get_all(ctxt)
-        if not compute_nodes:
-            print(_('No hosts found to map to cell, exiting.'))
-            return(0)
-        missing_nodes = []
-        for compute_node in compute_nodes:
-            try:
-                host_mapping = objects.HostMapping.get_by_host(
-                    ctxt, compute_node.host)
-            except exception.HostMappingNotFound:
-                missing_nodes.append(compute_node)
-            else:
-                if verbose:
-                    print(_(
-                        'Host %(host)s is already mapped to cell %(uuid)s'
-                        ) % {'host': host_mapping.host,
-                             'uuid': host_mapping.cell_mapping.uuid})
-                # Re-using the existing UUID in case there is already a mapping
-                # NOTE(sbauza): There could be possibly multiple CellMappings
-                # if the operator provides another configuration file and moves
-                # the hosts to another cell v2, but that's not really something
-                # we should support.
-                cell_mapping_uuid = host_mapping.cell_mapping.uuid
-        if not missing_nodes:
-            print(_('All hosts are already mapped to cell(s), exiting.'))
-            return(0)
-        # Create the cell mapping in the API database
-        if cell_mapping_uuid is not None:
-            cell_mapping = objects.CellMapping.get_by_uuid(
-                ctxt, cell_mapping_uuid)
-        if cell_mapping is None:
-            cell_mapping_uuid = uuidutils.generate_uuid()
-            cell_mapping = objects.CellMapping(
-                ctxt, uuid=cell_mapping_uuid, name=name,
-                transport_url=transport_url,
-                database_connection=CONF.database.connection)
-            cell_mapping.create()
-        # Pull the hosts from the cell database and create the host mappings
-        for compute_node in missing_nodes:
-            host_mapping = objects.HostMapping(
-                ctxt, host=compute_node.host, cell_mapping=cell_mapping)
-            host_mapping.create()
-        if verbose:
-            print(cell_mapping_uuid)
 
 
 CATEGORIES = {
@@ -1513,9 +1386,6 @@ def main():
     CONF.register_cli_opt(category_opt)
     try:
         config.parse_args(sys.argv)
-        logging.set_defaults(
-            default_log_levels=logging.get_default_log_levels() +
-            _EXTRA_DEFAULT_LOG_LEVELS)
         logging.setup(CONF, "nova")
     except cfg.ConfigFilesNotFoundError:
         cfgfile = CONF.config_file[-1] if CONF.config_file else None
@@ -1524,7 +1394,7 @@ def main():
             print(_("Could not read %s. Re-running with sudo") % cfgfile)
             try:
                 os.execvp('sudo', ['sudo', '-u', '#%s' % st.st_uid] + sys.argv)
-            except OSError:
+            except Exception:
                 print(_('sudo failed, continuing as if nothing happened'))
 
         print(_('Please re-run nova-manage as root.'))
@@ -1573,6 +1443,6 @@ def main():
         ret = fn(*fn_args, **fn_kwargs)
         rpc.cleanup()
         return(ret)
-    except Exception as ex:
-        print(_("error: %s") % ex)
-        return(1)
+    except Exception:
+        print(_("Command failed, please check log for more info"))
+        raise

@@ -20,16 +20,19 @@ from nova.objects import fields
 
 @six.add_metaclass(abc.ABCMeta)
 class MonitorBase(object):
-    """Base class for all resource monitor plugins.
-
-    A monitor is responsible for adding a set of related metrics to
-    a `nova.objects.MonitorMetricList` object after the monitor has
-    performed some sampling or monitoring action.
-    """
+    """Base class for all resource monitor plugins."""
 
     def __init__(self, compute_manager):
         self.compute_manager = compute_manager
         self.source = None
+
+    @abc.abstractmethod
+    def get_metric(self, name):
+        """Return a (value, timestamp) tuple for the supplied metric name.
+
+        :param name: The name/key for the metric to grab the value for.
+        """
+        raise NotImplementedError('get_metric')
 
     @abc.abstractmethod
     def get_metric_names(self):
@@ -43,21 +46,6 @@ class MonitorBase(object):
         """
         raise NotImplementedError('get_metric_names')
 
-    @abc.abstractmethod
-    def get_metrics(self):
-        """Returns a list of tuples containing information for all metrics
-        tracked by the monitor.
-
-        Note that if the monitor class is responsible for tracking a *related*
-        set of metrics -- e.g. a set of percentages of CPU time allocated to
-        user, kernel, and idle -- it is the responsibility of the monitor
-        implementation to do a single sampling call to the underlying monitor
-        to ensure that related metric values make logical sense.
-
-        :returns: list of (metric_name, value, timestamp) tuples
-        """
-        raise NotImplementedError('get_metrics')
-
     def add_metrics_to_list(self, metrics_list):
         """Adds metric objects to a supplied list object.
 
@@ -65,9 +53,10 @@ class MonitorBase(object):
                             plugin should append nova.objects.MonitorMetric
                             objects to.
         """
-        metric_data = self.get_metrics()
+        metric_names = self.get_metric_names()
         metrics = []
-        for (name, value, timestamp) in metric_data:
+        for name in metric_names:
+            value, timestamp = self.get_metric(name)
             metric = objects.MonitorMetric(name=name,
                                            value=value,
                                            timestamp=timestamp,

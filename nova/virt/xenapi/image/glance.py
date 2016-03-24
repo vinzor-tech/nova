@@ -14,11 +14,11 @@
 #    under the License.
 
 import functools
+import six
 import sys
 
 from oslo_config import cfg
 from oslo_log import log as logging
-import six
 
 from nova.compute import utils as compute_utils
 from nova import exception
@@ -36,10 +36,11 @@ class GlanceStore(object):
         glance_api_servers = glance.get_api_servers()
 
         def pick_glance(kwargs):
-            server = next(glance_api_servers)
-            kwargs['endpoint'] = server
-            # NOTE(sdague): is the return significant here at all?
-            return server
+            g_host, g_port, g_use_ssl = next(glance_api_servers)
+            kwargs['glance_host'] = g_host
+            kwargs['glance_port'] = g_port
+            kwargs['glance_use_ssl'] = g_use_ssl
+            return g_host
 
         def retry_cb(context, instance, exc=None):
             if exc:
@@ -64,7 +65,7 @@ class GlanceStore(object):
 
         try:
             vdis = self._call_glance_plugin(context, instance, session,
-                                            'download_vhd2', params)
+                                            'download_vhd', params)
         except exception.PluginRetriesExceeded:
             raise exception.CouldNotFetchImage(image_id=image_id)
 
@@ -89,6 +90,6 @@ class GlanceStore(object):
 
         try:
             self._call_glance_plugin(context, instance, session,
-                                     'upload_vhd2', params)
+                                     'upload_vhd', params)
         except exception.PluginRetriesExceeded:
             raise exception.CouldNotUploadImage(image_id=image_id)

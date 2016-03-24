@@ -12,7 +12,6 @@
 
 from oslo_serialization import jsonutils
 
-from nova import objects
 from nova.scheduler.filters import json_filter
 from nova import test
 from nova.tests.unit.scheduler import fakes
@@ -28,61 +27,56 @@ class TestJsonFilter(test.NoDBTestCase):
                         ['>=', '$free_disk_mb', 200 * 1024]])
 
     def test_json_filter_passes(self):
-        spec_obj = objects.RequestSpec(
-            flavor=objects.Flavor(memory_mb=1024,
-                                  root_gb=200,
-                                  ephemeral_gb=0),
-            scheduler_hints=dict(query=[self.json_query]))
+        filter_properties = {'instance_type': {'memory_mb': 1024,
+                                               'root_gb': 200,
+                                               'ephemeral_gb': 0},
+                           'scheduler_hints': {'query': self.json_query}}
         host = fakes.FakeHostState('host1', 'node1',
                 {'free_ram_mb': 1024,
                  'free_disk_mb': 200 * 1024})
-        self.assertTrue(self.filt_cls.host_passes(host, spec_obj))
+        self.assertTrue(self.filt_cls.host_passes(host, filter_properties))
 
     def test_json_filter_passes_with_no_query(self):
-        spec_obj = objects.RequestSpec(
-            flavor=objects.Flavor(memory_mb=1024,
-                                  root_gb=200,
-                                  ephemeral_gb=0),
-            scheduler_hints=None)
+        filter_properties = {'instance_type': {'memory_mb': 1024,
+                                               'root_gb': 200,
+                                               'ephemeral_gb': 0}}
         host = fakes.FakeHostState('host1', 'node1',
                 {'free_ram_mb': 0,
                  'free_disk_mb': 0})
-        self.assertTrue(self.filt_cls.host_passes(host, spec_obj))
+        self.assertTrue(self.filt_cls.host_passes(host, filter_properties))
 
     def test_json_filter_fails_on_memory(self):
-        spec_obj = objects.RequestSpec(
-            flavor=objects.Flavor(memory_mb=1024,
-                                  root_gb=200,
-                                  ephemeral_gb=0),
-            scheduler_hints=dict(query=[self.json_query]))
+        filter_properties = {'instance_type': {'memory_mb': 1024,
+                                               'root_gb': 200,
+                                               'ephemeral_gb': 0},
+                           'scheduler_hints': {'query': self.json_query}}
         host = fakes.FakeHostState('host1', 'node1',
                 {'free_ram_mb': 1023,
                  'free_disk_mb': 200 * 1024})
-        self.assertFalse(self.filt_cls.host_passes(host, spec_obj))
+        self.assertFalse(self.filt_cls.host_passes(host, filter_properties))
 
     def test_json_filter_fails_on_disk(self):
-        spec_obj = objects.RequestSpec(
-            flavor=objects.Flavor(memory_mb=1024,
-                                  root_gb=200,
-                                  ephemeral_gb=0),
-            scheduler_hints=dict(query=[self.json_query]))
+        filter_properties = {'instance_type': {'memory_mb': 1024,
+                                               'root_gb': 200,
+                                               'ephemeral_gb': 0},
+                           'scheduler_hints': {'query': self.json_query}}
         host = fakes.FakeHostState('host1', 'node1',
                 {'free_ram_mb': 1024,
                  'free_disk_mb': (200 * 1024) - 1})
-        self.assertFalse(self.filt_cls.host_passes(host, spec_obj))
+        self.assertFalse(self.filt_cls.host_passes(host, filter_properties))
 
     def test_json_filter_fails_on_service_disabled(self):
         json_query = jsonutils.dumps(
                 ['and', ['>=', '$free_ram_mb', 1024],
                         ['>=', '$free_disk_mb', 200 * 1024],
                         ['not', '$service.disabled']])
-        spec_obj = objects.RequestSpec(
-            flavor=objects.Flavor(memory_mb=1024, local_gb=200),
-            scheduler_hints=dict(query=[json_query]))
+        filter_properties = {'instance_type': {'memory_mb': 1024,
+                                               'local_gb': 200},
+                           'scheduler_hints': {'query': json_query}}
         host = fakes.FakeHostState('host1', 'node1',
                 {'free_ram_mb': 1024,
                  'free_disk_mb': 200 * 1024})
-        self.assertFalse(self.filt_cls.host_passes(host, spec_obj))
+        self.assertFalse(self.filt_cls.host_passes(host, filter_properties))
 
     def test_json_filter_happy_day(self):
         # Test json filter more thoroughly.
@@ -96,8 +90,11 @@ class TestJsonFilter(test.NoDBTestCase):
                       ['and',
                           ['>', '$free_ram_mb', 30],
                           ['>', '$free_disk_mb', 300]]]]
-        spec_obj = objects.RequestSpec(
-            scheduler_hints=dict(query=[jsonutils.dumps(raw)]))
+        filter_properties = {
+            'scheduler_hints': {
+                'query': jsonutils.dumps(raw),
+            },
+        }
 
         # Passes
         capabilities = {'opt1': 'match'}
@@ -107,7 +104,7 @@ class TestJsonFilter(test.NoDBTestCase):
                  'free_disk_mb': 200,
                  'capabilities': capabilities,
                  'service': service})
-        self.assertTrue(self.filt_cls.host_passes(host, spec_obj))
+        self.assertTrue(self.filt_cls.host_passes(host, filter_properties))
 
         # Passes
         capabilities = {'opt1': 'match'}
@@ -117,7 +114,7 @@ class TestJsonFilter(test.NoDBTestCase):
                  'free_disk_mb': 400,
                  'capabilities': capabilities,
                  'service': service})
-        self.assertTrue(self.filt_cls.host_passes(host, spec_obj))
+        self.assertTrue(self.filt_cls.host_passes(host, filter_properties))
 
         # Fails due to capabilities being disabled
         capabilities = {'enabled': False, 'opt1': 'match'}
@@ -127,7 +124,7 @@ class TestJsonFilter(test.NoDBTestCase):
                  'free_disk_mb': 400,
                  'capabilities': capabilities,
                  'service': service})
-        self.assertFalse(self.filt_cls.host_passes(host, spec_obj))
+        self.assertFalse(self.filt_cls.host_passes(host, filter_properties))
 
         # Fails due to being exact memory/disk we don't want
         capabilities = {'enabled': True, 'opt1': 'match'}
@@ -137,7 +134,7 @@ class TestJsonFilter(test.NoDBTestCase):
                  'free_disk_mb': 300,
                  'capabilities': capabilities,
                  'service': service})
-        self.assertFalse(self.filt_cls.host_passes(host, spec_obj))
+        self.assertFalse(self.filt_cls.host_passes(host, filter_properties))
 
         # Fails due to memory lower but disk higher
         capabilities = {'enabled': True, 'opt1': 'match'}
@@ -147,7 +144,7 @@ class TestJsonFilter(test.NoDBTestCase):
                  'free_disk_mb': 400,
                  'capabilities': capabilities,
                  'service': service})
-        self.assertFalse(self.filt_cls.host_passes(host, spec_obj))
+        self.assertFalse(self.filt_cls.host_passes(host, filter_properties))
 
         # Fails due to capabilities 'opt1' not equal
         capabilities = {'enabled': True, 'opt1': 'no-match'}
@@ -157,7 +154,7 @@ class TestJsonFilter(test.NoDBTestCase):
                  'free_disk_mb': 400,
                  'capabilities': capabilities,
                  'service': service})
-        self.assertFalse(self.filt_cls.host_passes(host, spec_obj))
+        self.assertFalse(self.filt_cls.host_passes(host, filter_properties))
 
     def test_json_filter_basic_operators(self):
         host = fakes.FakeHostState('host1', 'node1', {})
@@ -192,81 +189,101 @@ class TestJsonFilter(test.NoDBTestCase):
 
         for (op, args, expected) in ops_to_test:
             raw = [op] + args
-            spec_obj = objects.RequestSpec(
-                scheduler_hints=dict(
-                    query=[jsonutils.dumps(raw)]))
+            filter_properties = {
+                'scheduler_hints': {
+                    'query': jsonutils.dumps(raw),
+                },
+            }
             self.assertEqual(expected,
-                    self.filt_cls.host_passes(host, spec_obj))
+                    self.filt_cls.host_passes(host, filter_properties))
 
         # This results in [False, True, False, True] and if any are True
         # then it passes...
         raw = ['not', True, False, True, False]
-        spec_obj = objects.RequestSpec(
-            scheduler_hints=dict(
-                query=[jsonutils.dumps(raw)]))
-        self.assertTrue(self.filt_cls.host_passes(host, spec_obj))
+        filter_properties = {
+            'scheduler_hints': {
+                'query': jsonutils.dumps(raw),
+            },
+        }
+        self.assertTrue(self.filt_cls.host_passes(host, filter_properties))
 
         # This results in [False, False, False] and if any are True
         # then it passes...which this doesn't
         raw = ['not', True, True, True]
-        spec_obj = objects.RequestSpec(
-            scheduler_hints=dict(
-                query=[jsonutils.dumps(raw)]))
-        self.assertFalse(self.filt_cls.host_passes(host, spec_obj))
+        filter_properties = {
+            'scheduler_hints': {
+                'query': jsonutils.dumps(raw),
+            },
+        }
+        self.assertFalse(self.filt_cls.host_passes(host, filter_properties))
 
     def test_json_filter_unknown_operator_raises(self):
         raw = ['!=', 1, 2]
-        spec_obj = objects.RequestSpec(
-            scheduler_hints=dict(
-                query=[jsonutils.dumps(raw)]))
+        filter_properties = {
+            'scheduler_hints': {
+                'query': jsonutils.dumps(raw),
+            },
+        }
         host = fakes.FakeHostState('host1', 'node1',
                 {})
         self.assertRaises(KeyError,
-                self.filt_cls.host_passes, host, spec_obj)
+                self.filt_cls.host_passes, host, filter_properties)
 
     def test_json_filter_empty_filters_pass(self):
         host = fakes.FakeHostState('host1', 'node1',
                 {})
 
         raw = []
-        spec_obj = objects.RequestSpec(
-            scheduler_hints=dict(
-                query=[jsonutils.dumps(raw)]))
-        self.assertTrue(self.filt_cls.host_passes(host, spec_obj))
+        filter_properties = {
+            'scheduler_hints': {
+                'query': jsonutils.dumps(raw),
+            },
+        }
+        self.assertTrue(self.filt_cls.host_passes(host, filter_properties))
         raw = {}
-        spec_obj = objects.RequestSpec(
-            scheduler_hints=dict(
-                query=[jsonutils.dumps(raw)]))
-        self.assertTrue(self.filt_cls.host_passes(host, spec_obj))
+        filter_properties = {
+            'scheduler_hints': {
+                'query': jsonutils.dumps(raw),
+            },
+        }
+        self.assertTrue(self.filt_cls.host_passes(host, filter_properties))
 
     def test_json_filter_invalid_num_arguments_fails(self):
         host = fakes.FakeHostState('host1', 'node1',
                 {})
 
         raw = ['>', ['and', ['or', ['not', ['<', ['>=', ['<=', ['in', ]]]]]]]]
-        spec_obj = objects.RequestSpec(
-            scheduler_hints=dict(
-                query=[jsonutils.dumps(raw)]))
-        self.assertFalse(self.filt_cls.host_passes(host, spec_obj))
+        filter_properties = {
+            'scheduler_hints': {
+                'query': jsonutils.dumps(raw),
+            },
+        }
+        self.assertFalse(self.filt_cls.host_passes(host, filter_properties))
 
         raw = ['>', 1]
-        spec_obj = objects.RequestSpec(
-            scheduler_hints=dict(
-                query=[jsonutils.dumps(raw)]))
-        self.assertFalse(self.filt_cls.host_passes(host, spec_obj))
+        filter_properties = {
+            'scheduler_hints': {
+                'query': jsonutils.dumps(raw),
+            },
+        }
+        self.assertFalse(self.filt_cls.host_passes(host, filter_properties))
 
     def test_json_filter_unknown_variable_ignored(self):
         host = fakes.FakeHostState('host1', 'node1',
                 {})
 
         raw = ['=', '$........', 1, 1]
-        spec_obj = objects.RequestSpec(
-            scheduler_hints=dict(
-                query=[jsonutils.dumps(raw)]))
-        self.assertTrue(self.filt_cls.host_passes(host, spec_obj))
+        filter_properties = {
+            'scheduler_hints': {
+                'query': jsonutils.dumps(raw),
+            },
+        }
+        self.assertTrue(self.filt_cls.host_passes(host, filter_properties))
 
         raw = ['=', '$foo', 2, 2]
-        spec_obj = objects.RequestSpec(
-            scheduler_hints=dict(
-                query=[jsonutils.dumps(raw)]))
-        self.assertTrue(self.filt_cls.host_passes(host, spec_obj))
+        filter_properties = {
+            'scheduler_hints': {
+                'query': jsonutils.dumps(raw),
+            },
+        }
+        self.assertTrue(self.filt_cls.host_passes(host, filter_properties))

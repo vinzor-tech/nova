@@ -20,7 +20,6 @@ A fake VMware VI API implementation.
 """
 
 import collections
-import sys
 
 from oslo_log import log as logging
 from oslo_serialization import jsonutils
@@ -35,8 +34,7 @@ from nova.virt.vmwareapi import constants
 
 _CLASSES = ['Datacenter', 'Datastore', 'ResourcePool', 'VirtualMachine',
             'Network', 'HostSystem', 'HostNetworkSystem', 'Task', 'session',
-            'files', 'ClusterComputeResource', 'HostStorageSystem',
-            'Folder']
+            'files', 'ClusterComputeResource', 'HostStorageSystem']
 
 _FAKE_FILE_SIZE = 1024
 _FAKE_VCENTER_UUID = '497c514c-ef5e-4e7f-8d93-ec921993b93a'
@@ -52,7 +50,6 @@ def reset():
     """Resets the db contents."""
     cleanup()
     create_network()
-    create_folder()
     create_host_network_system()
     create_host_storage_system()
     ds_ref1 = create_datastore('ds1', 1024, 500)
@@ -79,7 +76,6 @@ def cleanup():
 
 def _create_object(table, table_obj):
     """Create an object in the db."""
-    _db_content.setdefault(table, {})
     _db_content[table][table_obj.obj] = table_obj
 
 
@@ -138,6 +134,16 @@ class FakeRetrieveResult(object):
 
     def add_object(self, object):
         self.objects.append(object)
+
+
+class MissingProperty(object):
+    """Missing object in ObjectContent's missing set."""
+    def __init__(self, path='fake-path', message='fake_message',
+                 method_fault=None):
+        self.path = path
+        self.fault = DataObject()
+        self.fault.localizedMessage = message
+        self.fault.fault = method_fault
 
 
 def _get_object_refs(obj_type):
@@ -270,8 +276,6 @@ class DataObject(object):
     """Data object base class."""
 
     def __init__(self, obj_name=None):
-        if obj_name is None:
-            obj_name = 'ns0:' + self.__class__.__name__
         self.obj_name = obj_name
 
     def __repr__(self):
@@ -531,14 +535,6 @@ class VirtualMachine(ManagedObject):
             pass
 
 
-class Folder(ManagedObject):
-    """Folder class."""
-
-    def __init__(self):
-        super(Folder, self).__init__("Folder")
-        self.set("childEntity", [])
-
-
 class Network(ManagedObject):
     """Network class."""
 
@@ -592,7 +588,7 @@ class DatastoreHostMount(DataObject):
     def __init__(self, value='host-100'):
         super(DatastoreHostMount, self).__init__()
         host_ref = (_db_content["HostSystem"]
-                    [list(_db_content["HostSystem"].keys())[0]].obj)
+                    [_db_content["HostSystem"].keys()[0]].obj)
         host_system = DataObject()
         host_system.ManagedObjectReference = [host_ref]
         host_system.value = value
@@ -719,7 +715,7 @@ class HostSystem(ManagedObject):
             create_host_network_system()
         if not _get_object_refs('HostStorageSystem'):
             create_host_storage_system()
-        host_net_key = list(_db_content["HostNetworkSystem"].keys())[0]
+        host_net_key = _db_content["HostNetworkSystem"].keys()[0]
         host_net_sys = _db_content["HostNetworkSystem"][host_net_key].obj
         self.set("configManager.networkSystem", host_net_sys)
         host_storage_sys_key = _get_object_refs('HostStorageSystem')[0]
@@ -777,8 +773,7 @@ class HostSystem(ManagedObject):
 
         if _db_content.get("Network", None) is None:
             create_network()
-        net_ref = _db_content["Network"][
-            list(_db_content["Network"].keys())[0]].obj
+        net_ref = _db_content["Network"][_db_content["Network"].keys()[0]].obj
         network_do = DataObject()
         network_do.ManagedObjectReference = [net_ref]
         self.set("network", network_do)
@@ -878,17 +873,10 @@ class Datacenter(ManagedObject):
     def __init__(self, name="ha-datacenter", ds_ref=None):
         super(Datacenter, self).__init__("dc")
         self.set("name", name)
-        if _db_content.get("Folder", None) is None:
-            create_folder()
-        folder_ref = _db_content["Folder"][
-            list(_db_content["Folder"].keys())[0]].obj
-        folder_do = DataObject()
-        folder_do.ManagedObjectReference = [folder_ref]
-        self.set("vmFolder", folder_ref)
+        self.set("vmFolder", "vm_folder_ref")
         if _db_content.get("Network", None) is None:
             create_network()
-        net_ref = _db_content["Network"][
-            list(_db_content["Network"].keys())[0]].obj
+        net_ref = _db_content["Network"][_db_content["Network"].keys()[0]].obj
         network_do = DataObject()
         network_do.ManagedObjectReference = [net_ref]
         self.set("network", network_do)
@@ -953,12 +941,6 @@ def create_res_pool():
     return res_pool.obj
 
 
-def create_folder():
-    folder = Folder()
-    _create_object('Folder', folder)
-    return folder.obj
-
-
 def create_network():
     network = Network()
     _create_object('Network', network)
@@ -989,16 +971,15 @@ def create_vm(uuid=None, name=None,
         devices = []
 
     if vmPathName is None:
-        vm_path = ds_obj.DatastorePath(
-            list(_db_content['Datastore'].values())[0])
+        vm_path = ds_obj.DatastorePath(_db_content['Datastore'].values()[0])
     else:
         vm_path = ds_obj.DatastorePath.parse(vmPathName)
 
     if res_pool_ref is None:
-        res_pool_ref = list(_db_content['ResourcePool'].keys())[0]
+        res_pool_ref = _db_content['ResourcePool'].keys()[0]
 
     if host_ref is None:
-        host_ref = list(_db_content["HostSystem"].keys())[0]
+        host_ref = _db_content["HostSystem"].keys()[0]
 
     # Fill in the default path to the vmx file if we were only given a
     # datastore. Note that if you create a VM with vmPathName '[foo]', when you
@@ -1125,32 +1106,7 @@ class FakeFactory(object):
 
     def create(self, obj_name):
         """Creates a namespace object."""
-        klass = obj_name[4:]  # skip 'ns0:'
-        module = sys.modules[__name__]
-        fake_klass = getattr(module, klass, None)
-        if fake_klass is None:
-            return DataObject(obj_name)
-        else:
-            return fake_klass()
-
-
-class SharesInfo(DataObject):
-    def __init__(self):
-        super(SharesInfo, self).__init__()
-        self.level = None
-        self.shares = None
-
-
-class VirtualEthernetCardResourceAllocation(DataObject):
-    def __init__(self):
-        super(VirtualEthernetCardResourceAllocation, self).__init__()
-        self.share = SharesInfo()
-
-
-class VirtualE1000(DataObject):
-    def __init__(self):
-        super(VirtualE1000, self).__init__()
-        self.resourceAllocation = VirtualEthernetCardResourceAllocation()
+        return DataObject(obj_name)
 
 
 class FakeService(DataObject):
@@ -1314,21 +1270,11 @@ class FakeVim(object):
         task_mdo = create_task(method, "success", result=vm_ref)
         return task_mdo.obj
 
-    def _create_folder(self, method, *args, **kwargs):
-        return create_folder()
-
     def _reconfig_vm(self, method, *args, **kwargs):
         """Reconfigures a VM and sets the properties supplied."""
         vm_ref = args[0]
         vm_mdo = _get_vm_mdo(vm_ref)
         vm_mdo.reconfig(self.client.factory, kwargs.get("spec"))
-        task_mdo = create_task(method, "success")
-        return task_mdo.obj
-
-    def _rename(self, method, *args, **kwargs):
-        vm_ref = args[0]
-        vm_mdo = _get_vm_mdo(vm_ref)
-        vm_mdo.set('name', kwargs['newName'])
         task_mdo = create_task(method, "success")
         return task_mdo.obj
 
@@ -1560,7 +1506,7 @@ class FakeVim(object):
 
     def _add_port_group(self, method, *args, **kwargs):
         """Adds a port group to the host system."""
-        _host_sk = list(_db_content["HostSystem"].keys())[0]
+        _host_sk = _db_content["HostSystem"].keys()[0]
         host_mdo = _db_content["HostSystem"][_host_sk]
         host_mdo._add_port_group(kwargs.get("portgrp"))
 
@@ -1590,14 +1536,8 @@ class FakeVim(object):
         elif attr_name == "CreateVM_Task":
             return lambda *args, **kwargs: self._create_vm(attr_name,
                                                 *args, **kwargs)
-        elif attr_name == "CreateFolder":
-            return lambda *args, **kwargs: self._create_folder(attr_name,
-                                                *args, **kwargs)
         elif attr_name == "ReconfigVM_Task":
             return lambda *args, **kwargs: self._reconfig_vm(attr_name,
-                                                *args, **kwargs)
-        elif attr_name == "Rename_Task":
-            return lambda *args, **kwargs: self._rename(attr_name,
                                                 *args, **kwargs)
         elif attr_name == "CreateVirtualDisk_Task":
             return lambda *args, **kwargs: self._create_copy_disk(attr_name,

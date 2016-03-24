@@ -17,8 +17,12 @@
 Cell scheduler filters
 """
 
+from oslo_log import log as logging
+
 from nova import filters
 from nova import policy
+
+LOG = logging.getLogger(__name__)
 
 
 class BaseCellFilter(filters.BaseFilter):

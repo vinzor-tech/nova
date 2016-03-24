@@ -14,6 +14,7 @@
 #    under the License.
 
 import io
+import os
 
 import mock
 import six
@@ -123,7 +124,7 @@ class TestDiskImage(test.NoDBTestCase):
         response = io.StringIO(six.text_type(PROC_MOUNTS_CONTENTS))
         mock_open.return_value = response
 
-    @mock.patch.object(six.moves.builtins, 'open')
+    @mock.patch('__builtin__.open')
     def test_mount(self, mock_open):
         self.mock_proc_mounts(mock_open)
         image = '/tmp/fake-image'
@@ -140,7 +141,7 @@ class TestDiskImage(test.NoDBTestCase):
         self.assertEqual(diskimage._mounter, fakemount)
         self.assertEqual(dev, '/dev/fake')
 
-    @mock.patch.object(six.moves.builtins, 'open')
+    @mock.patch('__builtin__.open')
     def test_umount(self, mock_open):
         self.mock_proc_mounts(mock_open)
 
@@ -160,7 +161,7 @@ class TestDiskImage(test.NoDBTestCase):
         diskimage.umount()
         self.assertIsNone(diskimage._mounter)
 
-    @mock.patch.object(six.moves.builtins, 'open')
+    @mock.patch('__builtin__.open')
     def test_teardown(self, mock_open):
         self.mock_proc_mounts(mock_open)
 
@@ -202,7 +203,7 @@ class TestVirtDisk(test.NoDBTestCase):
         def fake_instance_for_format(image, mountdir, partition):
             return FakeMount(image, mountdir, partition)
 
-        self.stub_out('os.path.exists', lambda _: True)
+        self.stubs.Set(os.path, 'exists', lambda _: True)
         self.stubs.Set(disk_api._DiskImage, '_device_for_path', proc_mounts)
         self.stubs.Set(mount.Mount, 'instance_for_format',
                        staticmethod(fake_instance_for_format))
@@ -221,7 +222,7 @@ class TestVirtDisk(test.NoDBTestCase):
             }
             return mount_points[mount_point]
 
-        self.stub_out('os.path.exists', lambda _: True)
+        self.stubs.Set(os.path, 'exists', lambda _: True)
         self.stubs.Set(disk_api._DiskImage, '_device_for_path', proc_mounts)
         expected_commands = []
 
@@ -253,11 +254,6 @@ class TestVirtDisk(test.NoDBTestCase):
                               ('qemu-nbd', '-d', '/dev/nbd15'),
                              ]
 
-        # NOTE(thomasem): Not adding any commands in this case, because we're
-        # not expecting an additional umount for LocalBlockImages. This is to
-        # assert that no additional commands are run in this case.
-        disk_api.teardown_container('/dev/volume-group/uuid_disk')
-
         self.assertEqual(self.executes, expected_commands)
 
     def test_lxc_teardown_container_with_namespace_cleaned(self):
@@ -265,7 +261,7 @@ class TestVirtDisk(test.NoDBTestCase):
         def proc_mounts(self, mount_point):
             return None
 
-        self.stub_out('os.path.exists', lambda _: True)
+        self.stubs.Set(os.path, 'exists', lambda _: True)
         self.stubs.Set(disk_api._DiskImage, '_device_for_path', proc_mounts)
         expected_commands = []
 

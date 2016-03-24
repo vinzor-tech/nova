@@ -30,8 +30,10 @@ class DifferentHostFilter(filters.BaseHostFilter):
     # The hosts the instances are running on doesn't change within a request
     run_filter_once_per_request = True
 
-    def host_passes(self, host_state, spec_obj):
-        affinity_uuids = spec_obj.get_scheduler_hint('different_host')
+    def host_passes(self, host_state, filter_properties):
+        scheduler_hints = filter_properties.get('scheduler_hints') or {}
+
+        affinity_uuids = scheduler_hints.get('different_host', [])
         if affinity_uuids:
             overlap = utils.instance_uuids_overlap(host_state, affinity_uuids)
             return not overlap
@@ -47,12 +49,14 @@ class SameHostFilter(filters.BaseHostFilter):
     # The hosts the instances are running on doesn't change within a request
     run_filter_once_per_request = True
 
-    def host_passes(self, host_state, spec_obj):
-        affinity_uuids = spec_obj.get_scheduler_hint('same_host')
-        if affinity_uuids:
+    def host_passes(self, host_state, filter_properties):
+        scheduler_hints = filter_properties.get('scheduler_hints') or {}
+
+        affinity_uuids = scheduler_hints.get('same_host', [])
+        if affinity_uuids and host_state.instances:
             overlap = utils.instance_uuids_overlap(host_state, affinity_uuids)
             return overlap
-        # With no same_host key
+        # With no same_host key or no instances
         return True
 
 
@@ -63,9 +67,11 @@ class SimpleCIDRAffinityFilter(filters.BaseHostFilter):
     # The address of a host doesn't change within a request
     run_filter_once_per_request = True
 
-    def host_passes(self, host_state, spec_obj):
-        affinity_cidr = spec_obj.get_scheduler_hint('cidr', '/24')
-        affinity_host_addr = spec_obj.get_scheduler_hint('build_near_host_ip')
+    def host_passes(self, host_state, filter_properties):
+        scheduler_hints = filter_properties.get('scheduler_hints') or {}
+
+        affinity_cidr = scheduler_hints.get('cidr', '/24')
+        affinity_host_addr = scheduler_hints.get('build_near_host_ip')
         host_ip = host_state.host_ip
         if affinity_host_addr:
             affinity_net = netaddr.IPNetwork(str.join('', (affinity_host_addr,
@@ -81,15 +87,13 @@ class _GroupAntiAffinityFilter(filters.BaseHostFilter):
     """Schedule the instance on a different host from a set of group
     hosts.
     """
-    def host_passes(self, host_state, spec_obj):
+    def host_passes(self, host_state, filter_properties):
         # Only invoke the filter is 'anti-affinity' is configured
-        policies = (spec_obj.instance_group.policies
-                    if spec_obj.instance_group else [])
+        policies = filter_properties.get('group_policies', [])
         if self.policy_name not in policies:
             return True
 
-        group_hosts = (spec_obj.instance_group.hosts
-                       if spec_obj.instance_group else [])
+        group_hosts = filter_properties.get('group_hosts') or []
         LOG.debug("Group anti affinity: check if %(host)s not "
                     "in %(configured)s", {'host': host_state.host,
                                            'configured': group_hosts})
@@ -109,15 +113,13 @@ class ServerGroupAntiAffinityFilter(_GroupAntiAffinityFilter):
 class _GroupAffinityFilter(filters.BaseHostFilter):
     """Schedule the instance on to host from a set of group hosts.
     """
-    def host_passes(self, host_state, spec_obj):
+    def host_passes(self, host_state, filter_properties):
         # Only invoke the filter is 'affinity' is configured
-        policies = (spec_obj.instance_group.policies
-                    if spec_obj.instance_group else [])
+        policies = filter_properties.get('group_policies', [])
         if self.policy_name not in policies:
             return True
 
-        group_hosts = (spec_obj.instance_group.hosts
-                       if spec_obj.instance_group else [])
+        group_hosts = filter_properties.get('group_hosts', [])
         LOG.debug("Group affinity: check if %(host)s in "
                     "%(configured)s", {'host': host_state.host,
                                         'configured': group_hosts})

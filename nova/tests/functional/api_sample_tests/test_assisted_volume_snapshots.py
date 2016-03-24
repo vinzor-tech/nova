@@ -14,6 +14,7 @@
 
 from oslo_config import cfg
 
+from nova.compute import api as compute_api
 from nova.tests.functional.api_sample_tests import test_servers
 from nova.tests.unit.api.openstack import fakes
 
@@ -35,8 +36,8 @@ class AssistedVolumeSnapshotsJsonTests(test_servers.ServersSampleBase):
 
     def test_create(self):
         """Create a volume snapshots."""
-        self.stub_out('nova.compute.api.API.volume_snapshot_create',
-                      fakes.stub_compute_volume_snapshot_create)
+        self.stubs.Set(compute_api.API, 'volume_snapshot_create',
+                       fakes.stub_compute_volume_snapshot_create)
 
         subs = {
             'volume_id': '521752a6-acf6-4b2d-bc7a-119f9148cd8c',
@@ -48,12 +49,13 @@ class AssistedVolumeSnapshotsJsonTests(test_servers.ServersSampleBase):
         response = self._do_post("os-assisted-volume-snapshots",
                                  "snapshot-create-assisted-req",
                                  subs)
+        subs.update(self._get_regexes())
         self._verify_response("snapshot-create-assisted-resp",
                               subs, response, 200)
 
     def test_snapshots_delete_assisted(self):
-        self.stub_out('nova.compute.api.API.volume_snapshot_delete',
-                      fakes.stub_compute_volume_snapshot_delete)
+        self.stubs.Set(compute_api.API, 'volume_snapshot_delete',
+                       fakes.stub_compute_volume_snapshot_delete)
 
         snapshot_id = '100'
         response = self._do_delete(

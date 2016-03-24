@@ -17,13 +17,11 @@
 
 """RequestContext: context for requests that persist through all of nova."""
 
-from contextlib import contextmanager
 import copy
 
-from keystoneauth1.access import service_catalog as ksa_service_catalog
-from keystoneauth1 import plugin
+from keystoneclient import auth
+from keystoneclient import service_catalog
 from oslo_context import context
-from oslo_db.sqlalchemy import enginefacade
 from oslo_log import log as logging
 from oslo_utils import timeutils
 import six
@@ -31,13 +29,13 @@ import six
 from nova import exception
 from nova.i18n import _, _LW
 from nova import policy
-from nova import utils
+
 
 LOG = logging.getLogger(__name__)
 
 
-class _ContextAuthPlugin(plugin.BaseAuthPlugin):
-    """A keystoneauth auth plugin that uses the values from the Context.
+class _ContextAuthPlugin(auth.BaseAuthPlugin):
+    """A keystoneclient auth plugin that uses the values from the Context.
 
     Ideally we would use the plugin provided by auth_token middleware however
     this plugin isn't serialized yet so we construct one from the serialized
@@ -48,7 +46,8 @@ class _ContextAuthPlugin(plugin.BaseAuthPlugin):
         super(_ContextAuthPlugin, self).__init__()
 
         self.auth_token = auth_token
-        self.service_catalog = ksa_service_catalog.ServiceCatalogV2(sc)
+        sc = {'serviceCatalog': sc}
+        self.service_catalog = service_catalog.ServiceCatalogV2(sc)
 
     def get_token(self, *args, **kwargs):
         return self.auth_token
@@ -57,11 +56,10 @@ class _ContextAuthPlugin(plugin.BaseAuthPlugin):
                      region_name=None, service_name=None, **kwargs):
         return self.service_catalog.url_for(service_type=service_type,
                                             service_name=service_name,
-                                            interface=interface,
+                                            endpoint_type=interface,
                                             region_name=region_name)
 
 
-@enginefacade.transaction_context_provider
 class RequestContext(context.RequestContext):
     """Security context and request information.
 
@@ -108,7 +106,7 @@ class RequestContext(context.RequestContext):
         # safely ignore this as we don't use it.
         kwargs.pop('user_identity', None)
         if kwargs:
-            LOG.warning(_LW('Arguments dropped when creating context: %s'),
+            LOG.warning(_LW('Arguments dropped when creating context: %s') %
                         str(kwargs))
 
         # FIXME(dims): user_id and project_id duplicate information that is
@@ -142,12 +140,6 @@ class RequestContext(context.RequestContext):
         self.user_name = user_name
         self.project_name = project_name
         self.is_admin = is_admin
-
-        # NOTE(dheeraj): The following attribute is used by cellsv2 to store
-        # connection information for connecting to the target cell.
-        # It is only manipulated using the target_cell contextmanager
-        # provided by this module
-        self.db_connection = None
         self.user_auth_plugin = user_auth_plugin
         if self.is_admin is None:
             self.is_admin = policy.check_is_admin(self)
@@ -185,7 +177,7 @@ class RequestContext(context.RequestContext):
             'read_deleted': getattr(self, 'read_deleted', 'no'),
             'roles': getattr(self, 'roles', None),
             'remote_address': getattr(self, 'remote_address', None),
-            'timestamp': utils.strtime(self.timestamp) if hasattr(
+            'timestamp': timeutils.strtime(self.timestamp) if hasattr(
                 self, 'timestamp') else None,
             'request_id': getattr(self, 'request_id', None),
             'quota_class': getattr(self, 'quota_class', None),
@@ -203,10 +195,7 @@ class RequestContext(context.RequestContext):
 
     def elevated(self, read_deleted=None):
         """Return a version of this context with admin flag set."""
-        context = copy.copy(self)
-        # context.roles must be deepcopied to leave original roles
-        # without changes
-        context.roles = copy.deepcopy(self.roles)
+        context = copy.deepcopy(self)
         context.is_admin = True
 
         if 'admin' not in context.roles:
@@ -279,23 +268,3 @@ def authorize_quota_class_context(context, class_name):
             raise exception.Forbidden()
         elif context.quota_class != class_name:
             raise exception.Forbidden()
-
-
-@contextmanager
-def target_cell(context, cell_mapping):
-    """Adds database connection information to the context for communicating
-    with the given target cell.
-
-    :param context: The RequestContext to add database connection information
-    :param cell_mapping: A objects.CellMapping object
-    """
-    original_db_connection = context.db_connection
-    # avoid circular import
-    from nova import db
-    connection_string = cell_mapping.database_connection
-    context.db_connection = db.create_context_manager(connection_string)
-
-    try:
-        yield context
-    finally:
-        context.db_connection = original_db_connection

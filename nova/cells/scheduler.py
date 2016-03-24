@@ -19,6 +19,7 @@ Cells Scheduler
 import copy
 import time
 
+from oslo_config import cfg
 from oslo_log import log as logging
 from six.moves import range
 
@@ -28,7 +29,6 @@ from nova import compute
 from nova.compute import instance_actions
 from nova.compute import vm_states
 from nova import conductor
-import nova.conf
 from nova.db import base
 from nova import exception
 from nova.i18n import _LE, _LI
@@ -37,9 +37,30 @@ from nova.objects import base as obj_base
 from nova.scheduler import utils as scheduler_utils
 from nova import utils
 
+cell_scheduler_opts = [
+        cfg.ListOpt('scheduler_filter_classes',
+                default=['nova.cells.filters.all_filters'],
+                help='Filter classes the cells scheduler should use.  '
+                        'An entry of "nova.cells.filters.all_filters" '
+                        'maps to all cells filters included with nova.'),
+        cfg.ListOpt('scheduler_weight_classes',
+                default=['nova.cells.weights.all_weighers'],
+                help='Weigher classes the cells scheduler should use.  '
+                        'An entry of "nova.cells.weights.all_weighers" '
+                        'maps to all cell weighers included with nova.'),
+        cfg.IntOpt('scheduler_retries',
+                default=10,
+                help='How many retries when no cells are available.'),
+        cfg.IntOpt('scheduler_retry_delay',
+                default=2,
+                help='How often to retry in seconds when no cells are '
+                        'available.')
+]
+
 LOG = logging.getLogger(__name__)
 
-CONF = nova.conf.CONF
+CONF = cfg.CONF
+CONF.register_opts(cell_scheduler_opts, group='cells')
 
 
 class CellsScheduler(base.Base):
@@ -81,14 +102,8 @@ class CellsScheduler(base.Base):
         # is sending proper instance objects.
         instance_values.pop('pci_requests', None)
 
-        # FIXME(danms): Same for ec2_ids
-        instance_values.pop('ec2_ids', None)
-
         instances = []
         num_instances = len(instance_uuids)
-        security_groups = (
-            self.compute_api.security_group_api.populate_security_groups(
-                security_groups))
         for i, instance_uuid in enumerate(instance_uuids):
             instance = objects.Instance(context=ctxt)
             instance.update(instance_values)

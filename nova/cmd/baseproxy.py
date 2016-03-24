@@ -15,7 +15,7 @@
 #
 
 """Base proxy module used to create compatible consoles
-for OpenStack Nova."""
+for Openstack Nova."""
 
 import os
 import sys
@@ -39,8 +39,7 @@ CONF.import_opt('web', 'nova.cmd.novnc')
 
 
 def exit_with_error(msg, errno=-1):
-    sys.stderr.write(msg + '\n')
-    sys.exit(errno)
+    print(msg) and sys.exit(errno)
 
 
 def proxy(host, port):

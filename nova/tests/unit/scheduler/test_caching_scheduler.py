@@ -18,7 +18,6 @@ from oslo_utils import timeutils
 from six.moves import range
 
 from nova import exception
-from nova import objects
 from nova.scheduler import caching_scheduler
 from nova.scheduler import host_manager
 from nova.tests.unit.scheduler import test_scheduler
@@ -75,60 +74,53 @@ class CachingSchedulerTestCase(test_scheduler.SchedulerTestCase):
             self.assertEqual(mock_get_hosts.return_value, result)
 
     def test_select_destination_raises_with_no_hosts(self):
-        spec_obj = self._get_fake_request_spec()
+        fake_request_spec = self._get_fake_request_spec()
         self.driver.all_host_states = []
 
         self.assertRaises(exception.NoValidHost,
                 self.driver.select_destinations,
-                self.context, spec_obj)
+                self.context, fake_request_spec, {})
 
     @mock.patch('nova.db.instance_extra_get_by_instance_uuid',
                 return_value={'numa_topology': None,
                               'pci_requests': None})
     def test_select_destination_works(self, mock_get_extra):
-        spec_obj = self._get_fake_request_spec()
+        fake_request_spec = self._get_fake_request_spec()
         fake_host = self._get_fake_host_state()
         self.driver.all_host_states = [fake_host]
 
-        result = self._test_select_destinations(spec_obj)
+        result = self._test_select_destinations(fake_request_spec)
 
         self.assertEqual(1, len(result))
         self.assertEqual(result[0]["host"], fake_host.host)
 
-    def _test_select_destinations(self, spec_obj):
+    def _test_select_destinations(self, request_spec):
         return self.driver.select_destinations(
-                self.context, spec_obj)
+                self.context, request_spec, {})
 
     def _get_fake_request_spec(self):
-        # NOTE(sbauza): Prevent to stub the Flavor.get_by_id call just by
-        # directly providing a Flavor object
-        flavor = objects.Flavor(
-            flavorid="small",
-            memory_mb=512,
-            root_gb=1,
-            ephemeral_gb=1,
-            vcpus=1,
-            swap=0,
-        )
+        flavor = {
+            "flavorid": "small",
+            "memory_mb": 512,
+            "root_gb": 1,
+            "ephemeral_gb": 1,
+            "vcpus": 1,
+            "swap": 0,
+        }
         instance_properties = {
             "os_type": "linux",
             "project_id": "1234",
+            "memory_mb": 512,
+            "root_gb": 1,
+            "ephemeral_gb": 1,
+            "vcpus": 1,
+            "uuid": 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
         }
-        request_spec = objects.RequestSpec(
-            flavor=flavor,
-            num_instances=1,
-            ignore_hosts=None,
-            force_hosts=None,
-            force_nodes=None,
-            retry=None,
-            availability_zone=None,
-            image=None,
-            instance_group=None,
-            pci_requests=None,
-            numa_topology=None,
-            instance_uuid='aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
-            **instance_properties
-        )
+        request_spec = {
+            "instance_type": flavor,
+            "instance_properties": instance_properties,
+            "num_instances": 1,
+        }
         return request_spec
 
     def _get_fake_host_state(self, index=0):
@@ -145,8 +137,6 @@ class CachingSchedulerTestCase(test_scheduler.SchedulerTestCase):
         }
         host_state.cpu_allocation_ratio = 16.0
         host_state.ram_allocation_ratio = 1.5
-        host_state.disk_allocation_ratio = 1.0
-        host_state.metrics = objects.MonitorMetricList(objects=[])
         return host_state
 
     @mock.patch('nova.db.instance_extra_get_by_instance_uuid',
@@ -158,7 +148,7 @@ class CachingSchedulerTestCase(test_scheduler.SchedulerTestCase):
 
         self.flags(service_down_time=240)
 
-        spec_obj = self._get_fake_request_spec()
+        request_spec = self._get_fake_request_spec()
         host_states = []
         for x in range(hosts):
             host_state = self._get_fake_host_state(x)
@@ -170,7 +160,7 @@ class CachingSchedulerTestCase(test_scheduler.SchedulerTestCase):
 
             for x in range(requests):
                 self.driver.select_destinations(
-                    self.context, spec_obj)
+                    self.context, request_spec, {})
 
             b = timeutils.utcnow()
             c = b - a
@@ -188,7 +178,6 @@ class CachingSchedulerTestCase(test_scheduler.SchedulerTestCase):
             config.trace_filter = pycallgraph.GlobbingFilter(exclude=[
                 'pycallgraph.*',
                 'unittest.*',
-                'testtools.*',
                 'nova.tests.unit.*',
             ])
             graphviz = output.GraphvizOutput(output_file='scheduler.png')
@@ -207,10 +196,10 @@ class CachingSchedulerTestCase(test_scheduler.SchedulerTestCase):
 if __name__ == '__main__':
     # A handy tool to help profile the schedulers performance
     ENABLE_PROFILER = True
-    import testtools
-    suite = testtools.ConcurrentTestSuite()
+    import unittest
+    suite = unittest.TestSuite()
     test = "test_performance_check_select_destination"
     test_case = CachingSchedulerTestCase(test)
     suite.addTest(test_case)
-    runner = testtools.TextTestResult.TextTestRunner()
+    runner = unittest.TextTestRunner()
     runner.run(suite)

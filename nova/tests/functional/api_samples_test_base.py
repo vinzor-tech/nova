@@ -22,84 +22,36 @@ import six
 from nova import test
 from nova.tests.functional import integrated_helpers
 
-PROJECT_ID = "6f70656e737461636b20342065766572"
-
 
 class NoMatch(test.TestingException):
     pass
 
 
-def pretty_data(data):
-    data = jsonutils.dumps(jsonutils.loads(data), sort_keys=True,
-                           indent=4)
-    return '\n'.join(line.rstrip() for line in data.split('\n')).strip()
-
-
-def objectify(data):
-    if not data:
-        return {}
-    # NOTE(sdague): templates will contain values like %(foo)s
-    # throughout them. If these are inside of double quoted
-    # strings, life is good, and we can treat it just like valid
-    # json to load it to python.
-    #
-    # However we've got some fields which are ints, like
-    # aggregate_id. This means we've got a snippet in the sample
-    # that looks like:
-    #
-    #     "id": %(aggregate_id)s,
-    #
-    # which is not valid json, and will explode. We do a quick and
-    # dirty transform of this to:
-    #
-    #     "id": "%(int:aggregate_id)s",
-    #
-    # That makes it valid data to convert to json, but keeps
-    # around the information that we need to drop those strings
-    # later. The regex anchors from the ': ', as all of these will
-    # be top rooted keys.
-    data = re.sub(r'(\: )%\((.+)\)s([^"])', r'\1"%(int:\2)s"\3', data)
-    return jsonutils.loads(data)
-
-
 class ApiSampleTestBase(integrated_helpers._IntegratedTestBase):
+    ctype = 'json'
     all_extensions = False
     extension_name = None
     sample_dir = None
-    microversion = None
+    request_api_version = None
     _use_common_server_api_samples = False
 
-    def __init__(self, *args, **kwargs):
-        super(ApiSampleTestBase, self).__init__(*args, **kwargs)
-        self.subs = {}  # TODO(auggy): subs should really be a class
+    def _pretty_data(self, data):
+        data = jsonutils.dumps(jsonutils.loads(data), sort_keys=True,
+                indent=4)
+        return '\n'.join(line.rstrip() for line in data.split('\n')).strip()
 
-    @property
-    def subs(self):
-        return self._subs
-
-    @subs.setter
-    def subs(self, value):
-        non_strings =  \
-            {k: v for k, v in value.items() if
-             (not k == 'compute_host') and
-             (not isinstance(v, six.string_types))}
-        if len(non_strings) > 0:
-            raise TypeError("subs can't contain non-string values:"
-                            "\n%(non_strings)s" %
-                            {'non_strings': non_strings})
-        else:
-            self._subs = value
+    def _objectify(self, data):
+        if not data:
+            return {}
+        # NOTE(vish): allow non-quoted replacements to survive json
+        data = re.sub(r'([^"])%\((.+)\)s([^"])', r'\1"%(int:\2)s"\3', data)
+        return jsonutils.loads(data)
 
     @classmethod
     def _get_sample_path(cls, name, dirname, suffix='', api_version=None):
         parts = [dirname]
         parts.append('api_samples')
-        # TODO(gmann): Once all tests gets merged for all extension
-        # then we need to have a simple logic here to select sample file
-        # directory which will be based on cls.sample_dir and api_version.
-        # All other things will go away from here. Currently hacking this
-        # till we merge every extensions tests.
-        if cls.all_extensions and not cls.sample_dir:
+        if cls.all_extensions:
             parts.append('all_extensions')
         # Note(gmann): if _use_common_server_api_samples is set to True
         # then common server sample files present in 'servers' directory
@@ -115,7 +67,7 @@ class ApiSampleTestBase(integrated_helpers._IntegratedTestBase):
                 parts.append(cls.extension_name)
             if api_version:
                 parts.append('v' + api_version)
-        parts.append(name + ".json" + suffix)
+        parts.append(name + "." + cls.ctype + suffix)
         return os.path.join(*parts)
 
     @classmethod
@@ -134,34 +86,23 @@ class ApiSampleTestBase(integrated_helpers._IntegratedTestBase):
                                     api_version=api_version)
 
     def _read_template(self, name):
-        template = self._get_template(name, self.microversion)
+        template = self._get_template(name, self.request_api_version)
         with open(template) as inf:
             return inf.read().strip()
 
     def _write_template(self, name, data):
         with open(self._get_template(name,
-                                     self.microversion), 'w') as outf:
+                                     self.request_api_version), 'w') as outf:
             outf.write(data)
 
     def _write_sample(self, name, data):
         with open(self._get_sample(
-            name, self.microversion), 'w') as outf:
+            name, self.request_api_version), 'w') as outf:
             outf.write(data)
 
-    def _compare_result(self, expected, result, result_str):
-
+    def _compare_result(self, subs, expected, result, result_str):
         matched_value = None
-        # None
-        if expected is None:
-            if result is None:
-                pass
-            elif result == u'':
-                pass  # TODO(auggy): known issue Bug#1544720
-            else:
-                raise NoMatch('%(result_str)s: Expected None, got %(result)s.'
-                        % {'result_str': result_str, 'result': result})
-        # dictionary
-        elif isinstance(expected, dict):
+        if isinstance(expected, dict):
             if not isinstance(result, dict):
                 raise NoMatch('%(result_str)s: %(result)s is not a dict.'
                         % {'result_str': result_str, 'result': result})
@@ -183,11 +124,9 @@ class ApiSampleTestBase(integrated_helpers._IntegratedTestBase):
                         {'ex_delta': ex_delta, 'result_str': result_str,
                            'res_delta': res_delta})
             for key in ex_keys:
-                # TODO(auggy): pass key name along as well for error reporting
-                res = self._compare_result(expected[key], result[key],
+                res = self._compare_result(subs, expected[key], result[key],
                                            result_str)
                 matched_value = res or matched_value
-        # list
         elif isinstance(expected, list):
             if not isinstance(result, list):
                 raise NoMatch(
@@ -199,7 +138,7 @@ class ApiSampleTestBase(integrated_helpers._IntegratedTestBase):
             for res_obj in result:
                 for i, ex_obj in enumerate(expected):
                     try:
-                        matched_value = self._compare_result(ex_obj,
+                        matched_value = self._compare_result(subs, ex_obj,
                                                              res_obj,
                                                              result_str)
                         del expected[i]
@@ -221,7 +160,6 @@ class ApiSampleTestBase(integrated_helpers._IntegratedTestBase):
 
             if error:
                 raise NoMatch('\n'.join(error))
-        # template string
         elif isinstance(expected, six.string_types) and '%' in expected:
             # NOTE(vish): escape stuff for regex
             for char in '[]<>?':
@@ -232,8 +170,7 @@ class ApiSampleTestBase(integrated_helpers._IntegratedTestBase):
             if expected.startswith("%(int:"):
                 result = str(result)
                 expected = expected.replace('int:', '')
-
-            expected = expected % self.subs
+            expected = expected % subs
             expected = '^%s$' % expected
             match = re.match(expected, result)
             if not match:
@@ -247,14 +184,12 @@ class ApiSampleTestBase(integrated_helpers._IntegratedTestBase):
             except IndexError:
                 if match.groups():
                     matched_value = match.groups()[0]
-        # string
-        elif isinstance(expected, six.string_types):
-
-            # NOTE(danms): Ignore whitespace in this comparison
-            expected = expected.strip()
-            if isinstance(result, six.string_types):
-                result = result.strip()
-
+        else:
+            if isinstance(expected, six.string_types):
+                # NOTE(danms): Ignore whitespace in this comparison
+                expected = expected.strip()
+                if isinstance(result, six.string_types):
+                    result = result.strip()
             if expected != result:
                 # NOTE(tdurakov):this attempt to parse string as JSON
                 # is needed for correct comparison of hypervisor.cpu_info,
@@ -263,9 +198,9 @@ class ApiSampleTestBase(integrated_helpers._IntegratedTestBase):
                 # TODO(tdurakov): remove this check as soon as
                 # hypervisor.cpu_info become common JSON object in REST API.
                 try:
-                    expected = objectify(expected)
-                    result = objectify(result)
-                    return self._compare_result(expected, result,
+                    expected = self._objectify(expected)
+                    result = self._objectify(result)
+                    return self._compare_result(subs, expected, result,
                                                 result_str)
                 except ValueError:
                     pass
@@ -275,21 +210,6 @@ class ApiSampleTestBase(integrated_helpers._IntegratedTestBase):
                         '%(result)s' % {'expected': expected,
                                         'result_str': result_str,
                                         'result': result})
-        # int
-        elif isinstance(expected, (six.integer_types, float)):
-            if expected != result:
-                raise NoMatch(
-                        'Values do not match:\n'
-                        'Template: %(expected)s\n%(result_str)s: '
-                        '%(result)s' % {'expected': expected,
-                                        'result_str': result_str,
-                                        'result': result})
-
-        else:
-            raise ValueError(
-                'Unexpected type %(expected_type)s'
-                % {'expected_type': type(expected)})
-
         return matched_value
 
     def generalize_subs(self, subs, vanilla_regexes):
@@ -303,39 +223,12 @@ class ApiSampleTestBase(integrated_helpers._IntegratedTestBase):
         """
         return subs
 
-    def _update_links(self, sample_data):
-        """Process sample data and update version specific links."""
-        # replace version urls
-        url_re = self._get_host() + "/v(2|2\.1)/" + PROJECT_ID
-        new_url = self._get_host() + "/" + self.api_major_version
-        if self._project_id:
-            new_url += "/" + PROJECT_ID
-        updated_data = re.sub(url_re, new_url, sample_data)
-
-        # replace unversioned urls
-        url_re = self._get_host() + "/" + PROJECT_ID
-        new_url = self._get_host()
-        if self._project_id:
-            new_url += "/" + PROJECT_ID
-        updated_data = re.sub(url_re, new_url, updated_data)
-        return updated_data
-
-    def _verify_response(self, name, subs, response, exp_code,
-                         update_links=True):
-
-        # Always also include the laundry list of base regular
-        # expressions for possible key values in our templates. Test
-        # specific patterns (the value of ``subs``) can override
-        # these.
-        regexes = self._get_regexes()
-        regexes.update(subs)
-        subs = regexes
-        self.subs = subs
-        self.assertEqual(exp_code, response.status_code)
+    def _verify_response(self, name, subs, response, exp_code):
+        self.assertEqual(response.status_code, exp_code)
         response_data = response.content
-        response_data = pretty_data(response_data)
+        response_data = self._pretty_data(response_data)
         if not os.path.exists(self._get_template(name,
-                                                 self.microversion)):
+                                                 self.request_api_version)):
             self._write_template(name, response_data)
             template_data = response_data
         else:
@@ -343,20 +236,18 @@ class ApiSampleTestBase(integrated_helpers._IntegratedTestBase):
 
         if (self.generate_samples and
                 not os.path.exists(self._get_sample(
-                    name, self.microversion))):
+                    name, self.request_api_version))):
             self._write_sample(name, response_data)
             sample_data = response_data
         else:
-            with open(self._get_sample(name,
-                                       self.microversion)) as sample:
+            with file(self._get_sample(name,
+                                       self.request_api_version)) as sample:
                 sample_data = sample.read()
-                if update_links:
-                    sample_data = self._update_links(sample_data)
 
         try:
-            template_data = objectify(template_data)
-            response_data = objectify(response_data)
-            response_result = self._compare_result(template_data,
+            template_data = self._objectify(template_data)
+            response_data = self._objectify(response_data)
+            response_result = self._compare_result(subs, template_data,
                                                    response_data, "Response")
             # NOTE(danms): replace some of the subs with patterns for the
             # doc/api_samples check, which won't have things like the
@@ -365,12 +256,9 @@ class ApiSampleTestBase(integrated_helpers._IntegratedTestBase):
             vanilla_regexes = self._get_regexes()
             subs['compute_host'] = vanilla_regexes['host_name']
             subs['id'] = vanilla_regexes['id']
-            subs['uuid'] = vanilla_regexes['uuid']
-            subs['image_id'] = vanilla_regexes['uuid']
             subs = self.generalize_subs(subs, vanilla_regexes)
-            self.subs = subs
-            sample_data = objectify(sample_data)
-            self._compare_result(template_data, sample_data, "Sample")
+            sample_data = self._objectify(sample_data)
+            self._compare_result(subs, template_data, sample_data, "Sample")
             return response_result
         except NoMatch:
             raise
@@ -382,7 +270,10 @@ class ApiSampleTestBase(integrated_helpers._IntegratedTestBase):
         return 'http://glance.openstack.example.com'
 
     def _get_regexes(self):
-        text = r'(\\"|[^"])*'
+        if self.ctype == 'json':
+            text = r'(\\"|[^"])*'
+        else:
+            text = r'[^<]*'
         isotime_re = '\d{4}-[0,1]\d-[0-3]\dT\d{2}:\d{2}:\d{2}Z'
         strtime_re = '\d{4}-[0,1]\d-[0-3]\dT\d{2}:\d{2}:\d{2}\.\d{6}'
         xmltime_re = ('\d{4}-[0,1]\d-[0-3]\d '
@@ -414,60 +305,44 @@ class ApiSampleTestBase(integrated_helpers._IntegratedTestBase):
                            '[0-9a-f]{2}',
             'keypair_type': 'ssh|x509',
             'host': self._get_host(),
-            'host_name': r'\w+',
+            'host_name': '[0-9a-z]{32}',
             'glance_host': self._get_glance_host(),
             'compute_host': self.compute.host,
             'text': text,
             'int': '[0-9]+',
             'user_id': text,
-            'api_vers': self.api_major_version,
-            'compute_endpoint': self._get_compute_endpoint(),
-            'versioned_compute_endpoint': self._get_vers_compute_endpoint(),
         }
 
-    def _get_compute_endpoint(self):
-        # NOTE(sdague): "openstack" is stand in for project_id, it
-        # should be more generic in future.
-        if self._project_id:
-            return '%s/%s' % (self._get_host(), PROJECT_ID)
-        else:
-            return self._get_host()
-
-    def _get_vers_compute_endpoint(self):
-        # NOTE(sdague): "openstack" is stand in for project_id, it
-        # should be more generic in future.
-        if self._project_id:
-            return '%s/%s/%s' % (self._get_host(), self.api_major_version,
-                                 PROJECT_ID)
-        else:
-            return '%s/%s' % (self._get_host(), self.api_major_version)
-
     def _get_response(self, url, method, body=None, strip_version=False,
-                      headers=None):
-        headers = headers or {}
-        headers['Content-Type'] = 'application/json'
-        headers['Accept'] = 'application/json'
+                      api_version=None):
+        headers = {}
+        headers['Content-Type'] = 'application/' + self.ctype
+        headers['Accept'] = 'application/' + self.ctype
+        if api_version:
+            headers['X-OpenStack-Nova-API-Version'] = api_version
         return self.api.api_request(url, body=body, method=method,
                 headers=headers, strip_version=strip_version)
 
-    def _do_options(self, url, strip_version=False, headers=None):
-        return self._get_response(url, 'OPTIONS', strip_version=strip_version,
-                                  headers=headers)
-
-    def _do_get(self, url, strip_version=False, headers=None):
+    def _do_get(self, url, strip_version=False, api_version=None):
         return self._get_response(url, 'GET', strip_version=strip_version,
-                                  headers=headers)
+                                  api_version=(api_version or
+                                               self.request_api_version))
 
-    def _do_post(self, url, name, subs, method='POST', headers=None):
-        self.subs = subs
-        body = self._read_template(name) % self.subs
-        sample = self._get_sample(name, self.microversion)
+    def _do_post(self, url, name, subs, method='POST', api_version=None):
+        body = self._read_template(name) % subs
+        sample = self._get_sample(name, self.request_api_version)
         if self.generate_samples and not os.path.exists(sample):
                 self._write_sample(name, body)
-        return self._get_response(url, method, body, headers=headers)
+        return self._get_response(url, method, body,
+                                  api_version=(api_version or
+                                               self.request_api_version))
 
-    def _do_put(self, url, name, subs, headers=None):
-        return self._do_post(url, name, subs, method='PUT', headers=headers)
+    def _do_put(self, url, name, subs, api_version=None):
+        return self._do_post(url, name, subs, method='PUT',
+                             api_version=(api_version or
+                                          self.request_api_version))
 
-    def _do_delete(self, url, headers=None):
-        return self._get_response(url, 'DELETE', headers=headers)
+    def _do_delete(self, url, api_version=None):
+        return self._get_response(url, 'DELETE',
+                                  api_version=(api_version or
+                                               self.request_api_version))

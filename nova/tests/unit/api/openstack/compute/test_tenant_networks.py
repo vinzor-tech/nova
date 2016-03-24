@@ -146,7 +146,7 @@ class TenantNetworksTestV21(test.NoDBTestCase):
         get_mock.return_value = NETWORKS[0]
 
         res = self.controller.show(self.req, 1)
-        self.assertEqual(NETWORKS[0], res['network'])
+        self.assertEqual(res['network'], NETWORKS[0])
 
     @mock.patch('nova.network.api.API.get')
     def test_network_show_not_found(self, get_mock):
@@ -167,7 +167,7 @@ class TenantNetworksTestV21(test.NoDBTestCase):
             expected = NETWORKS_WITH_DEFAULT_NET
 
         res = self.controller.index(self.req)
-        self.assertEqual(expected, res['networks'])
+        self.assertEqual(res['networks'], expected)
 
     def test_network_index_with_default_net(self):
         self._test_network_index()
@@ -189,7 +189,7 @@ class TenantNetworksTestV21(test.NoDBTestCase):
         body = {'network': body}
         res = self.controller.create(self.req, body=body)
 
-        self.assertEqual(NETWORKS[0], res['network'])
+        self.assertEqual(res['network'], NETWORKS[0])
         commit_mock.assert_called_once_with(ctxt, 'rv')
         reserve_mock.assert_called_once_with(ctxt, networks=1)
 
@@ -221,11 +221,6 @@ class TenantNetworksTestV21(test.NoDBTestCase):
     def test_network_create_exception_policy_failed(self):
         ex = exception.PolicyNotAuthorized(action='dummy')
         expex = webob.exc.HTTPForbidden
-        self._test_network_create_exception(ex, expex)
-
-    def test_network_create_exception_conflictcidr(self):
-        ex = exception.CidrConflict(cidr='dummy', other='dummy')
-        expex = webob.exc.HTTPConflict
         self._test_network_create_exception(ex, expex)
 
     def test_network_create_exception_service_unavailable(self):

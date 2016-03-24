@@ -18,23 +18,22 @@ Management class for VM snapshot operations.
 """
 import os
 
-from os_win import exceptions as os_win_exc
-from os_win import utilsfactory
+from oslo_config import cfg
 from oslo_log import log as logging
 
 from nova.compute import task_states
-from nova import exception
-from nova.i18n import _LE
+from nova.i18n import _LW
 from nova.image import glance
 from nova import utils
-from nova.virt.hyperv import pathutils
+from nova.virt.hyperv import utilsfactory
 
+CONF = cfg.CONF
 LOG = logging.getLogger(__name__)
 
 
 class SnapshotOps(object):
     def __init__(self):
-        self._pathutils = pathutils.PathUtils()
+        self._pathutils = utilsfactory.get_pathutils()
         self._vmutils = utilsfactory.get_vmutils()
         self._vhdutils = utilsfactory.get_vhdutils()
 
@@ -55,11 +54,7 @@ class SnapshotOps(object):
         def instance_synchronized_snapshot():
             self._snapshot(context, instance, image_id, update_task_state)
 
-        try:
-            instance_synchronized_snapshot()
-        except os_win_exc.HyperVVMNotFoundException:
-            # the instance might disappear before starting the operation.
-            raise exception.InstanceNotFound(instance_id=instance.uuid)
+        instance_synchronized_snapshot()
 
     def _snapshot(self, context, instance, image_id, update_task_state):
         """Create snapshot from a running VM instance."""
@@ -108,9 +103,11 @@ class SnapshotOps(object):
                 self._vhdutils.reconnect_parent_vhd(dest_vhd_path,
                                                     dest_base_disk_path)
 
-                LOG.debug("Merging diff disk %s into its parent.",
-                          dest_vhd_path)
-                self._vhdutils.merge_vhd(dest_vhd_path)
+                LOG.debug("Merging base disk %(dest_base_disk_path)s and "
+                          "diff disk %(dest_vhd_path)s",
+                          {'dest_base_disk_path': dest_base_disk_path,
+                           'dest_vhd_path': dest_vhd_path})
+                self._vhdutils.merge_vhd(dest_vhd_path, dest_base_disk_path)
                 image_vhd_path = dest_base_disk_path
 
             LOG.debug("Updating Glance image %(image_id)s with content from "
@@ -127,9 +124,10 @@ class SnapshotOps(object):
             try:
                 LOG.debug("Removing snapshot %s", image_id)
                 self._vmutils.remove_vm_snapshot(snapshot_path)
-            except Exception:
-                LOG.exception(_LE('Failed to remove snapshot for VM %s'),
-                              instance_name, instance=instance)
+            except Exception as ex:
+                LOG.exception(ex)
+                LOG.warning(_LW('Failed to remove snapshot for VM %s'),
+                            instance_name)
             if export_dir:
                 LOG.debug('Removing directory: %s', export_dir)
                 self._pathutils.rmtree(export_dir)

@@ -13,15 +13,18 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+from oslo_config import cfg
 from oslo_log import log as logging
 
-import nova.conf
 from nova.scheduler import filters
 from nova.scheduler import utils
 
 LOG = logging.getLogger(__name__)
 
-CONF = nova.conf.CONF
+CONF = cfg.CONF
+CONF.import_opt('weight_setting',
+                'nova.scheduler.weights.metrics',
+                group='metrics')
 
 
 class MetricsFilter(filters.BaseHostFilter):
@@ -40,7 +43,7 @@ class MetricsFilter(filters.BaseHostFilter):
                                    name="metrics.weight_setting")
         self.keys = set([x[0] for x in opts])
 
-    def host_passes(self, host_state, spec_obj):
+    def host_passes(self, host_state, filter_properties):
         metrics_on_host = set(m.name for m in host_state.metrics)
         if not self.keys.issubset(metrics_on_host):
             unavail = metrics_on_host - self.keys

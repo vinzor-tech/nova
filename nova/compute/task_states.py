@@ -112,6 +112,3 @@ SHELVING_OFFLOADING = 'shelving_offloading'
 
 # possible task states during unshelve()
 UNSHELVING = 'unshelving'
-
-ALLOW_REBOOT = [None, REBOOTING, REBOOT_PENDING, REBOOT_STARTED, RESUMING,
-                REBOOTING_HARD, UNPAUSING, PAUSING, SUSPENDING]

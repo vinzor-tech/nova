@@ -25,7 +25,7 @@ authorize = extensions.extension_authorizer('compute', 'fixed_ips')
 
 class FixedIPController(object):
     def show(self, req, id):
-        """Return data about the given fixed IP."""
+        """Return data about the given fixed ip."""
         context = req.environ['nova.context']
         authorize(context)
 

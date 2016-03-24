@@ -30,20 +30,20 @@ from oslo_serialization import jsonutils
 from oslo_utils import importutils
 
 from nova.conductor import rpcapi as conductor_rpcapi
-import nova.conf
 from nova import config
 from nova import context
 import nova.db.api
 from nova import exception
-from nova.i18n import _LE, _LW
+from nova.i18n import _LE
 from nova.network import rpcapi as network_rpcapi
 from nova import objects
 from nova.objects import base as objects_base
 from nova import rpc
 
-CONF = nova.conf.CONF
+CONF = cfg.CONF
 CONF.import_opt('host', 'nova.netconf')
 CONF.import_opt('network_manager', 'nova.service')
+CONF.import_opt('use_local', 'nova.conductor.api', group='conductor')
 LOG = logging.getLogger(__name__)
 
 
@@ -120,26 +120,15 @@ def main():
     logging.setup(CONF, "nova")
     global LOG
     LOG = logging.getLogger('nova.dhcpbridge')
-
-    if CONF.action.name == 'old':
-        # NOTE(sdague): old is the most frequent message sent, and
-        # it's a noop. We should just exit immediately otherwise we
-        # can stack up a bunch of requests in dnsmasq. A SIGHUP seems
-        # to dump this list, so actions queued up get lost.
-        return
-
     objects.register_all()
 
     if not CONF.conductor.use_local:
         block_db_access()
         objects_base.NovaObject.indirection_api = \
             conductor_rpcapi.ConductorAPI()
-    else:
-        LOG.warning(_LW('Conductor local mode is deprecated and will '
-                        'be removed in a subsequent release'))
 
-    if CONF.action.name in ['add', 'del']:
-        LOG.debug("Called '%(action)s' for mac '%(mac)s' with IP '%(ip)s'",
+    if CONF.action.name in ['add', 'del', 'old']:
+        LOG.debug("Called '%(action)s' for mac '%(mac)s' with ip '%(ip)s'",
                   {"action": CONF.action.name,
                    "mac": CONF.action.mac,
                    "ip": CONF.action.ip})

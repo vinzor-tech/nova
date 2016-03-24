@@ -26,6 +26,7 @@ Reference
    :maxdepth: 1
 
    nova-all
+   nova-api-ec2
    nova-api-metadata
    nova-api-os-compute
    nova-api
@@ -40,6 +41,7 @@ Reference
    nova-manage
    nova-network
    nova-novncproxy
+   nova-objectstore
    nova-rootwrap
    nova-scheduler
    nova-spicehtml5proxy

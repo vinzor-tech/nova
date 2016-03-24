@@ -31,11 +31,13 @@ class TestPCIPassthroughFilter(test.NoDBTestCase):
         request = objects.InstancePCIRequest(count=1,
             spec=[{'vendor_id': '8086'}])
         requests = objects.InstancePCIRequests(requests=[request])
-        spec_obj = objects.RequestSpec(pci_requests=requests)
+        filter_properties = {
+            'request_spec': {
+                'instance_properties': {'pci_requests': requests}}}
         host = fakes.FakeHostState(
             'host1', 'node1',
             attribute_dict={'pci_stats': pci_stats_mock})
-        self.assertTrue(self.filt_cls.host_passes(host, spec_obj))
+        self.assertTrue(self.filt_cls.host_passes(host, filter_properties))
         pci_stats_mock.support_requests.assert_called_once_with(
             requests.requests)
 
@@ -45,35 +47,39 @@ class TestPCIPassthroughFilter(test.NoDBTestCase):
         request = objects.InstancePCIRequest(count=1,
             spec=[{'vendor_id': '8086'}])
         requests = objects.InstancePCIRequests(requests=[request])
-        spec_obj = objects.RequestSpec(pci_requests=requests)
+        filter_properties = {
+            'request_spec': {
+                'instance_properties': {'pci_requests': requests}}}
         host = fakes.FakeHostState(
             'host1', 'node1',
             attribute_dict={'pci_stats': pci_stats_mock})
-        self.assertFalse(self.filt_cls.host_passes(host, spec_obj))
+        self.assertFalse(self.filt_cls.host_passes(host, filter_properties))
         pci_stats_mock.support_requests.assert_called_once_with(
             requests.requests)
 
     def test_pci_passthrough_no_pci_request(self):
-        spec_obj = objects.RequestSpec(pci_requests=None)
+        filter_properties = {}
         host = fakes.FakeHostState('h1', 'n1', {})
-        self.assertTrue(self.filt_cls.host_passes(host, spec_obj))
+        self.assertTrue(self.filt_cls.host_passes(host, filter_properties))
 
     def test_pci_passthrough_compute_stats(self):
-        request = objects.InstancePCIRequest(count=1,
-                                             spec=[{'vendor_id': '8086'}])
-        requests = objects.InstancePCIRequests(requests=[request])
-        spec_obj = objects.RequestSpec(pci_requests=requests)
+        requests = [{'count': 1, 'spec': [{'vendor_id': '8086'}]}]
+        filter_properties = {
+            'request_spec': {
+                'instance_properties': {'pci_requests': requests}}}
         host = fakes.FakeHostState(
             'host1', 'node1',
             attribute_dict={})
         self.assertRaises(AttributeError, self.filt_cls.host_passes,
-                          host, spec_obj)
+                          host, filter_properties)
 
     def test_pci_passthrough_no_pci_stats(self):
         request = objects.InstancePCIRequest(count=1,
             spec=[{'vendor_id': '8086'}])
         requests = objects.InstancePCIRequests(requests=[request])
-        spec_obj = objects.RequestSpec(pci_requests=requests)
+        filter_properties = {
+            'request_spec': {
+                'instance_properties': {'pci_requests': requests}}}
         host = fakes.FakeHostState('host1', 'node1',
             attribute_dict={'pci_stats': stats.PciDeviceStats()})
-        self.assertFalse(self.filt_cls.host_passes(host, spec_obj))
+        self.assertFalse(self.filt_cls.host_passes(host, filter_properties))

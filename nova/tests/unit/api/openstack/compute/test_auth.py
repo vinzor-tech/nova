@@ -17,68 +17,44 @@
 import webob
 import webob.dec
 
-import testscenarios
-
-from nova.api import openstack as openstack_api
-from nova.api.openstack import auth
-from nova.api.openstack import compute
-from nova.api.openstack import urlmap
 from nova import test
 from nova.tests.unit.api.openstack import fakes
 
 
-class TestNoAuthMiddleware(testscenarios.WithScenarios, test.NoDBTestCase):
-
-    scenarios = [
-        ('project_id', {
-            'expected_url': 'http://localhost/v2.1/user1_project',
-            'auth_middleware': auth.NoAuthMiddleware}),
-        ('no_project_id', {
-            'expected_url': 'http://localhost/v2.1',
-            'auth_middleware': auth.NoAuthMiddlewareV2_18}),
-    ]
+class TestNoAuthMiddlewareV3(test.NoDBTestCase):
 
     def setUp(self):
-        super(TestNoAuthMiddleware, self).setUp()
+        super(TestNoAuthMiddlewareV3, self).setUp()
         fakes.stub_out_rate_limiting(self.stubs)
-        fakes.stub_out_networking(self)
-        api_v21 = openstack_api.FaultWrapper(
-            self.auth_middleware(
-                compute.APIRouterV21()
-            )
-        )
-        self.wsgi_app = urlmap.URLMap()
-        self.wsgi_app['/v2.1'] = api_v21
-        self.req_url = '/v2.1'
+        fakes.stub_out_networking(self.stubs)
 
     def test_authorize_user(self):
-        req = webob.Request.blank(self.req_url)
+        req = webob.Request.blank('/v2/fake')
         req.headers['X-Auth-User'] = 'user1'
         req.headers['X-Auth-Key'] = 'user1_key'
         req.headers['X-Auth-Project-Id'] = 'user1_project'
-        result = req.get_response(self.wsgi_app)
+        result = req.get_response(fakes.wsgi_app_v21(use_no_auth=True))
         self.assertEqual(result.status, '204 No Content')
         self.assertEqual(result.headers['X-Server-Management-Url'],
-            self.expected_url)
+            "http://localhost/v2/fake")
 
     def test_authorize_user_trailing_slash(self):
         # make sure it works with trailing slash on the request
-        self.req_url = self.req_url + '/'
-        req = webob.Request.blank(self.req_url)
+        req = webob.Request.blank('/v2/fake/')
         req.headers['X-Auth-User'] = 'user1'
         req.headers['X-Auth-Key'] = 'user1_key'
         req.headers['X-Auth-Project-Id'] = 'user1_project'
-        result = req.get_response(self.wsgi_app)
+        result = req.get_response(fakes.wsgi_app_v21(use_no_auth=True))
         self.assertEqual(result.status, '204 No Content')
         self.assertEqual(result.headers['X-Server-Management-Url'],
-            self.expected_url)
+            "http://localhost/v2/fake")
 
     def test_auth_token_no_empty_headers(self):
-        req = webob.Request.blank(self.req_url)
+        req = webob.Request.blank('/v2/fake')
         req.headers['X-Auth-User'] = 'user1'
         req.headers['X-Auth-Key'] = 'user1_key'
         req.headers['X-Auth-Project-Id'] = 'user1_project'
-        result = req.get_response(self.wsgi_app)
+        result = req.get_response(fakes.wsgi_app_v21(use_no_auth=True))
         self.assertEqual(result.status, '204 No Content')
         self.assertNotIn('X-CDN-Management-Url', result.headers)
         self.assertNotIn('X-Storage-Url', result.headers)

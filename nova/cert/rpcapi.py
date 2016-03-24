@@ -16,12 +16,23 @@
 Client side of the cert manager RPC API.
 """
 
+from oslo_config import cfg
 import oslo_messaging as messaging
 
-import nova.conf
 from nova import rpc
 
-CONF = nova.conf.CONF
+rpcapi_opts = [
+    cfg.StrOpt('cert_topic',
+               default='cert',
+               help='The topic cert nodes listen on'),
+]
+
+CONF = cfg.CONF
+CONF.register_opts(rpcapi_opts)
+
+rpcapi_cap_opt = cfg.StrOpt('cert',
+        help='Set a version cap for messages sent to cert services')
+CONF.register_opt(rpcapi_cap_opt, 'upgrade_levels')
 
 
 class CertAPI(object):
@@ -38,11 +49,9 @@ class CertAPI(object):
 
         2.0 - Major API rev for Icehouse
 
-        ... Icehouse, Juno, Kilo, Liberty, and Mitaka support message version
-        2.0.  So, any changes to existing methods in 2.x after that
-        point should be done such that they can handle the version_cap
-        being set to 2.0.
-
+        ... Icehouse, Juno and Kilo support message version 2.0.  So, any
+        changes to existing methods in 2.x after that point should be done such
+        that they can handle the version_cap being set to 2.0.
     '''
 
     VERSION_ALIASES = {
@@ -51,8 +60,6 @@ class CertAPI(object):
         'icehouse': '2.0',
         'juno': '2.0',
         'kilo': '2.0',
-        'liberty': '2.0',
-        'mitaka': '2.0',
     }
 
     def __init__(self):

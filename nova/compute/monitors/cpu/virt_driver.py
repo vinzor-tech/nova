@@ -17,15 +17,16 @@
 CPU monitor based on virt driver to retrieve CPU information
 """
 
+from oslo_config import cfg
 from oslo_log import log as logging
 from oslo_utils import timeutils
 
 from nova.compute.monitors import base
-import nova.conf
 from nova import exception
 from nova.i18n import _LE
 
-CONF = nova.conf.CONF
+CONF = cfg.CONF
+CONF.import_opt('compute_driver', 'nova.virt.driver')
 LOG = logging.getLogger(__name__)
 
 
@@ -39,16 +40,20 @@ class Monitor(base.CPUMonitorBase):
         self._data = {}
         self._cpu_stats = {}
 
-    def get_metrics(self):
-        metrics = []
+    def get_metric(self, name):
         self._update_data()
-        for name in self.get_metric_names():
-            metrics.append((name, self._data[name], self._data["timestamp"]))
-        return metrics
+        return self._data[name], self._data["timestamp"]
 
     def _update_data(self):
+        # Don't allow to call this function so frequently (<= 1 sec)
+        now = timeutils.utcnow()
+        if self._data.get("timestamp") is not None:
+            delta = now - self._data.get("timestamp")
+            if delta.seconds <= 1:
+                return
+
         self._data = {}
-        self._data["timestamp"] = timeutils.utcnow()
+        self._data["timestamp"] = now
 
         # Extract node's CPU statistics.
         try:

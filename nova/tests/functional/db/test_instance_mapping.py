@@ -34,8 +34,6 @@ def create_mapping(**kwargs):
 
 
 class InstanceMappingTestCase(test.NoDBTestCase):
-    USES_DB_SELF = True
-
     def setUp(self):
         super(InstanceMappingTestCase, self).setUp()
         self.useFixture(fixtures.Database(database='api'))
@@ -73,10 +71,6 @@ class InstanceMappingTestCase(test.NoDBTestCase):
         self.assertRaises(exception.InstanceMappingNotFound,
                 self.mapping_obj._get_by_instance_uuid_from_db, self.context,
                 mapping['instance_uuid'])
-
-    def test_cell_id_nullable(self):
-        # Just ensure this doesn't raise
-        create_mapping(cell_id=None)
 
 
 class InstanceMappingListTestCase(test.NoDBTestCase):

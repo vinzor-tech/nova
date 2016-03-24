@@ -16,6 +16,7 @@
 import collections
 import functools
 import itertools
+import os
 import re
 
 from oslo_config import cfg
@@ -26,10 +27,10 @@ import six.moves.urllib.parse as urlparse
 import webob
 from webob import exc
 
+from nova.api.validation import parameter_types
 from nova.compute import task_states
 from nova.compute import utils as compute_utils
 from nova.compute import vm_states
-import nova.conf
 from nova import exception
 from nova.i18n import _
 from nova.i18n import _LE
@@ -50,11 +51,18 @@ osapi_opts = [
                help='Base URL that will be presented to users in links '
                     'to glance resources'),
 ]
-CONF = nova.conf.CONF
+CONF = cfg.CONF
 CONF.register_opts(osapi_opts)
 
 LOG = logging.getLogger(__name__)
 QUOTAS = quota.QUOTAS
+
+CONF.import_opt('enable', 'nova.cells.opts', group='cells')
+
+VALID_NAME_REGEX = re.compile(parameter_types.valid_name_regex, re.UNICODE)
+
+
+XML_NS_V11 = 'http://docs.openstack.org/compute/api/v1.1'
 
 
 _STATE_MAP = {
@@ -93,7 +101,7 @@ _STATE_MAP = {
         'default': 'VERIFY_RESIZE',
         # Note(maoy): the OS API spec 1.1 doesn't have CONFIRMING_RESIZE
         # state so we comment that out for future reference only.
-        # task_states.RESIZE_CONFIRMING: 'CONFIRMING_RESIZE',
+        #task_states.RESIZE_CONFIRMING: 'CONFIRMING_RESIZE',
         task_states.RESIZE_REVERTING: 'REVERT_RESIZE',
     },
     vm_states.PAUSED: {
@@ -291,10 +299,11 @@ def remove_trailing_version_from_href(href):
     # NOTE: this should match vX.X or vX
     expression = re.compile(r'^v([0-9]+|[0-9]+\.[0-9]+)(/.*|$)')
     if not expression.match(url_parts.pop()):
-        LOG.debug('href %s does not contain version', href)
+        LOG.debug('href %s does not contain version' % href)
         raise ValueError(_('href %s does not contain version') % href)
 
-    new_path = url_join(*url_parts)
+    new_path = '/'.join(url_parts)
+
     parsed_url = list(parsed_url)
     parsed_url[2] = new_path
     return urlparse.urlunsplit(parsed_url)
@@ -392,21 +401,6 @@ def check_snapshots_enabled(f):
     return inner
 
 
-def url_join(*parts):
-    """Convenience method for joining parts of a URL
-
-    Any leading and trailing '/' characters are removed, and the parts joined
-    together with '/' as a separator. If last element of 'parts' is an empty
-    string, the returned URL will have a trailing slash.
-    """
-    parts = parts or [""]
-    clean_parts = [part.strip("/") for part in parts if part]
-    if not parts[-1]:
-        # Empty last element should add a trailing slash
-        clean_parts.append("")
-    return "/".join(clean_parts)
-
-
 class ViewBuilder(object):
     """Model API responses as dictionaries."""
 
@@ -436,27 +430,27 @@ class ViewBuilder(object):
         params = request.params.copy()
         params["marker"] = identifier
         prefix = self._update_compute_link_prefix(request.application_url)
-        url = url_join(prefix,
-                       self._get_project_id(request),
-                       collection_name)
+        url = os.path.join(prefix,
+                           self._get_project_id(request),
+                           collection_name)
         return "%s?%s" % (url, urlparse.urlencode(params))
 
     def _get_href_link(self, request, identifier, collection_name):
         """Return an href string pointing to this object."""
         prefix = self._update_compute_link_prefix(request.application_url)
-        return url_join(prefix,
-                        self._get_project_id(request),
-                        collection_name,
-                        str(identifier))
+        return os.path.join(prefix,
+                            self._get_project_id(request),
+                            collection_name,
+                            str(identifier))
 
     def _get_bookmark_link(self, request, identifier, collection_name):
         """Create a URL that refers to a specific resource."""
         base_url = remove_trailing_version_from_href(request.application_url)
         base_url = self._update_compute_link_prefix(base_url)
-        return url_join(base_url,
-                        self._get_project_id(request),
-                        collection_name,
-                        str(identifier))
+        return os.path.join(base_url,
+                            self._get_project_id(request),
+                            collection_name,
+                            str(identifier))
 
     def _get_collection_links(self,
                               request,
@@ -516,17 +510,6 @@ def get_instance(compute_api, context, instance_id, expected_attrs=None):
                                expected_attrs=expected_attrs)
     except exception.InstanceNotFound as e:
         raise exc.HTTPNotFound(explanation=e.format_message())
-
-
-def normalize_name(name):
-    # NOTE(alex_xu): This method is used by v2.1 legacy v2 compat mode.
-    # In the legacy v2 API, some of APIs strip the spaces and some of APIs not.
-    # The v2.1 disallow leading/trailing, for compatible v2 API and consistent,
-    # we enable leading/trailing spaces and strip spaces in legacy v2 compat
-    # mode. Althrough in legacy v2 API there are some APIs didn't strip spaces,
-    # but actually leading/trailing spaces(that means user depend on leading/
-    # trailing spaces distinguish different instance) is pointless usecase.
-    return name.strip()
 
 
 def raise_feature_not_supported(msg=None):

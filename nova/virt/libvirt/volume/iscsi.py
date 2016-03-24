@@ -11,12 +11,10 @@
 #    under the License.
 """Libvirt volume driver for iSCSI"""
 
-from os_brick import exception as os_brick_exception
 from os_brick.initiator import connector
 from oslo_config import cfg
 from oslo_log import log as logging
 
-from nova.i18n import _LW
 from nova import utils
 from nova.virt.libvirt.volume import volume as libvirt_volume
 
@@ -28,7 +26,7 @@ volume_opts = [
                help='Number of times to rescan iSCSI target to find volume'),
     cfg.BoolOpt('iscsi_use_multipath',
                 default=False,
-                help='Use multipath connection of the iSCSI or FC volume'),
+                help='Use multipath connection of the iSCSI volume'),
     cfg.StrOpt('iscsi_iface',
                deprecated_name='iscsi_transport',
                help='The iSCSI transport iface to use to connect to target in '
@@ -77,7 +75,6 @@ class LibvirtISCSIVolumeDriver(libvirt_volume.LibvirtBaseVolumeDriver):
                      self).get_config(connection_info, disk_info)
         conf.source_type = "block"
         conf.source_path = connection_info['data']['device_path']
-        conf.driver_io = "native"
         return conf
 
     def connect_volume(self, connection_info, disk_info):
@@ -93,11 +90,7 @@ class LibvirtISCSIVolumeDriver(libvirt_volume.LibvirtBaseVolumeDriver):
         """Detach the volume from instance_name."""
 
         LOG.debug("calling os-brick to detach iSCSI Volume")
-        try:
-            self.connector.disconnect_volume(connection_info['data'], None)
-        except os_brick_exception.VolumeDeviceNotFound as exc:
-            LOG.warning(_LW('Ignoring VolumeDeviceNotFound: %s'), exc)
-            return
+        self.connector.disconnect_volume(connection_info['data'], None)
         LOG.debug("Disconnected iSCSI Volume %s", disk_dev)
 
         super(LibvirtISCSIVolumeDriver,

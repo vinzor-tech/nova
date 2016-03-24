@@ -16,13 +16,12 @@
 
 import datetime
 
-from oslo_db.sqlalchemy import enginefacade
+from oslo_config import cfg
 from oslo_utils import timeutils
 from six.moves import range
 
 from nova import compute
 from nova.compute import flavors
-import nova.conf
 from nova import context
 from nova import db
 from nova.db.sqlalchemy import api as sqa_api
@@ -32,7 +31,8 @@ from nova import quota
 from nova import test
 import nova.tests.unit.image.fake
 
-CONF = nova.conf.CONF
+CONF = cfg.CONF
+CONF.import_opt('compute_driver', 'nova.virt.driver')
 
 
 class QuotaIntegrationTestCase(test.TestCase):
@@ -56,7 +56,7 @@ class QuotaIntegrationTestCase(test.TestCase):
                                               self.project_id,
                                               is_admin=True)
 
-        nova.tests.unit.image.fake.stub_out_image_service(self)
+        nova.tests.unit.image.fake.stub_out_image_service(self.stubs)
 
         self.compute_api = compute.API()
 
@@ -239,7 +239,6 @@ class QuotaIntegrationTestCase(test.TestCase):
         assertInstancesReserved(0)
 
 
-@enginefacade.transaction_context_provider
 class FakeContext(object):
     def __init__(self, project_id, quota_class):
         self.is_admin = False
@@ -867,7 +866,7 @@ class DbQuotaDriverTestCase(test.TestCase):
                 metadata_items=64,
                 injected_file_content_bytes=5 * 1024,
                 )
-        self.stub_out('nova.db.quota_class_get_default', fake_qcgd)
+        self.stubs.Set(db, 'quota_class_get_default', fake_qcgd)
 
     def _stub_quota_class_get_all_by_name(self):
         # Stub out quota_class_get_all_by_name
@@ -880,7 +879,7 @@ class DbQuotaDriverTestCase(test.TestCase):
                 metadata_items=64,
                 injected_file_content_bytes=5 * 1024,
                 )
-        self.stub_out('nova.db.quota_class_get_all_by_name', fake_qcgabn)
+        self.stubs.Set(db, 'quota_class_get_all_by_name', fake_qcgabn)
 
     def test_get_class_quotas(self):
         self._stub_quota_class_get_all_by_name()
@@ -953,10 +952,9 @@ class DbQuotaDriverTestCase(test.TestCase):
                 injected_file_path_bytes=dict(in_use=0, reserved=0),
                 )
 
-        self.stub_out('nova.db.quota_get_all_by_project_and_user',
-                       fake_qgabpau)
-        self.stub_out('nova.db.quota_get_all_by_project', fake_qgabp)
-        self.stub_out('nova.db.quota_usage_get_all_by_project_and_user',
+        self.stubs.Set(db, 'quota_get_all_by_project_and_user', fake_qgabpau)
+        self.stubs.Set(db, 'quota_get_all_by_project', fake_qgabp)
+        self.stubs.Set(db, 'quota_usage_get_all_by_project_and_user',
                        fake_qugabpau)
 
         self._stub_quota_class_get_all_by_name()
@@ -1056,7 +1054,7 @@ class DbQuotaDriverTestCase(test.TestCase):
             return dict(
                 test_resource=dict(in_use=20, reserved=10),
                 )
-        self.stub_out('nova.db.quota_get', fake_quota_get)
+        self.stubs.Set(db, 'quota_get', fake_quota_get)
 
     def test_get_by_project_and_user(self):
         self._stub_get_by_project_and_user_specific()
@@ -1101,9 +1099,9 @@ class DbQuotaDriverTestCase(test.TestCase):
                     sqa_models.ProjectUserQuota(resource='cores',
                                                 hard_limit=2)]
 
-        self.stub_out('nova.db.quota_get_all_by_project', fake_qgabp)
-        self.stub_out('nova.db.quota_usage_get_all_by_project', fake_qugabp)
-        self.stub_out('nova.db.quota_get_all', fake_quota_get_all)
+        self.stubs.Set(db, 'quota_get_all_by_project', fake_qgabp)
+        self.stubs.Set(db, 'quota_usage_get_all_by_project', fake_qugabp)
+        self.stubs.Set(db, 'quota_get_all', fake_quota_get_all)
 
         self._stub_quota_class_get_all_by_name()
         self._stub_quota_class_get_default()
@@ -1817,7 +1815,7 @@ class DbQuotaDriverTestCase(test.TestCase):
             self.calls.append('quota_get_all_by_project')
             return {'floating_ips': 20}
 
-        def fake_get_project_quotas(dbdrv, context, resources, project_id,
+        def fake_get_project_quotas(context, resources, project_id,
                                     quota_class=None, defaults=True,
                                     usages=True, remains=False,
                                     project_quotas=None):
@@ -1844,7 +1842,7 @@ class DbQuotaDriverTestCase(test.TestCase):
                              'reserved': reserved, 'remains': remains}
             return result
 
-        def fake_process_quotas_in_get_user_quotas(dbdrv, context, resources,
+        def fake_process_quotas_in_get_user_quotas(context, resources,
                                                    project_id, quotas,
                                                    quota_class=None,
                                                    defaults=True, usages=None,
@@ -1868,13 +1866,13 @@ class DbQuotaDriverTestCase(test.TestCase):
             self.calls.append('quota_get_all_by_project_and_user')
             return {'instances': 2, 'cores': -1}
 
-        self.stub_out('nova.db.quota_get_all_by_project',
+        self.stubs.Set(db, 'quota_get_all_by_project',
                        fake_quota_get_all_by_project)
-        self.stub_out('nova.quota.DbQuotaDriver.get_project_quotas',
+        self.stubs.Set(self.driver, 'get_project_quotas',
                        fake_get_project_quotas)
-        self.stub_out('nova.quota.DbQuotaDriver._process_quotas',
+        self.stubs.Set(self.driver, '_process_quotas',
                        fake_process_quotas_in_get_user_quotas)
-        self.stub_out('nova.db.quota_get_all_by_project_and_user',
+        self.stubs.Set(db, 'quota_get_all_by_project_and_user',
                        fake_qgabpau)
 
     def test_get_settable_quotas_with_user(self):
@@ -2089,14 +2087,14 @@ class DbQuotaDriverTestCase(test.TestCase):
                 })
 
     def _stub_get_project_quotas(self):
-        def fake_get_project_quotas(dbdrv, context, resources, project_id,
+        def fake_get_project_quotas(context, resources, project_id,
                                     quota_class=None, defaults=True,
                                     usages=True, remains=False,
                                     project_quotas=None):
             self.calls.append('get_project_quotas')
             return {k: dict(limit=v.default) for k, v in resources.items()}
 
-        self.stub_out('nova.quota.DbQuotaDriver.get_project_quotas',
+        self.stubs.Set(self.driver, 'get_project_quotas',
                        fake_get_project_quotas)
 
     def test_get_quotas_has_sync_unknown(self):
@@ -2219,7 +2217,7 @@ class DbQuotaDriverTestCase(test.TestCase):
             self.calls.append(('quota_reserve', expire, until_refresh,
                                max_age))
             return ['resv-1', 'resv-2', 'resv-3']
-        self.stub_out('nova.db.quota_reserve', fake_quota_reserve)
+        self.stubs.Set(db, 'quota_reserve', fake_quota_reserve)
 
     def test_reserve_bad_expire(self):
         self._stub_get_project_quotas()
@@ -2327,7 +2325,7 @@ class DbQuotaDriverTestCase(test.TestCase):
                           resource, kwargs))
             if resource == 'nonexist':
                 raise exception.QuotaUsageNotFound(project_id=project_id)
-        self.stub_out('nova.db.quota_usage_update', fake_quota_usage_update)
+        self.stubs.Set(db, 'quota_usage_update', fake_quota_usage_update)
 
         ctx = FakeContext('test_project', 'test_class')
         resources = ['res1', 'res2', 'nonexist', 'res4']
@@ -2341,7 +2339,7 @@ class DbQuotaDriverTestCase(test.TestCase):
         elevated = calls[0][1]
         self.assertEqual(elevated.project_id, ctx.project_id)
         self.assertEqual(elevated.quota_class, ctx.quota_class)
-        self.assertTrue(elevated.is_admin)
+        self.assertEqual(elevated.is_admin, True)
 
         # Now check that all the expected calls were made
         exemplar = [('quota_usage_update', elevated, 'test_project',
@@ -2390,7 +2388,7 @@ class QuotaReserveSqlAlchemyTestCase(test.TestCase):
             )
 
         def make_sync(res_name):
-            def sync(context, project_id, user_id):
+            def sync(context, project_id, user_id, session):
                 self.sync_called.add(res_name)
                 if res_name in self.usages:
                     if self.usages[res_name].in_use < 0:
@@ -2446,12 +2444,16 @@ class QuotaReserveSqlAlchemyTestCase(test.TestCase):
                      until_refresh=None),
                 ]
 
-        def fake_get_project_user_quota_usages(context, project_id, user_id):
+        def fake_get_session():
+            return FakeSession()
+
+        def fake_get_project_user_quota_usages(context, session, project_id,
+                                               user_id):
             return self.usages.copy(), self.usages.copy()
 
         def fake_quota_usage_create(project_id, user_id, resource,
                                     in_use, reserved, until_refresh,
-                                    session):
+                                    session=None, save=True):
             quota_usage_ref = self._make_quota_usage(
                 project_id, user_id, resource, in_use, reserved, until_refresh,
                 timeutils.utcnow(), timeutils.utcnow())
@@ -2462,7 +2464,7 @@ class QuotaReserveSqlAlchemyTestCase(test.TestCase):
 
         def fake_reservation_create(uuid, usage_id, project_id,
                                     user_id, resource, delta, expire,
-                                    session):
+                                    session=None):
             reservation_ref = self._make_reservation(
                 uuid, usage_id, project_id, user_id, resource, delta, expire,
                 timeutils.utcnow(), timeutils.utcnow())
@@ -2471,12 +2473,11 @@ class QuotaReserveSqlAlchemyTestCase(test.TestCase):
 
             return reservation_ref
 
-        self.stub_out('nova.db.sqlalchemy.api._get_project_user_quota_usages',
+        self.stubs.Set(sqa_api, 'get_session', fake_get_session)
+        self.stubs.Set(sqa_api, '_get_project_user_quota_usages',
                        fake_get_project_user_quota_usages)
-        self.stub_out('nova.db.sqlalchemy.api._quota_usage_create',
-                       fake_quota_usage_create)
-        self.stub_out('nova.db.sqlalchemy.api._reservation_create',
-                       fake_reservation_create)
+        self.stubs.Set(sqa_api, '_quota_usage_create', fake_quota_usage_create)
+        self.stubs.Set(sqa_api, '_reservation_create', fake_reservation_create)
 
         self.useFixture(test.TimeOverride())
 

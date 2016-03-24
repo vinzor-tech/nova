@@ -14,6 +14,7 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+import contextlib
 import copy
 
 import mock
@@ -309,7 +310,7 @@ class ComputeHostAPITestCase(test.TestCase):
         self.assertEqual('fake-response', result)
 
     def test_service_delete(self):
-        with test.nested(
+        with contextlib.nested(
             mock.patch.object(objects.Service, 'get_by_id',
                               return_value=objects.Service()),
             mock.patch.object(objects.Service, 'destroy')

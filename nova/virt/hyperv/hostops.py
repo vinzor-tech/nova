@@ -21,8 +21,6 @@ import os
 import platform
 import time
 
-from os_win import constants as os_win_const
-from os_win import utilsfactory
 from oslo_config import cfg
 from oslo_log import log as logging
 from oslo_serialization import jsonutils
@@ -33,7 +31,7 @@ from nova.compute import hv_type
 from nova.compute import vm_mode
 from nova.i18n import _
 from nova.virt.hyperv import constants
-from nova.virt.hyperv import pathutils
+from nova.virt.hyperv import utilsfactory
 
 CONF = cfg.CONF
 CONF.import_opt('my_ip', 'nova.netconf')
@@ -43,7 +41,7 @@ LOG = logging.getLogger(__name__)
 class HostOps(object):
     def __init__(self):
         self._hostutils = utilsfactory.get_hostutils()
-        self._pathutils = pathutils.PathUtils()
+        self._pathutils = utilsfactory.get_pathutils()
 
     def _get_cpu_info(self):
         """Get the CPU information.
@@ -63,12 +61,12 @@ class HostOps(object):
         topology = dict()
         topology['sockets'] = len(processors)
         topology['cores'] = processors[0]['NumberOfCores']
-        topology['threads'] = (processors[0]['NumberOfLogicalProcessors'] //
+        topology['threads'] = (processors[0]['NumberOfLogicalProcessors'] /
                                processors[0]['NumberOfCores'])
         cpu_info['topology'] = topology
 
         features = list()
-        for fkey, fname in os_win_const.PROCESSOR_FEATURE.items():
+        for fkey, fname in constants.PROCESSOR_FEATURE.items():
             if self._hostutils.is_cpu_feature_present(fkey):
                 features.append(fname)
         cpu_info['features'] = features
@@ -77,16 +75,16 @@ class HostOps(object):
 
     def _get_memory_info(self):
         (total_mem_kb, free_mem_kb) = self._hostutils.get_memory_info()
-        total_mem_mb = total_mem_kb // 1024
-        free_mem_mb = free_mem_kb // 1024
+        total_mem_mb = total_mem_kb / 1024
+        free_mem_mb = free_mem_kb / 1024
         return (total_mem_mb, free_mem_mb, total_mem_mb - free_mem_mb)
 
     def _get_local_hdd_info_gb(self):
         drive = os.path.splitdrive(self._pathutils.get_instances_dir())[0]
         (size, free_space) = self._hostutils.get_volume_info(drive)
 
-        total_gb = size // units.Gi
-        free_gb = free_space // units.Gi
+        total_gb = size / units.Gi
+        free_gb = free_space / units.Gi
         used_gb = total_gb - free_gb
         return (total_gb, free_gb, used_gb)
 
@@ -141,9 +139,9 @@ class HostOps(object):
                'hypervisor_hostname': platform.node(),
                'vcpus_used': 0,
                'cpu_info': jsonutils.dumps(cpu_info),
-               'supported_instances':
+               'supported_instances': jsonutils.dumps(
                    [(arch.I686, hv_type.HYPERV, vm_mode.HVM),
-                    (arch.X86_64, hv_type.HYPERV, vm_mode.HVM)],
+                    (arch.X86_64, hv_type.HYPERV, vm_mode.HVM)]),
                'numa_topology': None,
                }
 
@@ -185,4 +183,4 @@ class HostOps(object):
         # value is same as in libvirt
         return "%s up %s,  0 users,  load average: 0, 0, 0" % (
                    str(time.strftime("%H:%M:%S")),
-                   str(datetime.timedelta(milliseconds=int(tick_count64))))
+                   str(datetime.timedelta(milliseconds=long(tick_count64))))

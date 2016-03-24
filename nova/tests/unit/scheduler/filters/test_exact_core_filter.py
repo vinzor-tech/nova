@@ -10,7 +10,6 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from nova import objects
 from nova.scheduler.filters import exact_core_filter
 from nova import test
 from nova.tests.unit.scheduler import fakes
@@ -23,26 +22,24 @@ class TestExactCoreFilter(test.NoDBTestCase):
         self.filt_cls = exact_core_filter.ExactCoreFilter()
 
     def test_exact_core_filter_passes(self):
-        spec_obj = objects.RequestSpec(
-            flavor=objects.Flavor(vcpus=1))
-        vcpus = 3
-        host = self._get_host({'vcpus_total': vcpus, 'vcpus_used': vcpus - 1})
-        self.assertTrue(self.filt_cls.host_passes(host, spec_obj))
-        self.assertEqual(host.limits.get('vcpu'), vcpus)
+        filter_properties = {'instance_type': {'vcpus': 1}}
+        host = self._get_host({'vcpus_total': 3, 'vcpus_used': 2})
+        self.assertTrue(self.filt_cls.host_passes(host, filter_properties))
 
     def test_exact_core_filter_fails(self):
-        spec_obj = objects.RequestSpec(
-            flavor=objects.Flavor(vcpus=2))
+        filter_properties = {'instance_type': {'vcpus': 2}}
         host = self._get_host({'vcpus_total': 3, 'vcpus_used': 2})
-        self.assertFalse(self.filt_cls.host_passes(host, spec_obj))
-        self.assertNotIn('vcpu', host.limits)
+        self.assertFalse(self.filt_cls.host_passes(host, filter_properties))
+
+    def test_exact_core_filter_passes_no_instance_type(self):
+        filter_properties = {}
+        host = self._get_host({'vcpus_total': 3, 'vcpus_used': 2})
+        self.assertTrue(self.filt_cls.host_passes(host, filter_properties))
 
     def test_exact_core_filter_fails_host_vcpus_not_set(self):
-        spec_obj = objects.RequestSpec(
-            flavor=objects.Flavor(vcpus=1))
+        filter_properties = {'instance_type': {'vcpus': 1}}
         host = self._get_host({})
-        self.assertFalse(self.filt_cls.host_passes(host, spec_obj))
-        self.assertNotIn('vcpu', host.limits)
+        self.assertFalse(self.filt_cls.host_passes(host, filter_properties))
 
     def _get_host(self, host_attributes):
         return fakes.FakeHostState('host1', 'node1', host_attributes)

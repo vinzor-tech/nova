@@ -13,6 +13,7 @@
 #    under the License.
 
 import datetime
+import functools
 import hashlib
 import importlib
 import logging
@@ -30,7 +31,7 @@ from oslo_config import cfg
 from oslo_context import context as common_context
 from oslo_context import fixture as context_fixture
 from oslo_utils import encodeutils
-from oslo_utils import fixture as utils_fixture
+from oslo_utils import timeutils
 from oslo_utils import units
 import six
 
@@ -93,48 +94,6 @@ class GenericUtilsTestCase(test.NoDBTestCase):
         hostname = "<}\x1fh\x10e\x08l\x02l\x05o\x12!{>"
         self.assertEqual("hello", utils.sanitize_hostname(hostname))
 
-    def test_hostname_has_default(self):
-        hostname = u"\u7684hello"
-        defaultname = "Server-1"
-        self.assertEqual("hello", utils.sanitize_hostname(hostname,
-                                                          defaultname))
-
-    def test_hostname_empty_has_default(self):
-        hostname = u"\u7684"
-        defaultname = "Server-1"
-        self.assertEqual(defaultname, utils.sanitize_hostname(hostname,
-                                                              defaultname))
-
-    def test_hostname_empty_has_default_too_long(self):
-        hostname = u"\u7684"
-        defaultname = "a" * 64
-        self.assertEqual("a" * 63, utils.sanitize_hostname(hostname,
-                                                           defaultname))
-
-    def test_hostname_empty_no_default(self):
-        hostname = u"\u7684"
-        self.assertEqual("", utils.sanitize_hostname(hostname))
-
-    def test_hostname_empty_minus_period(self):
-        hostname = "---..."
-        self.assertEqual("", utils.sanitize_hostname(hostname))
-
-    def test_hostname_with_space(self):
-        hostname = " a b c "
-        self.assertEqual("a-b-c", utils.sanitize_hostname(hostname))
-
-    def test_hostname_too_long(self):
-        hostname = "a" * 64
-        self.assertEqual(63, len(utils.sanitize_hostname(hostname)))
-
-    def test_hostname_truncated_no_hyphen(self):
-        hostname = "a" * 62
-        hostname = hostname + '-' + 'a'
-        res = utils.sanitize_hostname(hostname)
-        # we trim to 63 and then trim the trailing dash
-        self.assertEqual(62, len(res))
-        self.assertFalse(res.endswith('-'), 'The hostname ends with a -')
-
     def test_generate_password(self):
         password = utils.generate_password()
         self.assertTrue([c for c in password if c in '0123456789'])
@@ -149,7 +108,7 @@ class GenericUtilsTestCase(test.NoDBTestCase):
                 raise processutils.ProcessExecutionError()
             return 'fakecontents', None
 
-        self.stub_out('nova.utils.execute', fake_execute)
+        self.stubs.Set(utils, 'execute', fake_execute)
         contents = utils.read_file_as_root('good')
         self.assertEqual(contents, 'fakecontents')
         self.assertRaises(exception.FileNotFound,
@@ -159,7 +118,7 @@ class GenericUtilsTestCase(test.NoDBTestCase):
         def fake_execute(*args, **kwargs):
             if args[0] == 'chown':
                 fake_execute.uid = args[1]
-        self.stub_out('nova.utils.execute', fake_execute)
+        self.stubs.Set(utils, 'execute', fake_execute)
 
         with tempfile.NamedTemporaryFile() as f:
             with utils.temporary_chown(f.name, owner_uid=2):
@@ -304,7 +263,7 @@ class TestCachedFile(test.NoDBTestCase):
         self.assertNotIn(filename, utils._FILE_CACHE)
 
 
-class RootwrapDaemonTesetCase(test.NoDBTestCase):
+class RootwrapDaemonTesetCase(test.TestCase):
     @mock.patch('oslo_rootwrap.client.Client')
     def test_get_client(self, mock_client):
         mock_conf = mock.MagicMock()
@@ -594,13 +553,17 @@ class AuditPeriodTest(test.NoDBTestCase):
     def setUp(self):
         super(AuditPeriodTest, self).setUp()
         # a fairly random time to test with
-        self.useFixture(utils_fixture.TimeFixture(
-            datetime.datetime(second=23,
-                              minute=12,
-                              hour=8,
-                              day=5,
-                              month=3,
-                              year=2012)))
+        self.test_time = datetime.datetime(second=23,
+                                           minute=12,
+                                           hour=8,
+                                           day=5,
+                                           month=3,
+                                           year=2012)
+        timeutils.set_time_override(override_time=self.test_time)
+
+    def tearDown(self):
+        timeutils.clear_time_override()
+        super(AuditPeriodTest, self).tearDown()
 
     def test_hour(self):
         begin, end = utils.last_completed_audit_period(unit='hour')
@@ -751,41 +714,34 @@ class AuditPeriodTest(test.NoDBTestCase):
 
 class MkfsTestCase(test.NoDBTestCase):
 
-    @mock.patch('nova.utils.execute')
-    def test_mkfs_ext4(self, mock_execute):
+    def test_mkfs(self):
+        self.mox.StubOutWithMock(utils, 'execute')
+        utils.execute('mkfs', '-t', 'ext4', '-F', '/my/block/dev',
+                      run_as_root=False)
+        utils.execute('mkfs', '-t', 'msdos', '/my/msdos/block/dev',
+                      run_as_root=False)
+        utils.execute('mkswap', '/my/swap/block/dev',
+                      run_as_root=False)
+        self.mox.ReplayAll()
+
         utils.mkfs('ext4', '/my/block/dev')
-        mock_execute.assert_called_once_with('mkfs', '-t', 'ext4', '-F',
-            '/my/block/dev', run_as_root=False)
-
-    @mock.patch('nova.utils.execute')
-    def test_mkfs_msdos(self, mock_execute):
         utils.mkfs('msdos', '/my/msdos/block/dev')
-        mock_execute.assert_called_once_with('mkfs', '-t', 'msdos',
-            '/my/msdos/block/dev', run_as_root=False)
-
-    @mock.patch('nova.utils.execute')
-    def test_mkfs_swap(self, mock_execute):
         utils.mkfs('swap', '/my/swap/block/dev')
-        mock_execute.assert_called_once_with('mkswap', '/my/swap/block/dev',
-            run_as_root=False)
 
-    @mock.patch('nova.utils.execute')
-    def test_mkfs_ext4_withlabel(self, mock_execute):
+    def test_mkfs_with_label(self):
+        self.mox.StubOutWithMock(utils, 'execute')
+        utils.execute('mkfs', '-t', 'ext4', '-F',
+                      '-L', 'ext4-vol', '/my/block/dev', run_as_root=False)
+        utils.execute('mkfs', '-t', 'msdos',
+                      '-n', 'msdos-vol', '/my/msdos/block/dev',
+                      run_as_root=False)
+        utils.execute('mkswap', '-L', 'swap-vol', '/my/swap/block/dev',
+                      run_as_root=False)
+        self.mox.ReplayAll()
+
         utils.mkfs('ext4', '/my/block/dev', 'ext4-vol')
-        mock_execute.assert_called_once_with('mkfs', '-t', 'ext4', '-F',
-            '-L', 'ext4-vol', '/my/block/dev', run_as_root=False)
-
-    @mock.patch('nova.utils.execute')
-    def test_mkfs_msdos_withlabel(self, mock_execute):
         utils.mkfs('msdos', '/my/msdos/block/dev', 'msdos-vol')
-        mock_execute.assert_called_once_with('mkfs', '-t', 'msdos',
-            '-n', 'msdos-vol', '/my/msdos/block/dev', run_as_root=False)
-
-    @mock.patch('nova.utils.execute')
-    def test_mkfs_swap_withlabel(self, mock_execute):
         utils.mkfs('swap', '/my/swap/block/dev', 'swap-vol')
-        mock_execute.assert_called_once_with('mkswap', '-L', 'swap-vol',
-            '/my/swap/block/dev', run_as_root=False)
 
 
 class LastBytesTestCase(test.NoDBTestCase):
@@ -822,26 +778,8 @@ class MetadataToDictTestCase(test.NoDBTestCase):
                  {'key': 'foo2', 'value': 'baz'}]),
                          {'foo1': 'bar', 'foo2': 'baz'})
 
-    def test_metadata_to_dict_with_include_deleted(self):
-        metadata = [{'key': 'foo1', 'value': 'bar', 'deleted': 1442875429,
-                     'other': 'stuff'},
-                    {'key': 'foo2', 'value': 'baz', 'deleted': 0,
-                     'other': 'stuff2'}]
-        self.assertEqual({'foo1': 'bar', 'foo2': 'baz'},
-                         utils.metadata_to_dict(metadata,
-                                                include_deleted=True))
-        self.assertEqual({'foo2': 'baz'},
-                         utils.metadata_to_dict(metadata,
-                                                include_deleted=False))
-        # verify correct default behavior
-        self.assertEqual(utils.metadata_to_dict(metadata),
-                         utils.metadata_to_dict(metadata,
-                                                include_deleted=False))
-
     def test_metadata_to_dict_empty(self):
-        self.assertEqual({}, utils.metadata_to_dict([]))
-        self.assertEqual({}, utils.metadata_to_dict([], include_deleted=True))
-        self.assertEqual({}, utils.metadata_to_dict([], include_deleted=False))
+        self.assertEqual(utils.metadata_to_dict([]), {})
 
     def test_dict_to_metadata(self):
         def sort_key(adict):
@@ -857,6 +795,58 @@ class MetadataToDictTestCase(test.NoDBTestCase):
         self.assertEqual(utils.dict_to_metadata({}), [])
 
 
+class WrappedCodeTestCase(test.NoDBTestCase):
+    """Test the get_wrapped_function utility method."""
+
+    def _wrapper(self, function):
+        @functools.wraps(function)
+        def decorated_function(self, *args, **kwargs):
+            function(self, *args, **kwargs)
+        return decorated_function
+
+    def test_single_wrapped(self):
+        @self._wrapper
+        def wrapped(self, instance, red=None, blue=None):
+            pass
+
+        func = utils.get_wrapped_function(wrapped)
+        func_code = func.__code__
+        self.assertEqual(4, len(func_code.co_varnames))
+        self.assertIn('self', func_code.co_varnames)
+        self.assertIn('instance', func_code.co_varnames)
+        self.assertIn('red', func_code.co_varnames)
+        self.assertIn('blue', func_code.co_varnames)
+
+    def test_double_wrapped(self):
+        @self._wrapper
+        @self._wrapper
+        def wrapped(self, instance, red=None, blue=None):
+            pass
+
+        func = utils.get_wrapped_function(wrapped)
+        func_code = func.__code__
+        self.assertEqual(4, len(func_code.co_varnames))
+        self.assertIn('self', func_code.co_varnames)
+        self.assertIn('instance', func_code.co_varnames)
+        self.assertIn('red', func_code.co_varnames)
+        self.assertIn('blue', func_code.co_varnames)
+
+    def test_triple_wrapped(self):
+        @self._wrapper
+        @self._wrapper
+        @self._wrapper
+        def wrapped(self, instance, red=None, blue=None):
+            pass
+
+        func = utils.get_wrapped_function(wrapped)
+        func_code = func.__code__
+        self.assertEqual(4, len(func_code.co_varnames))
+        self.assertIn('self', func_code.co_varnames)
+        self.assertIn('instance', func_code.co_varnames)
+        self.assertIn('red', func_code.co_varnames)
+        self.assertIn('blue', func_code.co_varnames)
+
+
 class ExpectedArgsTestCase(test.NoDBTestCase):
     def test_passes(self):
         @utils.expects_func_args('foo', 'baz')
@@ -866,9 +856,6 @@ class ExpectedArgsTestCase(test.NoDBTestCase):
         @dec
         def func(foo, bar, baz="lol"):
             pass
-
-        # Call to ensure nothing errors
-        func(None, None)
 
     def test_raises(self):
         @utils.expects_func_args('foo', 'baz')
@@ -888,9 +875,6 @@ class ExpectedArgsTestCase(test.NoDBTestCase):
         @dec
         def func(bar, *args, **kwargs):
             pass
-
-        # Call to ensure nothing errors
-        func(None)
 
     def test_more_layers(self):
         @utils.expects_func_args('foo', 'baz')
@@ -982,7 +966,11 @@ class ValidateNeutronConfiguration(test.NoDBTestCase):
         self.assertFalse(utils.is_neutron())
 
     def test_neutron(self):
-        self.flags(use_neutron=True)
+        self.flags(network_api_class='nova.network.neutronv2.api.API')
+        self.assertTrue(utils.is_neutron())
+
+    def test_quantum(self):
+        self.flags(network_api_class='nova.network.quantumv2.api.API')
         self.assertTrue(utils.is_neutron())
 
 
@@ -1171,6 +1159,29 @@ class GetImageMetadataFromVolumeTestCase(test.NoDBTestCase):
         self.assertNotEqual({}, properties)
 
 
+class VersionTestCase(test.NoDBTestCase):
+    def test_convert_version_to_int(self):
+        self.assertEqual(utils.convert_version_to_int('6.2.0'), 6002000)
+        self.assertEqual(utils.convert_version_to_int((6, 4, 3)), 6004003)
+        self.assertEqual(utils.convert_version_to_int((5, )), 5)
+        self.assertRaises(exception.NovaException,
+                          utils.convert_version_to_int, '5a.6b')
+
+    def test_convert_version_to_string(self):
+        self.assertEqual(utils.convert_version_to_str(6007000), '6.7.0')
+        self.assertEqual(utils.convert_version_to_str(4), '4')
+
+    def test_convert_version_to_tuple(self):
+        self.assertEqual(utils.convert_version_to_tuple('6.7.0'), (6, 7, 0))
+
+
+class ConstantTimeCompareTestCase(test.NoDBTestCase):
+    def test_constant_time_compare(self):
+        self.assertTrue(utils.constant_time_compare("abcd1234", "abcd1234"))
+        self.assertFalse(utils.constant_time_compare("abcd1234", "a"))
+        self.assertFalse(utils.constant_time_compare("abcd1234", "ABCD234"))
+
+
 class ResourceFilterTestCase(test.NoDBTestCase):
     def _assert_filtering(self, res_list, filts, expected_tags):
         actual_tags = utils.filter_and_format_resource_metadata('instance',
@@ -1327,24 +1338,3 @@ class SpawnTestCase(SpawnNTestCase):
     def setUp(self):
         super(SpawnTestCase, self).setUp()
         self.spawn_name = 'spawn'
-
-
-class UT8TestCase(test.NoDBTestCase):
-    def test_none_value(self):
-        self.assertIsInstance(utils.utf8(None), type(None))
-
-    def test_bytes_value(self):
-        some_value = b"fake data"
-        return_value = utils.utf8(some_value)
-        # check that type of returned value doesn't changed
-        self.assertIsInstance(return_value, type(some_value))
-        self.assertEqual(some_value, return_value)
-
-    def test_not_text_type(self):
-        return_value = utils.utf8(1)
-        self.assertEqual(b"1", return_value)
-        self.assertIsInstance(return_value, six.binary_type)
-
-    def test_text_type_with_encoding(self):
-        some_value = 'test\u2026config'
-        self.assertEqual(some_value, utils.utf8(some_value).decode("utf-8"))

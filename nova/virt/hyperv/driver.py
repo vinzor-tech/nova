@@ -17,20 +17,16 @@
 A Hyper-V Nova Compute driver.
 """
 
-import functools
 import platform
-import sys
 
-from os_win import exceptions as os_win_exc
-from os_win import utilsfactory
 from oslo_log import log as logging
-import six
 
-from nova import exception
-from nova.i18n import _, _LE
+from nova.i18n import _, _LW
+from nova import objects
 from nova.virt import driver
 from nova.virt.hyperv import eventhandler
 from nova.virt.hyperv import hostops
+from nova.virt.hyperv import hostutils
 from nova.virt.hyperv import livemigrationops
 from nova.virt.hyperv import migrationops
 from nova.virt.hyperv import rdpconsoleops
@@ -41,55 +37,6 @@ from nova.virt.hyperv import volumeops
 LOG = logging.getLogger(__name__)
 
 
-def convert_exceptions(function, exception_map):
-    expected_exceptions = tuple(exception_map.keys())
-
-    @functools.wraps(function)
-    def wrapper(*args, **kwargs):
-        try:
-            return function(*args, **kwargs)
-        except expected_exceptions as ex:
-            raised_exception = exception_map.get(type(ex))
-            if not raised_exception:
-                # exception might be a subclass of an expected exception.
-                for expected in expected_exceptions:
-                    if isinstance(ex, expected):
-                        raised_exception = exception_map[expected]
-                        break
-
-            exc_info = sys.exc_info()
-            # NOTE(claudiub): Python 3 raises the exception object given as
-            # the second argument in six.reraise.
-            # The original message will be maintained by passing the original
-            # exception.
-            exc = raised_exception(six.text_type(exc_info[1]))
-            six.reraise(raised_exception, exc, exc_info[2])
-    return wrapper
-
-
-def decorate_all_methods(decorator, *args, **kwargs):
-    def decorate(cls):
-        for attr in cls.__dict__:
-            class_member = getattr(cls, attr)
-            if callable(class_member):
-                setattr(cls, attr, decorator(class_member, *args, **kwargs))
-        return cls
-
-    return decorate
-
-
-exception_conversion_map = {
-    # expected_exception: converted_exception
-    os_win_exc.OSWinException: exception.NovaException,
-    os_win_exc.HyperVVMNotFoundException: exception.InstanceNotFound,
-}
-
-# NOTE(claudiub): the purpose of the decorator below is to prevent any
-# os_win exceptions (subclasses of OSWinException) to leak outside of the
-# HyperVDriver.
-
-
-@decorate_all_methods(convert_exceptions, exception_conversion_map)
 class HyperVDriver(driver.ComputeDriver):
     capabilities = {
         "has_imagecache": False,
@@ -98,10 +45,6 @@ class HyperVDriver(driver.ComputeDriver):
     }
 
     def __init__(self, virtapi):
-        # check if the current version of Windows is supported before any
-        # further driver initialisation.
-        self._check_minimum_windows_version()
-
         super(HyperVDriver, self).__init__(virtapi)
 
         self._hostops = hostops.HostOps()
@@ -112,16 +55,16 @@ class HyperVDriver(driver.ComputeDriver):
         self._migrationops = migrationops.MigrationOps()
         self._rdpconsoleops = rdpconsoleops.RDPConsoleOps()
 
-    def _check_minimum_windows_version(self):
-        if not utilsfactory.get_hostutils().check_min_windows_version(6, 2):
-            # the version is of Windows is older than Windows Server 2012 R2.
-            # Log an error, letting users know that this version is not
-            # supported any longer.
-            LOG.error(_LE('You are running nova-compute on an unsupported '
-                          'version of Windows (older than Windows / Hyper-V '
-                          'Server 2012). The support for this version of '
-                          'Windows has been removed in Mitaka.'))
-            raise exception.HypervisorTooOld(version='6.2')
+        # check if the current version is older than kernel version 6.2
+        # (Windows Server 2012)
+        if not hostutils.HostUtils().check_min_windows_version(6, 2):
+            # the version is Windows Server 2008 R2. Log a warning, letting
+            # users know that this version is deprecated in Liberty.
+            LOG.warning(
+                _LW('You are running nova-compute on Windows / Hyper-V Server '
+                    '2008 R2. This version of Windows is deprecated in the '
+                    'current version of OpenStack and the support for it will '
+                    'be removed in the next cycle.'))
 
     def init_host(self, host):
         self._vmops.restart_vm_log_writers()
@@ -138,6 +81,7 @@ class HyperVDriver(driver.ComputeDriver):
 
     def spawn(self, context, instance, image_meta, injected_files,
               admin_password, network_info=None, block_device_info=None):
+        image_meta = objects.ImageMeta.from_dict(image_meta)
         self._vmops.spawn(context, instance, image_meta, injected_files,
                           admin_password, network_info, block_device_info)
 
@@ -306,6 +250,7 @@ class HyperVDriver(driver.ComputeDriver):
     def finish_migration(self, context, migration, instance, disk_info,
                          network_info, image_meta, resize_instance,
                          block_device_info=None, power_on=True):
+        image_meta = objects.ImageMeta.from_dict(image_meta)
         self._migrationops.finish_migration(context, migration, instance,
                                             disk_info, network_info,
                                             image_meta, resize_instance,
@@ -322,9 +267,3 @@ class HyperVDriver(driver.ComputeDriver):
 
     def get_console_output(self, context, instance):
         return self._vmops.get_console_output(instance)
-
-    def attach_interface(self, instance, image_meta, vif):
-        return self._vmops.attach_interface(instance, vif)
-
-    def detach_interface(self, instance, vif):
-        return self._vmops.detach_interface(instance, vif)

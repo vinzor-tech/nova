@@ -13,11 +13,14 @@
 #    under the License.
 
 import mock
+from oslo_config import cfg
 from oslo_serialization import jsonutils
 
 from nova.api.openstack import api_version_request as api_version
 from nova import test
 from nova.tests.unit.api.openstack import fakes
+
+CONF = cfg.CONF
 
 
 class MicroversionsTest(test.NoDBTestCase):
@@ -179,7 +182,7 @@ class MicroversionsTest(test.NoDBTestCase):
         req.method = 'POST'
         req.headers = {self.header_name: '2.2'}
         req.environ['CONTENT_TYPE'] = "application/json"
-        req.body = jsonutils.dump_as_bytes({'dummy': {'val': 'foo'}})
+        req.body = jsonutils.dumps({'dummy': {'val': 'foo'}})
 
         res = req.get_response(app)
         self.assertEqual(200, res.status_int)
@@ -199,7 +202,7 @@ class MicroversionsTest(test.NoDBTestCase):
         req.method = 'POST'
         req.headers = {self.header_name: '2.2'}
         req.environ['CONTENT_TYPE'] = "application/json"
-        req.body = jsonutils.dump_as_bytes({'dummy': {'invalid_param': 'foo'}})
+        req.body = jsonutils.dumps({'dummy': {'invalid_param': 'foo'}})
 
         res = req.get_response(app)
         self.assertEqual(400, res.status_int)
@@ -218,7 +221,7 @@ class MicroversionsTest(test.NoDBTestCase):
         req = fakes.HTTPRequest.blank('/v2/fake/microversions3/1')
         req.method = 'PUT'
         req.headers = {self.header_name: '2.2'}
-        req.body = jsonutils.dump_as_bytes({'dummy': {'inv_val': 'foo'}})
+        req.body = jsonutils.dumps({'dummy': {'inv_val': 'foo'}})
         req.environ['CONTENT_TYPE'] = "application/json"
 
         res = req.get_response(app)
@@ -239,7 +242,7 @@ class MicroversionsTest(test.NoDBTestCase):
         req.headers = {self.header_name: '2.10'}
         req.environ['CONTENT_TYPE'] = "application/json"
         req.method = 'PUT'
-        req.body = jsonutils.dump_as_bytes({'dummy': {'val2': 'foo'}})
+        req.body = jsonutils.dumps({'dummy': {'val2': 'foo'}})
 
         res = req.get_response(app)
         self.assertEqual(200, res.status_int)
@@ -308,7 +311,7 @@ class MicroversionsTest(test.NoDBTestCase):
         if req_header:
             req.headers = {self.header_name: req_header}
         req.method = 'POST'
-        req.body = jsonutils.dump_as_bytes({'foo': None})
+        req.body = jsonutils.dumps({'foo': None})
 
         res = self._test_microversions(app, req, ret_code,
                                        ret_header=ret_header)

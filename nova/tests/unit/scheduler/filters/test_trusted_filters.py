@@ -13,7 +13,6 @@
 import mock
 from oslo_config import cfg
 from oslo_serialization import jsonutils
-from oslo_utils import fixture as utils_fixture
 from oslo_utils import timeutils
 import requests
 
@@ -21,7 +20,6 @@ from nova import objects
 from nova.scheduler.filters import trusted_filter
 from nova import test
 from nova.tests.unit.scheduler import fakes
-from nova import utils
 
 CONF = cfg.CONF
 
@@ -106,93 +104,89 @@ class TestTrustedFilter(test.NoDBTestCase):
             self.filt_cls = trusted_filter.TrustedFilter()
 
     def test_trusted_filter_default_passes(self, req_mock):
-        spec_obj = objects.RequestSpec(
-            context=mock.sentinel.ctx,
-            flavor=objects.Flavor(memory_mb=1024))
+        filter_properties = {'context': mock.sentinel.ctx,
+                             'instance_type': {'memory_mb': 1024}}
         host = fakes.FakeHostState('host1', 'node1', {})
-        self.assertTrue(self.filt_cls.host_passes(host, spec_obj))
+        self.assertTrue(self.filt_cls.host_passes(host, filter_properties))
         self.assertFalse(req_mock.called)
 
     def test_trusted_filter_trusted_and_trusted_passes(self, req_mock):
         oat_data = {"hosts": [{"host_name": "node1",
                                    "trust_lvl": "trusted",
-                                   "vtime": utils.isotime()}]}
+                                   "vtime": timeutils.isotime()}]}
         req_mock.return_value = requests.codes.OK, oat_data
 
         extra_specs = {'trust:trusted_host': 'trusted'}
-        spec_obj = objects.RequestSpec(
-            context=mock.sentinel.ctx,
-            flavor=objects.Flavor(memory_mb=1024,
-                                  extra_specs=extra_specs))
+        filter_properties = {'context': mock.sentinel.ctx,
+                             'instance_type': {'memory_mb': 1024,
+                                               'extra_specs': extra_specs}}
         host = fakes.FakeHostState('host1', 'node1', {})
-        self.assertTrue(self.filt_cls.host_passes(host, spec_obj))
+        self.assertTrue(self.filt_cls.host_passes(host, filter_properties))
         req_mock.assert_called_once_with("POST", "PollHosts", ["node1"])
 
     def test_trusted_filter_trusted_and_untrusted_fails(self, req_mock):
         oat_data = {"hosts": [{"host_name": "node1",
                                     "trust_lvl": "untrusted",
-                                    "vtime": utils.isotime()}]}
+                                    "vtime": timeutils.isotime()}]}
         req_mock.return_value = requests.codes.OK, oat_data
         extra_specs = {'trust:trusted_host': 'trusted'}
-        spec_obj = objects.RequestSpec(
-            context=mock.sentinel.ctx,
-            flavor=objects.Flavor(memory_mb=1024,
-                                  extra_specs=extra_specs))
+        filter_properties = {'context': mock.sentinel.ctx,
+                             'instance_type': {'memory_mb': 1024,
+                                               'extra_specs': extra_specs}}
         host = fakes.FakeHostState('host1', 'node1', {})
-        self.assertFalse(self.filt_cls.host_passes(host, spec_obj))
+        self.assertFalse(self.filt_cls.host_passes(host, filter_properties))
 
     def test_trusted_filter_untrusted_and_trusted_fails(self, req_mock):
         oat_data = {"hosts": [{"host_name": "node",
                                     "trust_lvl": "trusted",
-                                    "vtime": utils.isotime()}]}
+                                    "vtime": timeutils.isotime()}]}
         req_mock.return_value = requests.codes.OK, oat_data
         extra_specs = {'trust:trusted_host': 'untrusted'}
-        spec_obj = objects.RequestSpec(
-            context=mock.sentinel.ctx,
-            flavor=objects.Flavor(memory_mb=1024,
-                                  extra_specs=extra_specs))
+        filter_properties = {'context': mock.sentinel.ctx,
+                             'instance_type': {'memory_mb': 1024,
+                                               'extra_specs': extra_specs}}
         host = fakes.FakeHostState('host1', 'node1', {})
-        self.assertFalse(self.filt_cls.host_passes(host, spec_obj))
+        self.assertFalse(self.filt_cls.host_passes(host, filter_properties))
 
     def test_trusted_filter_untrusted_and_untrusted_passes(self, req_mock):
         oat_data = {"hosts": [{"host_name": "node1",
                                     "trust_lvl": "untrusted",
-                                    "vtime": utils.isotime()}]}
+                                    "vtime": timeutils.isotime()}]}
         req_mock.return_value = requests.codes.OK, oat_data
         extra_specs = {'trust:trusted_host': 'untrusted'}
-        spec_obj = objects.RequestSpec(
-            context=mock.sentinel.ctx,
-            flavor=objects.Flavor(memory_mb=1024,
-                                  extra_specs=extra_specs))
+        filter_properties = {'context': mock.sentinel.ctx,
+                             'instance_type': {'memory_mb': 1024,
+                                               'extra_specs': extra_specs}}
         host = fakes.FakeHostState('host1', 'node1', {})
-        self.assertTrue(self.filt_cls.host_passes(host, spec_obj))
+        self.assertTrue(self.filt_cls.host_passes(host, filter_properties))
 
     def test_trusted_filter_update_cache(self, req_mock):
         oat_data = {"hosts": [{"host_name": "node1",
                                     "trust_lvl": "untrusted",
-                                    "vtime": utils.isotime()}]}
+                                    "vtime": timeutils.isotime()}]}
 
         req_mock.return_value = requests.codes.OK, oat_data
         extra_specs = {'trust:trusted_host': 'untrusted'}
-        spec_obj = objects.RequestSpec(
-            context=mock.sentinel.ctx,
-            flavor=objects.Flavor(memory_mb=1024,
-                                  extra_specs=extra_specs))
+        filter_properties = {'context': mock.sentinel.ctx,
+                             'instance_type': {'memory_mb': 1024,
+                                               'extra_specs': extra_specs}}
         host = fakes.FakeHostState('host1', 'node1', {})
 
-        self.filt_cls.host_passes(host, spec_obj)  # Fill the caches
+        self.filt_cls.host_passes(host, filter_properties)  # Fill the caches
 
         req_mock.reset_mock()
-        self.filt_cls.host_passes(host, spec_obj)
+        self.filt_cls.host_passes(host, filter_properties)
         self.assertFalse(req_mock.called)
 
         req_mock.reset_mock()
 
-        time_fixture = self.useFixture(utils_fixture.TimeFixture())
-        time_fixture.advance_time_seconds(
+        timeutils.set_time_override(timeutils.utcnow())
+        timeutils.advance_time_seconds(
             CONF.trusted_computing.attestation_auth_timeout + 80)
-        self.filt_cls.host_passes(host, spec_obj)
+        self.filt_cls.host_passes(host, filter_properties)
         self.assertTrue(req_mock.called)
+
+        timeutils.clear_time_override()
 
     def test_trusted_filter_update_cache_timezone(self, req_mock):
         oat_data = {"hosts": [{"host_name": "node1",
@@ -200,27 +194,28 @@ class TestTrustedFilter(test.NoDBTestCase):
                                     "vtime": "2012-09-09T05:10:40-04:00"}]}
         req_mock.return_value = requests.codes.OK, oat_data
         extra_specs = {'trust:trusted_host': 'untrusted'}
-        spec_obj = objects.RequestSpec(
-            context=mock.sentinel.ctx,
-            flavor=objects.Flavor(memory_mb=1024,
-                                  extra_specs=extra_specs))
+        filter_properties = {'context': mock.sentinel.ctx,
+                             'instance_type': {'memory_mb': 1024,
+                                               'extra_specs': extra_specs}}
         host = fakes.FakeHostState('host1', 'node1', {})
 
-        time_fixture = self.useFixture(utils_fixture.TimeFixture(
+        timeutils.set_time_override(
             timeutils.normalize_time(
-                timeutils.parse_isotime("2012-09-09T09:10:40Z"))))
+                timeutils.parse_isotime("2012-09-09T09:10:40Z")))
 
-        self.filt_cls.host_passes(host, spec_obj)  # Fill the caches
+        self.filt_cls.host_passes(host, filter_properties)  # Fill the caches
 
         req_mock.reset_mock()
-        self.filt_cls.host_passes(host, spec_obj)
+        self.filt_cls.host_passes(host, filter_properties)
         self.assertFalse(req_mock.called)
 
         req_mock.reset_mock()
-        time_fixture.advance_time_seconds(
+        timeutils.advance_time_seconds(
             CONF.trusted_computing.attestation_auth_timeout - 10)
-        self.filt_cls.host_passes(host, spec_obj)
+        self.filt_cls.host_passes(host, filter_properties)
         self.assertFalse(req_mock.called)
+
+        timeutils.clear_time_override()
 
     def test_trusted_filter_combine_hosts(self, req_mock):
         fake_compute_nodes = [
@@ -235,13 +230,12 @@ class TestTrustedFilter(test.NoDBTestCase):
                                     "vtime": "2012-09-09T05:10:40-04:00"}]}
         req_mock.return_value = requests.codes.OK, oat_data
         extra_specs = {'trust:trusted_host': 'trusted'}
-        spec_obj = objects.RequestSpec(
-            context=mock.sentinel.ctx,
-            flavor=objects.Flavor(memory_mb=1024,
-                                  extra_specs=extra_specs))
+        filter_properties = {'context': mock.sentinel.ctx,
+                             'instance_type': {'memory_mb': 1024,
+                                               'extra_specs': extra_specs}}
         host = fakes.FakeHostState('host1', 'node1', {})
 
-        self.filt_cls.host_passes(host, spec_obj)  # Fill the caches
+        self.filt_cls.host_passes(host, filter_properties)  # Fill the caches
         self.assertTrue(req_mock.called)
         self.assertEqual(1, req_mock.call_count)
         call_args = list(req_mock.call_args[0])
@@ -253,25 +247,22 @@ class TestTrustedFilter(test.NoDBTestCase):
             req_mock):
         oat_data = {"hosts": [{"host_name": "host1",
                                     "trust_lvl": "trusted",
-                                    "vtime": timeutils.utcnow().strftime(
-                                        "%c")},
+                                    "vtime": timeutils.strtime(fmt="%c")},
                                    {"host_name": "host2",
                                     "trust_lvl": "trusted",
-                                    "vtime": timeutils.utcnow().strftime(
-                                        "%D")},
+                                    "vtime": timeutils.strtime(fmt="%D")},
                                     # This is just a broken date to ensure that
                                     # we're not just arbitrarily accepting any
                                     # date format.
                         ]}
         req_mock.return_value = requests.codes.OK, oat_data
         extra_specs = {'trust:trusted_host': 'trusted'}
-        spec_obj = objects.RequestSpec(
-            context=mock.sentinel.ctx,
-            flavor=objects.Flavor(memory_mb=1024,
-                                  extra_specs=extra_specs))
+        filter_properties = {'context': mock.sentinel.ctx,
+                             'instance_type': {'memory_mb': 1024,
+                                               'extra_specs': extra_specs}}
         host = fakes.FakeHostState('host1', 'host1', {})
         bad_host = fakes.FakeHostState('host2', 'host2', {})
 
-        self.assertTrue(self.filt_cls.host_passes(host, spec_obj))
+        self.assertTrue(self.filt_cls.host_passes(host, filter_properties))
         self.assertFalse(self.filt_cls.host_passes(bad_host,
-                                                   spec_obj))
+                                                   filter_properties))

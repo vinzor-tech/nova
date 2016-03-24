@@ -12,8 +12,6 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-import copy
-
 from nova.api.validation import parameter_types
 
 
@@ -39,9 +37,3 @@ create_backup = {
     'required': ['createBackup'],
     'additionalProperties': False,
 }
-
-
-create_backup_v20 = copy.deepcopy(create_backup)
-create_backup_v20['properties'][
-    'createBackup']['properties']['name'] = (parameter_types.
-        name_with_leading_trailing_spaces)

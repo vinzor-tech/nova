@@ -16,7 +16,6 @@ import functools
 import itertools
 import operator
 
-from oslo_config import cfg
 from oslo_log import log as logging
 from oslo_serialization import jsonutils
 from oslo_utils import excutils
@@ -27,10 +26,9 @@ from nova import exception
 from nova.i18n import _LE
 from nova.i18n import _LI
 from nova.i18n import _LW
+from nova import objects
+from nova.objects import base as obj_base
 from nova.volume import encryptors
-
-CONF = cfg.CONF
-CONF.import_opt('cross_az_attach', 'nova.volume.cinder', group='cinder')
 
 LOG = logging.getLogger(__name__)
 
@@ -56,34 +54,6 @@ def update_db(method):
             obj.save()
         return ret_val
     return wrapped
-
-
-def _get_volume_create_az_value(instance):
-    """Determine az to use when creating a volume
-
-    Uses the cinder.cross_az_attach config option to determine the availability
-    zone value to use when creating a volume.
-
-    :param nova.objects.Instance instance: The instance for which the volume
-        will be created and attached.
-    :returns: The availability_zone value to pass to volume_api.create
-    """
-    # If we're allowed to attach a volume in any AZ to an instance in any AZ,
-    # then we don't care what AZ the volume is in so don't specify anything.
-    if CONF.cinder.cross_az_attach:
-        return None
-    # Else the volume has to be in the same AZ as the instance otherwise we
-    # fail. If the AZ is not in Cinder the volume create will fail. But on the
-    # other hand if the volume AZ and instance AZ don't match and
-    # cross_az_attach is False, then volume_api.check_attach will fail too, so
-    # we can't really win. :)
-    # TODO(mriedem): It would be better from a UX perspective if we could do
-    # some validation in the API layer such that if we know we're going to
-    # specify the AZ when creating the volume and that AZ is not in Cinder, we
-    # could fail the boot from volume request early with a 400 rather than
-    # fail to build the instance on the compute node which results in a
-    # NoValidHost error.
-    return instance.availability_zone
 
 
 class DriverBlockDevice(dict):
@@ -119,7 +89,14 @@ class DriverBlockDevice(dict):
                        'device_type': None}
 
     def __init__(self, bdm):
-        self.__dict__['_bdm_obj'] = bdm
+        # TODO(ndipanov): Remove this check when we have all the rpc methods
+        # use objects for block devices.
+        if isinstance(bdm, obj_base.NovaObject):
+            self.__dict__['_bdm_obj'] = bdm
+        else:
+            self.__dict__['_bdm_obj'] = objects.BlockDeviceMapping()
+            self._bdm_obj.update(block_device.BlockDeviceDict(bdm))
+            self._bdm_obj.obj_reset_changes()
 
         if self._bdm_obj.no_device:
             raise _NotTransformable()
@@ -299,31 +276,8 @@ class DriverVolumeBlockDevice(DriverBlockDevice):
             # after that we can detach and connection_info is required for
             # detach.
             self.save()
-            try:
-                volume_api.attach(context, volume_id, instance.uuid,
-                                  self['mount_device'], mode=mode)
-            except Exception:
-                with excutils.save_and_reraise_exception():
-                    if do_driver_attach:
-                        try:
-                            virt_driver.detach_volume(connection_info,
-                                                      instance,
-                                                      self['mount_device'],
-                                                      encryption=encryption)
-                        except Exception:
-                            LOG.warning(_LW("Driver failed to detach volume "
-                                         "%(volume_id)s at %(mount_point)s."),
-                                     {'volume_id': volume_id,
-                                      'mount_point': self['mount_device']},
-                                     exc_info=True, context=context,
-                                     instance=instance)
-                    volume_api.terminate_connection(context, volume_id,
-                                                    connector)
-
-                    # Cinder-volume might have completed volume attach. So
-                    # we should detach the volume. If the attach did not
-                    # happen, the detach request will be ignored.
-                    volume_api.detach(context, volume_id)
+            volume_api.attach(context, volume_id, instance.uuid,
+                              self['mount_device'], mode=mode)
 
     @update_db
     def refresh_connection_info(self, context, instance,
@@ -362,10 +316,9 @@ class DriverVolumeBlockDevice(DriverBlockDevice):
                     try:
                         volume_api.delete(context, volume_id)
                     except Exception as exc:
-                        LOG.warning(
-                            _LW('Failed to delete volume: %(volume_id)s '
-                                'due to %(exc)s'),
-                            {'volume_id': volume_id, 'exc': exc})
+                        LOG.warn(_LW('Failed to delete volume: %(volume_id)s '
+                                     'due to %(exc)s'),
+                                 {'volume_id': volume_id, 'exc': exc})
 
 
 class DriverSnapshotBlockDevice(DriverVolumeBlockDevice):
@@ -377,7 +330,7 @@ class DriverSnapshotBlockDevice(DriverVolumeBlockDevice):
                virt_driver, wait_func=None, do_check_attach=True):
 
         if not self.volume_id:
-            av_zone = _get_volume_create_az_value(instance)
+            av_zone = instance.availability_zone
             snapshot = volume_api.get_snapshot(context,
                                                self.snapshot_id)
             vol = volume_api.create(context, self.volume_size, '', '',
@@ -401,7 +354,7 @@ class DriverImageBlockDevice(DriverVolumeBlockDevice):
     def attach(self, context, instance, volume_api,
                virt_driver, wait_func=None, do_check_attach=True):
         if not self.volume_id:
-            av_zone = _get_volume_create_az_value(instance)
+            av_zone = instance.availability_zone
             vol = volume_api.create(context, self.volume_size,
                                     '', '', image_id=self.image_id,
                                     availability_zone=av_zone)
@@ -424,7 +377,7 @@ class DriverBlankBlockDevice(DriverVolumeBlockDevice):
                virt_driver, wait_func=None, do_check_attach=True):
         if not self.volume_id:
             vol_name = instance.uuid + '-blank-vol'
-            av_zone = _get_volume_create_az_value(instance)
+            av_zone = instance.availability_zone
             vol = volume_api.create(context, self.volume_size, vol_name, '',
                                     availability_zone=av_zone)
             if wait_func:
@@ -491,29 +444,10 @@ def attach_block_devices(block_device_mapping, *attach_args, **attach_kwargs):
     def _log_and_attach(bdm):
         context = attach_args[0]
         instance = attach_args[1]
-        if bdm.get('volume_id'):
-            LOG.info(_LI('Booting with volume %(volume_id)s at '
-                         '%(mountpoint)s'),
-                     {'volume_id': bdm.volume_id,
-                      'mountpoint': bdm['mount_device']},
-                     context=context, instance=instance)
-        elif bdm.get('snapshot_id'):
-            LOG.info(_LI('Booting with volume snapshot %(snapshot_id)s at '
-                         '%(mountpoint)s'),
-                     {'snapshot_id': bdm.snapshot_id,
-                      'mountpoint': bdm['mount_device']},
-                     context=context, instance=instance)
-        elif bdm.get('image_id'):
-            LOG.info(_LI('Booting with volume-backed-image %(image_id)s at '
-                         '%(mountpoint)s'),
-                     {'image_id': bdm.image_id,
-                      'mountpoint': bdm['mount_device']},
-                     context=context, instance=instance)
-        else:
-            LOG.info(_LI('Booting with blank volume at %(mountpoint)s'),
-                     {'mountpoint': bdm['mount_device']},
-                     context=context, instance=instance)
-
+        LOG.info(_LI('Booting with volume %(volume_id)s at %(mountpoint)s'),
+                  {'volume_id': bdm.volume_id,
+                   'mountpoint': bdm['mount_device']},
+                  context=context, instance=instance)
         bdm.attach(*attach_args, **attach_kwargs)
 
     map(_log_and_attach, block_device_mapping)

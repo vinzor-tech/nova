@@ -16,24 +16,35 @@
 """Availability zone helper functions."""
 
 import collections
-import nova.conf
 
-from nova import cache_utils
+from oslo_config import cfg
+
 from nova import objects
+from nova.openstack.common import memorycache
 
 # NOTE(vish): azs don't change that often, so cache them for an hour to
 #             avoid hitting the db multiple times on every request.
 AZ_CACHE_SECONDS = 60 * 60
 MC = None
 
-CONF = nova.conf.CONF
+availability_zone_opts = [
+    cfg.StrOpt('internal_service_availability_zone',
+               default='internal',
+               help='The availability_zone to show internal services under'),
+    cfg.StrOpt('default_availability_zone',
+               default='nova',
+               help='Default compute node availability_zone'),
+    ]
+
+CONF = cfg.CONF
+CONF.register_opts(availability_zone_opts)
 
 
 def _get_cache():
     global MC
 
     if MC is None:
-        MC = cache_utils.get_client(expiration_time=AZ_CACHE_SECONDS)
+        MC = memorycache.get_client()
 
     return MC
 
@@ -102,7 +113,7 @@ def update_host_availability_zone_cache(context, host, availability_zone=None):
     cache = _get_cache()
     cache_key = _make_cache_key(host)
     cache.delete(cache_key)
-    cache.set(cache_key, availability_zone)
+    cache.set(cache_key, availability_zone, AZ_CACHE_SECONDS)
 
 
 def get_availability_zones(context, get_only_available=False,
@@ -184,5 +195,5 @@ def get_instance_availability_zone(context, instance):
     if not az:
         elevated = context.elevated()
         az = get_host_availability_zone(elevated, host)
-        cache.set(cache_key, az)
+        cache.set(cache_key, az, AZ_CACHE_SECONDS)
     return az

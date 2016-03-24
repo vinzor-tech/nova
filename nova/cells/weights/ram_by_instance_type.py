@@ -16,12 +16,19 @@
 """
 Weigh cells by memory needed in a way that spreads instances.
 """
+from oslo_config import cfg
 
 from nova.cells import weights
-import nova.conf
 
+ram_weigher_opts = [
+        cfg.FloatOpt('ram_weight_multiplier',
+                     default=10.0,
+                     help='Multiplier used for weighing ram.  Negative '
+                          'numbers mean to stack vs spread.'),
+]
 
-CONF = nova.conf.CONF
+CONF = cfg.CONF
+CONF.register_opts(ram_weigher_opts, group='cells')
 
 
 class RamByInstanceTypeWeigher(weights.BaseCellWeigher):

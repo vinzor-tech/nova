@@ -23,16 +23,22 @@ dynamic configuration.
 import datetime
 import os
 
+from oslo_config import cfg
 from oslo_log import log as logging
 from oslo_serialization import jsonutils
 from oslo_utils import excutils
 from oslo_utils import timeutils
 
-import nova.conf
 from nova.i18n import _LE
 
 
-CONF = nova.conf.CONF
+scheduler_json_config_location_opt = cfg.StrOpt(
+        'scheduler_json_config_location',
+        default='',
+        help='Absolute path to scheduler configuration JSON file.')
+
+CONF = cfg.CONF
+CONF.register_opt(scheduler_json_config_location_opt)
 
 LOG = logging.getLogger(__name__)
 

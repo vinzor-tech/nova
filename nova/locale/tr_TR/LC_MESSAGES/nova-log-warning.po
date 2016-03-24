@@ -4,22 +4,22 @@
 #
 # Translators:
 # OpenStack Infra <zanata@openstack.org>, 2015. #zanata
-# Andreas Jaeger <jaegerandi@gmail.com>, 2016. #zanata
 msgid ""
 msgstr ""
-"Project-Id-Version: nova 13.0.0.0b4.dev129\n"
+"Project-Id-Version: nova 12.0.0.0b4.dev203\n"
 "Report-Msgid-Bugs-To: EMAIL@ADDRESS\n"
-"POT-Creation-Date: 2016-03-10 03:26+0000\n"
+"POT-Creation-Date: 2015-09-16 19:02+0000\n"
+"PO-Revision-Date: 2015-09-08 05:38+0000\n"
+"Last-Translator: openstackjenkins <jenkins@openstack.org>\n"
+"Language-Team: Turkish (Turkey) (http://www.transifex.com/openstack/nova/"
+"language/tr_TR/)\n"
+"Language: tr-TR\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
-"PO-Revision-Date: 2016-01-20 01:48+0000\n"
-"Last-Translator: Andreas Jaeger <jaegerandi@gmail.com>\n"
-"Language: tr-TR\n"
-"Plural-Forms: nplurals=1; plural=0;\n"
 "Generated-By: Babel 2.0\n"
-"X-Generator: Zanata 3.7.3\n"
-"Language-Team: Turkish (Turkey)\n"
+"Plural-Forms: nplurals=1; plural=0;\n"
+"X-Generator: Zanata 3.7.1\n"
 
 #, python-format
 msgid ""
@@ -35,9 +35,21 @@ msgid "%(host_state)s has not been heard from in a while"
 msgstr "%(host_state)s'den yakın zamanda haber alınamadı"
 
 #, python-format
+msgid "%(logprefix)sfailed to load json"
+msgstr "%(logprefix)s json yükleyemedi"
+
+#, python-format
+msgid "%(logprefix)sfile does not exist"
+msgstr "%(logprefix)s dosyası mevcut değil."
+
+#, python-format
+msgid "%(logprefix)unexpected IOError when reading"
+msgstr "Okumada %(logprefix)unexpected IOError"
+
+#, python-format
 msgid "%(overs)s quota exceeded for %(pid)s, tried to resize instance."
 msgstr ""
-"%(pid)s için %(overs)s kota aşıldı, sunucu yeniden boyutlandırılmaya "
+"%(pid)s için %(over)s kota aşıldı, sunucu yeniden boyutlandırılmaya "
 "çalışıldı."
 
 #, python-format
@@ -56,6 +68,14 @@ msgstr "%s zaten bağlı"
 msgid "%s swap image was used by instance but no back files existing!"
 msgstr ""
 "%s swap imajı sunucu tarafından kullanılmuş ama mevcut arka dosyalar yok!"
+
+#, python-format
+msgid ""
+"Access key %(access_key)s has had %(failures)d failed authentications and "
+"will be locked out for %(lock_mins)d minutes."
+msgstr ""
+"%(access_key)s erişim anahtarı %(failures)d kez yanlış girildi ve "
+"%(lock_mins)d dakika boyunca kilitlenmiş olacak."
 
 #, python-format
 msgid "Address |%(address)s| is not allocated"
@@ -94,6 +114,9 @@ msgstr "Denenen auto_configure_disk başarısız çünkü: %s"
 msgid "Attempted to remove chain %s which does not exist"
 msgstr "Var olmayan %s zinciri kaldırılmaya çalışılıyor"
 
+msgid "Bandwidth usage not supported by hypervisor."
+msgstr "Bant genişliği kullanımı hipervizör tarafından desteklenmiyor."
+
 #, python-format
 msgid ""
 "Cannot add security group %(name)s to %(instance)s since the port "
@@ -116,6 +139,10 @@ msgstr "Girdi silinemiyor |%s|"
 
 msgid "Cannot destroy instance, operation time out"
 msgstr "Sunucu silinemiyor, işlem zaman aşımına uğradı"
+
+#, python-format
+msgid "Cannot get the metrics from %s."
+msgstr "%s'den ölçüler alınamadı."
 
 msgid ""
 "Cannot get the number of cpu, because this function is not implemented for "
@@ -242,6 +269,14 @@ msgid "Device allocation failed after repeated retries."
 msgstr "Bir çok denemeden sonra aygıt ayırma başarısız."
 
 #, python-format
+msgid ""
+"Disk not found on controller \"%(controller_path)s\" with address "
+"\"%(address)s\""
+msgstr ""
+"Disk \"%(address)s\" adresine sahip \"%(controller_path)s\" denetmeni "
+"üzerinde bulunamadı"
+
+#, python-format
 msgid "Domain |%(domain)s| already exists, changing project to |%(project)s|."
 msgstr ""
 "Alan |%(domain)s| zaten mevcut, proje |%(project)s| olarak değiştiriliyor."
@@ -256,6 +291,9 @@ msgstr "detach_interface sırasında, sunucu ortadan kayboldu."
 
 msgid "During detach_volume, instance disappeared."
 msgstr "detach_volume sırasındai sunucu ortadan kayboldu."
+
+msgid "Error cleaning up fixed ip allocation. Manual cleanup may be required."
+msgstr "Ayrılan sabit ip temizlenirken hata. Elle temizlik gerekebilir."
 
 #, python-format
 msgid ""
@@ -359,12 +397,20 @@ msgstr "%(ext_name)s:%(exc)s eklentisi yüklenemedi"
 msgid "Failed to power off instance"
 msgstr "Sunucu gücü kapatma başarısız"
 
+#, python-format
+msgid "Failed to remove snapshot for VM %s"
+msgstr "%s VM'i için anlık görüntü silme başarısız"
+
 msgid "Failed to resume instance"
 msgstr "Sunucu sürdürülürken hata"
 
 #, python-format
 msgid "Failed to revert task state for instance. Error: %s"
 msgstr "Sunucu için görev durumunu tersine çevirme başarısız. Hata: %s"
+
+#, python-format
+msgid "Failed to rollback quota for deallocate fixed ip: %s"
+msgstr "Ayrılmamış sabit ip için kota geri alınamadı: %s"
 
 #, python-format
 msgid "Failed to shutdown appliance %s"
@@ -392,24 +438,58 @@ msgid "Flag sr_matching_filter '%s' does not respect formatting convention"
 msgstr ""
 "Bayrak sr_matching_filter '%s' biçimlendirme kurallarına saygı göstermiyor"
 
+#, python-format
+msgid "Flavor %d not found"
+msgstr "Nitelik %d bulunamadı"
+
 msgid "Flavor could not be found, skipping migration."
 msgstr "Nitelik bulunamadı, göç atlanıyor."
+
+#, python-format
+msgid ""
+"Floating ip address |%(address)s| no longer belongs to instance "
+"%(instance_uuid)s. Will not migrate it "
+msgstr ""
+"Değişken ip adres |%(address)s| artık %(instance_uuid)s sunucusuna ait "
+"değil. Göç ettirilmeyecek "
+
+#, python-format
+msgid ""
+"Floating ip address |%(address)s| no longer belongs to instance "
+"%(instance_uuid)s. Will not setup it."
+msgstr ""
+"Değişken ip adres |%(address)s| artık %(instance_uuid)s sunucusuna ait "
+"değil. Kurulmayacak."
 
 #, python-format
 msgid ""
 "Found multiple matches for domain %(domain)s.\n"
 "%(entry)s"
 msgstr ""
-"%(domain)s alanı için birden fazla eşleşme bulundu.\n"
+"%(domain) alanı için birden fazla eşleşme bulundu.\n"
 "%(entry)s"
+
+#, python-format
+msgid ""
+"Host %(hostname)s has more disk space than database expected (%(physical)sgb "
+"> %(database)sgb)"
+msgstr ""
+"%(hostname) istemcisi veri tabanının beklediğinden çok diske sahip "
+"(%(physical)sgb > %(database)sgb)"
 
 msgid ""
 "Host field should not be set on the instance until resources have been "
 "claimed."
 msgstr "Kaynaklar talep edilmeden sunucuda istemci alanı ayarlanmamalı."
 
+msgid "Hypervisor driver does not support firewall rules"
+msgstr "Misafir sistem sürücüsü güvenlik duvarı kurallarını desteklemiyor"
+
 msgid "Hypervisor driver does not support resume guests"
 msgstr "Hipervizör sürücü konukların sürdürülmesini desteklemiyor"
+
+msgid "Hypervisor driver does not support security groups."
+msgstr "Hipervizör sürücüsü güvenlik gruplarını desteklemiyor."
 
 #, python-format
 msgid "IP %s leased that is not associated"
@@ -621,6 +701,10 @@ msgstr ""
 "%(disk_type)s disk türü için geçersiz zula kipi %(cache_mode)s belirtilmiş."
 
 #, python-format
+msgid "Invalid floating ip id %s in request"
+msgstr "İstekte geçersiz değişken ip id'si %s"
+
+#, python-format
 msgid "Invalid value '%d' for image_compression_level"
 msgstr "image_compression_level için geçersiz değer '%d'"
 
@@ -676,13 +760,19 @@ msgstr ""
 "%(tenant_id)s kullanılacak."
 
 #, python-format
+msgid ""
+"Neutron error: %(ip)s is not a valid ip address for network %(network_id)s."
+msgstr ""
+"Neutron hatası: %(ip)s %(network_id)s ağı için geçerli bir ip adresi değil."
+
+#, python-format
 msgid "Neutron error: Fixed IP %s is already in use."
 msgstr "Neutron hatası: Sabit IP %s zaten kullanımda."
 
 #, python-format
 msgid ""
 "Neutron error: MAC address %(mac)s is already in use on network %(network)s."
-msgstr "Neutron hatası: MAC adresi %(mac)s %(network)s ağında zaten kullanımda"
+msgstr "Neutron hatası: MAC adresi %(mac) %(network)s ağında zaten kullanımda"
 
 #, python-format
 msgid "Neutron error: No more fixed IPs in network: %s"
@@ -738,6 +828,14 @@ msgid "No valid host found for unshelve instance"
 msgstr "Askıdan alınmış sunucu için geçelir istemci bulunamadı"
 
 #, python-format
+msgid ""
+"No valid network found in %(opaque)s, from %(bridge)s or "
+"%(integration_bridge)s"
+msgstr ""
+"%(opaque)s için geçerli ağ bulunamadı, %(bridge)s den veya "
+"%(integration_bridge)s"
+
+#, python-format
 msgid "Node %(uuid)s has a malformed \"%(prop)s\". It should be an integer."
 msgstr "%(uuid)s düğümü kusurlu \"%(prop)s\" a sahip. Tam sayı olmalıdır."
 
@@ -749,6 +847,14 @@ msgstr "Kaynaklar talep edilmeden sunucuda düğüm alanı ayarlanmamalı"
 #, python-format
 msgid "Not deleting key %s"
 msgstr "%s anahtarı silinmiyor"
+
+#, python-format
+msgid "Not loading %s because it is in the blacklist"
+msgstr "Karalistede olduğundan %s yüklenmiyor"
+
+#, python-format
+msgid "Not loading %s because it is not in the whitelist"
+msgstr "Beyaz listede olmadığından %s yüklenmiyor"
 
 msgid ""
 "Old property name \"hw_watchdog_action\" is now deprecated and will be "
@@ -816,6 +922,14 @@ msgid "Power state %s not found."
 msgstr "Güç durumu %s bulunamadı."
 
 #, python-format
+msgid ""
+"Problem with acquiring the list of children of %(path)r within a given "
+"timeout=%(timeout)rs"
+msgstr ""
+"%(path)r'in çocuklarının listesinin verilen zaman aşımı=%(timeout)rs içinde "
+"alınmasında problem"
+
+#, python-format
 msgid "Quota exceeded for %s, tried to allocate floating IP"
 msgstr "Kota %s için aşıldı, değişken IP ayrılmaya çalışıldı"
 
@@ -849,6 +963,10 @@ msgid ""
 "Relative blockrebase support was not detected. Continuing with old behaviour."
 msgstr ""
 "Göreli blockrebase desteği algılanmadı. Eski davranışla devam ediliyor."
+
+#, python-format
+msgid "Removed %(num)d duplicate rules for floating ip %(float)s"
+msgstr "Değişken ip %(float)s için %(num)d kopya kural kaldırıldı"
 
 #, python-format
 msgid ""
@@ -886,6 +1004,16 @@ msgstr ""
 "Nova artık %(version)s sürümünden eski VMware vCenter sürümleriyle "
 "çalıştırılmıyor. Gerekli asgari vCenter sürümü 13.0.0 sürümüyle beraber "
 "%(version)s olarak artırılacak."
+
+#, python-format
+msgid ""
+"Running Nova with a libvirt version less than %(version)s is deprecated. The "
+"required minimum version of libvirt will be raised to %(version)s in the "
+"13.0.0 release."
+msgstr ""
+"Nova'nın %(version)s sürümünden eski libvirt ile çalıştırılması artık "
+"kullanılmıyor. 13.0.0 sürümüyle birlikte gerekli libvirt sürümü %(version)s "
+"olarak artırılacak."
 
 msgid ""
 "Running libvirt-lxc without user namespaces is dangerous. Containers spawned "
@@ -930,6 +1058,25 @@ msgstr ""
 "Tenant_id %(tenant_id)s %(instance_id)s sunucusunun tenant_id'si ile "
 "eşleşmiyor."
 
+msgid ""
+"The ZooKeeper service group driver in Nova is not tested by the OpenStack "
+"project and thus its quality can not be ensured. This may change in the "
+"future, but current deployers should be aware that the use of it in "
+"production right now may be risky."
+msgstr ""
+"Nova'daki ZooKeeper servis grup sürücüsü OpenStack  projesi tarafından test "
+"edilmedi ve kalitesinden emin olunamaz. Bu durum gelecekte değişebilir, ama "
+"şu an kurulum yapanlar üretimde kullanımının riskli olabileceğini bilmeliler."
+
+msgid ""
+"The in tree EC2 API is deprecated as of Kilo release and may be removed in a "
+"future release. The stackforge ec2-api project http://git.openstack.org/cgit/"
+"stackforge/ec2-api/ is the target replacement for this functionality."
+msgstr ""
+"Ağaçtaki EC2 API Kilo yayınlandığından beri onaylanmıyor ve ileri bir "
+"sürümde kaldırılabilir. Bu işlevselliğin yerini alacak hedef stackforge ec2-"
+"api projesi http://git.openstack.org/cgit/stackforge/ec2-api/"
+
 #, python-format
 msgid ""
 "The libvirt driver is not tested on %(type)s/%(arch)s by the OpenStack "
@@ -939,6 +1086,13 @@ msgstr ""
 "libvirt sürücüsü %(type)s/%(arch)s üzerinde OpenStack projesi tarafından "
 "test edilmedi dolayısıyla kalitesinden emin olunamaz. Daha fazla bilgi için, "
 "bknz: https://wiki.openstack.org/wiki/HypervisorSupportMatrix"
+
+msgid ""
+"The setting \"always\" will be deprecated in the Liberty version. Please use "
+"\"True\" instead"
+msgstr ""
+"\"her zaman\" ayarı Liberty sürümünde kalkacak. Lütfen bunun yerine \"Doğru"
+"\" kullanın"
 
 msgid ""
 "This key manager is insecure and is not recommended for production "
@@ -1126,6 +1280,16 @@ msgstr "Mantıksal sürücü %s şifrelenmeli ama şifreleme metadata'sı yok."
 
 #, python-format
 msgid ""
+"Volume group %(vg)s will not be able to hold sparse volume %(lv)s. Virtual "
+"volume size is %(size)db, but free space on volume group is only "
+"%(free_space)db."
+msgstr ""
+"Mantıksal sürücü grubu %(vg)s aralıklı mantıksal sürücü %(lv)s i "
+"tutamayacak. Sanal mantıksal sürücü boyutu %(size)db, ama mantıksal sürücü "
+"grubundaki boş alan yalnızca %(free_space)db."
+
+#, python-format
+msgid ""
 "Volume id: %(vol_id)s finished being created but its status is "
 "%(vol_status)s."
 msgstr ""
@@ -1144,14 +1308,14 @@ msgstr ""
 #, python-format
 msgid "Warning, memory usage is 0 for %(instance)s on baremetal node %(node)s."
 msgstr ""
-"Uyarı, çıplak saç düğüm %(node)s üzerindeki %(instance)s için hafıza "
+"Uyarı, çıplak saç düğüm %(node)s üzerindeki %(instance) için hafıza "
 "kullanımı 0."
 
 #, python-format
 msgid ""
 "Warning, number of cpus is 0 for %(instance)s on baremetal node %(node)s."
 msgstr ""
-"Uyarı, çıplak saç düğüm %(node)s üzerindeki %(instance)s için cpu sayısı 0."
+"Uyarı, çıplak saç düğüm %(node)s üzerindeki %(instance) için cpu sayısı 0."
 
 #, python-format
 msgid ""
@@ -1169,6 +1333,21 @@ msgstr ""
 "İstek başlıklarında X-Instance-ID mevcut. Bu başlığın işlenmesi için "
 "'service_metadata_proxy' seçeneği etkin olmalı."
 
+msgid ""
+"Your libvirt version does not support the VIR_DOMAIN_XML_MIGRATABLE flag, "
+"and the  graphics (VNC and/or SPICE) listen addresses on the destination "
+"node do not match the addresses on the source node. Since the source node "
+"has listen addresses set to either the catch-all address (0.0.0.0 or ::) or "
+"the local address (127.0.0.1 or ::1), the live migration will succeed, but "
+"the VM will continue to listen on the current addresses."
+msgstr ""
+"Libvirt sürümünüz VIR_DOMAIN_XML_MIGRATABLE flag bayrağını desteklemiyor, "
+"ve  hedef düğümdeki grafik (VNC ve/veya SPICE) dinleme adresleri kaynak "
+"düğümdeki adreslerle eşleşmiyor. Kaynak düğümdeki dinleme adresleri hepsini "
+"yakalayan adres (0.0.0.0 veya ::) veya yerel adres (127.0.0.1 veya ::1) "
+"olarak ayarlandığından, canlı göç başarılı olacak, ama VM mevcut adreslerden "
+"dinlemeye devam edecek."
+
 #, python-format
 msgid "_migrate_disk_resizing_up failed to rollback: %s"
 msgstr "_migrate_disk_resizing_up geri dönmede başarısız: %s"
@@ -1181,8 +1360,17 @@ msgstr ""
 "sebep: %(msg)s"
 
 #, python-format
+msgid "couldn't obtain the XML from domain: %(uuid)s, exception: %(ex)s"
+msgstr "Alandan XML elde edilemedi: %(uuid)s, istisna: %(ex)s"
+
+#, python-format
 msgid "couldn't obtain the memory from domain: %(uuid)s, exception: %(ex)s"
 msgstr "hafıza alandan elde edilemedi: %(uuid)s, istisna: %(ex)s"
+
+#, python-format
+msgid ""
+"couldn't obtain the vpu count from domain id: %(uuid)s, exception: %(ex)s"
+msgstr "alandan vpu sayısı alınamadı id: %(uuid)s, istisna: %(ex)s"
 
 #, python-format
 msgid "cpu_arch not defined for node '%s'"
@@ -1248,6 +1436,10 @@ msgid "multiple fixed_ips exist, using the first IPv4 fixed_ip: %s"
 msgstr "birden fazla sabit_ip mevcut, ilk IPv4 sabit ip kullanılıyor: %s"
 
 #, python-format
+msgid "multiple fixed_ips exist, using the first: %s"
+msgstr "birden fazla sabit_ip mevcut, ilki kullanılıyor: %s"
+
+#, python-format
 msgid ""
 "my_ip address (%(my_ip)s) was not found on any of the interfaces: %(ifaces)s"
 msgstr ""
@@ -1272,6 +1464,9 @@ msgstr ""
 msgid "set_admin_password is not implemented by this driver or guest instance."
 msgstr ""
 "set_admin_password bu sürücü veya konuk sunucu tarafından uygulanmamış."
+
+msgid "set_bootable is not implemented for the current driver"
+msgstr "set_bootable mevcut sürücü için uygulanmadı"
 
 #, python-format
 msgid ""

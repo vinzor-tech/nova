@@ -29,10 +29,9 @@ from oslo_utils import strutils
 from oslo_utils import units
 import six
 
-import nova.conf
 from nova import exception
 from nova.i18n import _
-from nova.i18n import _LE, _LI, _LW
+from nova.i18n import _LE, _LI
 from nova import image
 from nova import keymgr
 from nova import utils
@@ -71,9 +70,16 @@ __imagebackend_opts = [
                     ' format)'),
         ]
 
-CONF = nova.conf.CONF
+CONF = cfg.CONF
 CONF.register_opts(__imagebackend_opts, 'libvirt')
 CONF.import_opt('image_cache_subdirectory_name', 'nova.virt.imagecache')
+CONF.import_opt('preallocate_images', 'nova.virt.driver')
+CONF.import_opt('enabled', 'nova.compute.api',
+                group='ephemeral_storage_encryption')
+CONF.import_opt('cipher', 'nova.compute.api',
+                group='ephemeral_storage_encryption')
+CONF.import_opt('key_size', 'nova.compute.api',
+                group='ephemeral_storage_encryption')
 CONF.import_opt('rbd_user', 'nova.virt.libvirt.volume.net', group='libvirt')
 CONF.import_opt('rbd_secret_uuid', 'nova.virt.libvirt.volume.net',
                 group='libvirt')
@@ -102,7 +108,6 @@ class Image(object):
 
         self.source_type = source_type
         self.driver_format = driver_format
-        self.driver_io = None
         self.discard_mode = CONF.libvirt.hw_disk_discard
         self.is_block_dev = is_block_dev
         self.preallocate = False
@@ -137,15 +142,6 @@ class Image(object):
         """
         pass
 
-    @abc.abstractmethod
-    def resize_image(self, size):
-        """Resize image to size (in bytes).
-
-        :size: Desired size of image in bytes
-
-        """
-        pass
-
     def libvirt_info(self, disk_bus, disk_dev, device_type, cache_mode,
                      extra_specs, hypervisor_version):
         """Get `LibvirtConfigGuestDisk` filled for this image.
@@ -164,7 +160,6 @@ class Image(object):
         info.target_dev = disk_dev
         info.driver_cache = cache_mode
         info.driver_discard = self.discard_mode
-        info.driver_io = self.driver_io
         info.driver_format = self.driver_format
         driver_name = libvirt_utils.pick_disk_driver_name(hypervisor_version,
                                                           self.is_block_dev)
@@ -244,13 +239,9 @@ class Image(object):
             self.create_image(fetch_func_sync, base, size,
                               *args, **kwargs)
 
-        if size:
-            if size > self.get_disk_size(base):
-                self.resize_image(size)
-
-            if (self.preallocate and self._can_fallocate() and
-                    os.access(self.path, os.W_OK)):
-                utils.execute('fallocate', '-n', '-l', size, self.path)
+        if (size and self.preallocate and self._can_fallocate() and
+                os.access(self.path, os.W_OK)):
+            utils.execute('fallocate', '-n', '-l', size, self.path)
 
     def _can_fallocate(self):
         """Check once per class, whether fallocate(1) is available,
@@ -258,14 +249,14 @@ class Image(object):
         """
         can_fallocate = getattr(self.__class__, 'can_fallocate', None)
         if can_fallocate is None:
-            test_path = self.path + '.fallocate_test'
-            _out, err = utils.trycmd('fallocate', '-l', '1', test_path)
-            fileutils.delete_if_exists(test_path)
+            _out, err = utils.trycmd('fallocate', '-n', '-l', '1',
+                                     self.path + '.fallocate_test')
+            fileutils.delete_if_exists(self.path + '.fallocate_test')
             can_fallocate = not err
             self.__class__.can_fallocate = can_fallocate
             if not can_fallocate:
-                LOG.warning(_LW('Unable to preallocate image at path: '
-                                '%(path)s'), {'path': self.path})
+                LOG.error(_LE('Unable to preallocate image at path: '
+                              '%(path)s'), {'path': self.path})
         return can_fallocate
 
     def verify_base_size(self, base, size, base_size=0):
@@ -296,7 +287,7 @@ class Image(object):
                               'base_size': base_size,
                               'size': size})
             raise exception.FlavorDiskSmallerThanImage(
-                flavor_size=size, image_size=base_size)
+                flavor_size=base_size, image_size=size)
 
     def get_disk_size(self, name):
         return disk.get_disk_size(name)
@@ -389,25 +380,6 @@ class Image(object):
         raise exception.ImageUnacceptable(image_id=image_id_or_uri,
                                           reason=reason)
 
-    def direct_snapshot(self, context, snapshot_name, image_format, image_id,
-                        base_image_id):
-        """Prepare a snapshot for direct reference from glance
-
-        :raises: exception.ImageUnacceptable if it cannot be
-                 referenced directly in the specified image format
-        :returns: URL to be given to glance
-        """
-        raise NotImplementedError(_('direct_snapshot() is not implemented'))
-
-    def cleanup_direct_snapshot(self, location, also_destroy_volume=False,
-                                ignore_errors=False):
-        """Performs any cleanup actions required after calling
-        direct_snapshot(), for graceful exception handling and the like.
-
-        This should be a no-op on any backend where it is not implemented.
-        """
-        pass
-
     def _get_lock_name(self, base):
         """Get an image's name of a base file."""
         return os.path.split(base)[-1]
@@ -436,29 +408,14 @@ class Image(object):
         # we should talk about if we want this functionality for everything.
         pass
 
-    def create_snap(self, name):
-        """Create a snapshot on the image.  A noop on backends that don't
-        support snapshots.
+    def import_file_cleanup(self, local_file):
+        """Once an import has run, we many no longer need the local file.
 
-        :param name: name of the snapshot
+        :param local_file: path to the file that was imported.
         """
-        pass
 
-    def remove_snap(self, name, ignore_errors=False):
-        """Remove a snapshot on the image.  A noop on backends that don't
-        support snapshots.
-
-        :param name: name of the snapshot
-        :param ignore_errors: don't log errors if the snapshot does not exist
-        """
-        pass
-
-    def rollback_to_snap(self, name):
-        """Rollback the image to the named snapshot. A noop on backends that
-        don't support snapshots.
-
-        :param name: name of the snapshot
-        """
+        # NOTE(mikal): this is a noop for most backends, as they don't "import"
+        # the file into some sort of storage system.
         pass
 
 
@@ -472,8 +429,6 @@ class Raw(Image):
                                   disk_name))
         self.preallocate = (
             strutils.to_slug(CONF.preallocate_images) == 'space')
-        if self.preallocate:
-            self.driver_io = "native"
         self.disk_info_path = os.path.join(os.path.dirname(self.path),
                                            'disk.info')
         self.correct_format()
@@ -525,23 +480,14 @@ class Raw(Image):
         else:
             if not os.path.exists(base):
                 prepare_template(target=base, max_size=size, *args, **kwargs)
-
-            # NOTE(mikal): Update the mtime of the base file so the image
-            # cache manager knows it is in use.
-            libvirt_utils.update_mtime(base)
             self.verify_base_size(base, size)
             if not os.path.exists(self.path):
                 with fileutils.remove_path_on_error(self.path):
                     copy_raw_image(base, self.path, size)
-
         self.correct_format()
 
-    def resize_image(self, size):
-        image = imgmodel.LocalFileImage(self.path, self.driver_format)
-        disk.extend(image, size)
-
     def snapshot_extract(self, target, out_format):
-        images.convert_image(self.path, target, self.driver_format, out_format)
+        images.convert_image(self.path, target, out_format)
 
     @staticmethod
     def is_file_in_instance_path():
@@ -561,8 +507,6 @@ class Qcow2(Image):
                                   disk_name))
         self.preallocate = (
             strutils.to_slug(CONF.preallocate_images) == 'space')
-        if self.preallocate:
-            self.driver_io = "native"
         self.disk_info_path = os.path.join(os.path.dirname(self.path),
                                            'disk.info')
         self.resolve_driver_format()
@@ -583,10 +527,6 @@ class Qcow2(Image):
         # Download the unmodified base image unless we already have a copy.
         if not os.path.exists(base):
             prepare_template(target=base, max_size=size, *args, **kwargs)
-
-        # NOTE(ankit): Update the mtime of the base file so the image
-        # cache manager knows it is in use.
-        libvirt_utils.update_mtime(base)
         self.verify_base_size(base, size)
 
         legacy_backing_size = None
@@ -618,10 +558,6 @@ class Qcow2(Image):
         if not os.path.exists(self.path):
             with fileutils.remove_path_on_error(self.path):
                 copy_qcow2_image(base, self.path, size)
-
-    def resize_image(self, size):
-        image = imgmodel.LocalFileImage(self.path, imgmodel.FORMAT_QCOW2)
-        disk.extend(image, size)
 
     def snapshot_extract(self, target, out_format):
         libvirt_utils.extract_snapshot(self.path, 'qcow2',
@@ -679,9 +615,6 @@ class Lvm(Image):
         self.sparse = CONF.libvirt.sparse_logical_volumes
         self.preallocate = not self.sparse
 
-        if not self.sparse:
-            self.driver_io = "native"
-
     def _supports_encryption(self):
         return True
 
@@ -708,16 +641,7 @@ class Lvm(Image):
                                          size, sparse=self.sparse)
             if self.ephemeral_key_uuid is not None:
                 encrypt_lvm_image()
-            # NOTE: by calling convert_image_unsafe here we're
-            # telling qemu-img convert to do format detection on the input,
-            # because we don't know what the format is. For example,
-            # we might have downloaded a qcow2 image, or created an
-            # ephemeral filesystem locally, we just don't know here. Having
-            # audited this, all current sources have been sanity checked,
-            # either because they're locally generated, or because they have
-            # come from images.fetch_to_raw. However, this is major code smell.
-            images.convert_image_unsafe(base, self.path, self.driver_format,
-                                        run_as_root=True)
+            images.convert_image(base, self.path, 'raw', run_as_root=True)
             if resize:
                 disk.resize2fs(self.path, run_as_root=True)
 
@@ -751,11 +675,6 @@ class Lvm(Image):
             with self.remove_volume_on_error(self.path):
                 create_lvm_image(base, size)
 
-    # NOTE(nic): Resizing the image is already handled in create_image(),
-    # and migrate/resize is not supported with LVM yet, so this is a no-op
-    def resize_image(self, size):
-        pass
-
     @contextlib.contextmanager
     def remove_volume_on_error(self, path):
         try:
@@ -769,8 +688,8 @@ class Lvm(Image):
                     lvm.remove_volumes([self.lv_path])
 
     def snapshot_extract(self, target, out_format):
-        images.convert_image(self.path, target, self.driver_format,
-                             out_format, run_as_root=True)
+        images.convert_image(self.path, target, out_format,
+                             run_as_root=True)
 
     def get_model(self, connection):
         return imgmodel.LocalBlockImage(self.path)
@@ -876,11 +795,8 @@ class Rbd(Image):
         if size and size > self.get_disk_size(self.rbd_name):
             self.driver.resize(self.rbd_name, size)
 
-    def resize_image(self, size):
-        self.driver.resize(self.rbd_name, size)
-
     def snapshot_extract(self, target, out_format):
-        images.convert_image(self.path, target, 'raw', out_format)
+        images.convert_image(self.path, target, out_format)
 
     @staticmethod
     def is_shared_block_storage():
@@ -928,104 +844,9 @@ class Rbd(Image):
             self.driver.remove_image(name)
         self.driver.import_image(local_file, name)
 
-    def create_snap(self, name):
-        return self.driver.create_snap(self.rbd_name, name)
-
-    def remove_snap(self, name, ignore_errors=False):
-        return self.driver.remove_snap(self.rbd_name, name, ignore_errors)
-
-    def rollback_to_snap(self, name):
-        return self.driver.rollback_to_snap(self.rbd_name, name)
-
-    def _get_parent_pool(self, context, base_image_id, fsid):
-        parent_pool = None
-        try:
-            # The easy way -- the image is an RBD clone, so use the parent
-            # images' storage pool
-            parent_pool, _im, _snap = self.driver.parent_info(self.rbd_name)
-        except exception.ImageUnacceptable:
-            # The hard way -- the image is itself a parent, so ask Glance
-            # where it came from
-            LOG.debug('No parent info for %s; asking the Image API where its '
-                      'store is', base_image_id)
-            try:
-                image_meta = IMAGE_API.get(context, base_image_id,
-                                           include_locations=True)
-            except Exception as e:
-                LOG.debug('Unable to get image %(image_id)s; error: %(error)s',
-                          {'image_id': base_image_id, 'error': e})
-                image_meta = {}
-
-            # Find the first location that is in the same RBD cluster
-            for location in image_meta.get('locations', []):
-                try:
-                    parent_fsid, parent_pool, _im, _snap = \
-                        self.driver.parse_url(location['url'])
-                    if parent_fsid == fsid:
-                        break
-                    else:
-                        parent_pool = None
-                except exception.ImageUnacceptable:
-                    continue
-
-        if not parent_pool:
-            raise exception.ImageUnacceptable(
-                    _('Cannot determine the parent storage pool for %s; '
-                      'cannot determine where to store images') %
-                    base_image_id)
-
-        return parent_pool
-
-    def direct_snapshot(self, context, snapshot_name, image_format,
-                        image_id, base_image_id):
-        """Creates an RBD snapshot directly.
-        """
-        fsid = self.driver.get_fsid()
-        # NOTE(nic): Nova has zero comprehension of how Glance's image store
-        # is configured, but we can infer what storage pool Glance is using
-        # by looking at the parent image.  If using authx, write access should
-        # be enabled on that pool for the Nova user
-        parent_pool = self._get_parent_pool(context, base_image_id, fsid)
-
-        # Snapshot the disk and clone it into Glance's storage pool.  librbd
-        # requires that snapshots be set to "protected" in order to clone them
-        self.driver.create_snap(self.rbd_name, snapshot_name, protect=True)
-        location = {'url': 'rbd://%(fsid)s/%(pool)s/%(image)s/%(snap)s' %
-                           dict(fsid=fsid,
-                                pool=self.pool,
-                                image=self.rbd_name,
-                                snap=snapshot_name)}
-        try:
-            self.driver.clone(location, image_id, dest_pool=parent_pool)
-            # Flatten the image, which detaches it from the source snapshot
-            self.driver.flatten(image_id, pool=parent_pool)
-        finally:
-            # all done with the source snapshot, clean it up
-            self.cleanup_direct_snapshot(location)
-
-        # Glance makes a protected snapshot called 'snap' on uploaded
-        # images and hands it out, so we'll do that too.  The name of
-        # the snapshot doesn't really matter, this just uses what the
-        # glance-store rbd backend sets (which is not configurable).
-        self.driver.create_snap(image_id, 'snap', pool=parent_pool,
-                                protect=True)
-        return ('rbd://%(fsid)s/%(pool)s/%(image)s/snap' %
-                dict(fsid=fsid, pool=parent_pool, image=image_id))
-
-    def cleanup_direct_snapshot(self, location, also_destroy_volume=False,
-                                ignore_errors=False):
-        """Unprotects and destroys the name snapshot.
-
-        With also_destroy_volume=True, it will also cleanup/destroy the parent
-        volume.  This is useful for cleaning up when the target volume fails
-        to snapshot properly.
-        """
-        if location:
-            _fsid, _pool, _im, _snap = self.driver.parse_url(location['url'])
-            self.driver.remove_snap(_im, _snap, pool=_pool, force=True,
-                                    ignore_errors=ignore_errors)
-            if also_destroy_volume:
-                self.driver.destroy_volume(_im, pool=_pool)
+    def import_file_cleanup(self, local_file):
+        if os.path.exists(local_file):
+            os.unlink(local_file)
 
 
 class Ploop(Image):
@@ -1084,18 +905,6 @@ class Ploop(Image):
                                         remove=shutil.rmtree)
         with fileutils.remove_path_on_error(self.path, remove=remove_func):
             create_ploop_image(base, self.path, size)
-
-    def resize_image(self, size):
-        dd_path = os.path.join(self.path, "DiskDescriptor.xml")
-        utils.execute('ploop', 'grow', '-s', '%dK' % (size >> 10), dd_path,
-                      run_as_root=True)
-
-    def snapshot_extract(self, target, out_format):
-        img_path = os.path.join(self.path, "root.hds")
-        libvirt_utils.extract_snapshot(img_path,
-                                       'parallels',
-                                       target,
-                                       out_format)
 
 
 class Backend(object):

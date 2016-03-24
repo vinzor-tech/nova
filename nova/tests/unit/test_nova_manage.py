@@ -18,7 +18,6 @@ import sys
 
 import fixtures
 import mock
-from oslo_utils import uuidutils
 
 from nova.cmd import manage
 from nova import context
@@ -37,14 +36,14 @@ from nova.tests.unit import test_flavors
 class FixedIpCommandsTestCase(test.TestCase):
     def setUp(self):
         super(FixedIpCommandsTestCase, self).setUp()
-        db_fakes.stub_out_db_network_api(self)
+        db_fakes.stub_out_db_network_api(self.stubs)
         self.commands = manage.FixedIpCommands()
 
     def test_reserve(self):
         self.commands.reserve('192.168.0.100')
         address = db.fixed_ip_get_by_address(context.get_admin_context(),
                                              '192.168.0.100')
-        self.assertTrue(address['reserved'])
+        self.assertEqual(address['reserved'], True)
 
     def test_reserve_nonexistent_address(self):
         self.assertEqual(2, self.commands.reserve('55.55.55.55'))
@@ -53,7 +52,7 @@ class FixedIpCommandsTestCase(test.TestCase):
         self.commands.unreserve('192.168.0.100')
         address = db.fixed_ip_get_by_address(context.get_admin_context(),
                                              '192.168.0.100')
-        self.assertFalse(address['reserved'])
+        self.assertEqual(address['reserved'], False)
 
     def test_unreserve_nonexistent_address(self):
         self.assertEqual(2, self.commands.unreserve('55.55.55.55'))
@@ -77,10 +76,10 @@ class FixedIpCommandsTestCase(test.TestCase):
         self.assertNotEqual(1, sys.stdout.getvalue().find('192.168.0.100'))
 
 
-class FloatingIpCommandsTestCase(test.NoDBTestCase):
+class FloatingIpCommandsTestCase(test.TestCase):
     def setUp(self):
         super(FloatingIpCommandsTestCase, self).setUp()
-        db_fakes.stub_out_db_network_api(self)
+        db_fakes.stub_out_db_network_api(self.stubs)
         self.commands = manage.FloatingIpCommands()
 
     def test_address_to_hosts(self):
@@ -118,7 +117,7 @@ class FloatingIpCommandsTestCase(test.NoDBTestCase):
                           '192.168.100.1/12')
 
 
-class NetworkCommandsTestCase(test.NoDBTestCase):
+class NetworkCommandsTestCase(test.TestCase):
     def setUp(self):
         super(NetworkCommandsTestCase, self).setUp()
         self.commands = manage.NetworkCommands()
@@ -173,7 +172,7 @@ class NetworkCommandsTestCase(test.NoDBTestCase):
             self.assertTrue(context.to_dict()['is_admin'])
             self.assertEqual(kwargs['label'], 'Test')
             self.assertEqual(kwargs['cidr'], '10.2.0.0/24')
-            self.assertFalse(kwargs['multi_host'])
+            self.assertEqual(kwargs['multi_host'], False)
             self.assertEqual(kwargs['num_networks'], 1)
             self.assertEqual(kwargs['network_size'], 256)
             self.assertEqual(kwargs['vlan'], 200)
@@ -212,7 +211,7 @@ class NetworkCommandsTestCase(test.NoDBTestCase):
 
         def fake_network_get_all(context):
             return [db_fakes.FakeModel(self.net)]
-        self.stub_out('nova.db.network_get_all', fake_network_get_all)
+        self.stubs.Set(db, 'network_get_all', fake_network_get_all)
         output = StringIO()
         sys.stdout = output
         self.commands.list()
@@ -246,35 +245,35 @@ class NetworkCommandsTestCase(test.NoDBTestCase):
         self.fake_net = self.net
         self.fake_net['project_id'] = None
         self.fake_net['host'] = None
-        self.stub_out('nova.db.network_get_by_uuid',
-                      self.fake_network_get_by_uuid)
+        self.stubs.Set(db, 'network_get_by_uuid',
+                       self.fake_network_get_by_uuid)
 
         def fake_network_delete_safe(context, network_id):
             self.assertTrue(context.to_dict()['is_admin'])
             self.assertEqual(network_id, self.fake_net['id'])
-        self.stub_out('nova.db.network_delete_safe', fake_network_delete_safe)
+        self.stubs.Set(db, 'network_delete_safe', fake_network_delete_safe)
         self.commands.delete(uuid=self.fake_net['uuid'])
 
     def test_delete_by_cidr(self):
         self.fake_net = self.net
         self.fake_net['project_id'] = None
         self.fake_net['host'] = None
-        self.stub_out('nova.db.network_get_by_cidr',
-                      self.fake_network_get_by_cidr)
+        self.stubs.Set(db, 'network_get_by_cidr',
+                       self.fake_network_get_by_cidr)
 
         def fake_network_delete_safe(context, network_id):
             self.assertTrue(context.to_dict()['is_admin'])
             self.assertEqual(network_id, self.fake_net['id'])
-        self.stub_out('nova.db.network_delete_safe', fake_network_delete_safe)
+        self.stubs.Set(db, 'network_delete_safe', fake_network_delete_safe)
         self.commands.delete(fixed_range=self.fake_net['cidr'])
 
     def _test_modify_base(self, update_value, project, host, dis_project=None,
                           dis_host=None):
         self.fake_net = self.net
         self.fake_update_value = update_value
-        self.stub_out('nova.db.network_get_by_cidr',
-                      self.fake_network_get_by_cidr)
-        self.stub_out('nova.db.network_update', self.fake_network_update)
+        self.stubs.Set(db, 'network_get_by_cidr',
+                       self.fake_network_get_by_cidr)
+        self.stubs.Set(db, 'network_update', self.fake_network_update)
         self.commands.modify(self.fake_net['cidr'], project=project, host=host,
                              dis_project=dis_project, dis_host=dis_host)
 
@@ -292,10 +291,10 @@ class NetworkCommandsTestCase(test.NoDBTestCase):
                                dis_host=True)
 
 
-class NeutronV2NetworkCommandsTestCase(test.NoDBTestCase):
+class NeutronV2NetworkCommandsTestCase(test.TestCase):
     def setUp(self):
         super(NeutronV2NetworkCommandsTestCase, self).setUp()
-        self.flags(use_neutron=True)
+        self.flags(network_api_class='nova.network.neutronv2.api.API')
         self.commands = manage.NetworkCommands()
 
     def test_create(self):
@@ -333,7 +332,7 @@ class ProjectCommandsTestCase(test.TestCase):
         self.assertEqual(2, self.commands.quota('admin', 'volumes1', '10'))
 
 
-class VmCommandsTestCase(test.NoDBTestCase):
+class VmCommandsTestCase(test.TestCase):
     def setUp(self):
         super(VmCommandsTestCase, self).setUp()
         self.commands = manage.VmCommands()
@@ -376,53 +375,13 @@ class VmCommandsTestCase(test.NoDBTestCase):
         self.assertIn('fake-host', result)
 
 
-class DBCommandsTestCase(test.NoDBTestCase):
+class DBCommandsTestCase(test.TestCase):
     def setUp(self):
         super(DBCommandsTestCase, self).setUp()
         self.commands = manage.DbCommands()
 
     def test_archive_deleted_rows_negative(self):
         self.assertEqual(1, self.commands.archive_deleted_rows(-1))
-
-    def test_archive_deleted_rows_large_number(self):
-        large_number = '1' * 100
-        self.assertEqual(1, self.commands.archive_deleted_rows(large_number))
-
-    @mock.patch.object(db, 'archive_deleted_rows',
-                       return_value=dict(instances=10, consoles=5))
-    def _test_archive_deleted_rows(self, mock_db_archive, verbose=False):
-        self.useFixture(fixtures.MonkeyPatch('sys.stdout', StringIO()))
-        self.commands.archive_deleted_rows(20, verbose=verbose)
-        mock_db_archive.assert_called_once_with(20)
-        output = sys.stdout.getvalue()
-        if verbose:
-            expected = '''\
-+-----------+-------------------------+
-| Table     | Number of Rows Archived |
-+-----------+-------------------------+
-| consoles  | 5                       |
-| instances | 10                      |
-+-----------+-------------------------+
-'''
-            self.assertEqual(expected, output)
-        else:
-            self.assertEqual(0, len(output))
-
-    def test_archive_deleted_rows(self):
-        # Tests that we don't show any table output (not verbose).
-        self._test_archive_deleted_rows()
-
-    def test_archive_deleted_rows_verbose(self):
-        # Tests that we get table output.
-        self._test_archive_deleted_rows(verbose=True)
-
-    @mock.patch.object(db, 'archive_deleted_rows', return_value={})
-    def test_archive_deleted_rows_verbose_no_results(self, mock_db_archive):
-        self.useFixture(fixtures.MonkeyPatch('sys.stdout', StringIO()))
-        self.commands.archive_deleted_rows(20, verbose=True)
-        mock_db_archive.assert_called_once_with(20)
-        output = sys.stdout.getvalue()
-        self.assertIn('Nothing was archived.', output)
 
     @mock.patch.object(migration, 'db_null_instance_uuid_scan',
                        return_value={'foo': 0})
@@ -464,57 +423,8 @@ class DBCommandsTestCase(test.NoDBTestCase):
         self.commands.sync(version=4)
         sqla_sync.assert_called_once_with(version=4, database='main')
 
-    def _fake_db_command(self, migrations=None):
-        if migrations is None:
-            mock_mig_1 = mock.MagicMock(__name__="mock_mig_1")
-            mock_mig_2 = mock.MagicMock(__name__="mock_mig_2")
-            mock_mig_1.return_value = (5, 4)
-            mock_mig_2.return_value = (6, 6)
-            migrations = (mock_mig_1, mock_mig_2)
 
-        class _CommandSub(manage.DbCommands):
-            online_migrations = migrations
-
-        return _CommandSub
-
-    @mock.patch('nova.context.get_admin_context')
-    def test_online_migrations(self, mock_get_context):
-        ctxt = mock_get_context.return_value
-        command_cls = self._fake_db_command()
-        command = command_cls()
-        command.online_data_migrations(10)
-        command_cls.online_migrations[0].assert_called_once_with(ctxt, 10)
-        command_cls.online_migrations[1].assert_called_once_with(ctxt, 6)
-
-    @mock.patch('nova.context.get_admin_context')
-    def test_online_migrations_no_max_count(self, mock_get_context):
-        total = [120]
-        batches = [50, 40, 30, 0]
-        runs = []
-
-        def fake_migration(context, count):
-            self.assertEqual(mock_get_context.return_value, context)
-            runs.append(count)
-            count = batches.pop(0)
-            total[0] -= count
-            return total[0], count
-
-        command_cls = self._fake_db_command((fake_migration,))
-        command = command_cls()
-        command.online_data_migrations(None)
-        self.assertEqual([], batches)
-        self.assertEqual(0, total[0])
-        self.assertEqual([50, 50, 50, 50], runs)
-
-    def test_online_migrations_error(self):
-        fake_migration = mock.MagicMock()
-        fake_migration.side_effect = Exception
-        command_cls = self._fake_db_command((fake_migration,))
-        command = command_cls()
-        command.online_data_migrations(None)
-
-
-class ApiDbCommandsTestCase(test.NoDBTestCase):
+class ApiDbCommandsTestCase(test.TestCase):
     def setUp(self):
         super(ApiDbCommandsTestCase, self).setUp()
         self.commands = manage.ApiDbCommands()
@@ -542,7 +452,7 @@ class ServiceCommandsTestCase(test.TestCase):
         self.assertEqual(2, self.commands.disable('nohost', 'noservice'))
 
 
-class CellCommandsTestCase(test.NoDBTestCase):
+class CellCommandsTestCase(test.TestCase):
     def setUp(self):
         super(CellCommandsTestCase, self).setUp()
         self.commands = manage.CellCommands()
@@ -681,140 +591,3 @@ class CellCommandsTestCase(test.NoDBTestCase):
                       'weight_offset': 0.0,
                       'weight_scale': 0.0}
         mock_db_cell_create.assert_called_once_with(ctxt, exp_values)
-
-
-class CellV2CommandsTestCase(test.TestCase):
-    def setUp(self):
-        super(CellV2CommandsTestCase, self).setUp()
-        self.useFixture(fixtures.MonkeyPatch('sys.stdout', StringIO()))
-        self.commands = manage.CellV2Commands()
-
-    def test_map_cell_and_hosts(self):
-        # Create some fake compute nodes and check if they get host mappings
-        ctxt = context.RequestContext()
-        values = {
-                'vcpus': 4,
-                'memory_mb': 4096,
-                'local_gb': 1024,
-                'vcpus_used': 2,
-                'memory_mb_used': 2048,
-                'local_gb_used': 512,
-                'hypervisor_type': 'Hyper-Dan-VM-ware',
-                'hypervisor_version': 1001,
-                'cpu_info': 'Schmintel i786',
-            }
-        for i in range(3):
-            host = 'host%s' % i
-            compute_node = objects.ComputeNode(ctxt, host=host, **values)
-            compute_node.create()
-        cell_transport_url = "fake://guest:devstack@127.0.0.1:9999/"
-        self.commands.map_cell_and_hosts(cell_transport_url, name='ssd',
-                                         verbose=True)
-        cell_mapping_uuid = sys.stdout.getvalue().strip()
-        # Verify the cell mapping
-        cell_mapping = objects.CellMapping.get_by_uuid(ctxt, cell_mapping_uuid)
-        self.assertEqual('ssd', cell_mapping.name)
-        self.assertEqual(cell_transport_url, cell_mapping.transport_url)
-        # Verify the host mappings
-        for i in range(3):
-            host = 'host%s' % i
-            host_mapping = objects.HostMapping.get_by_host(ctxt, host)
-            self.assertEqual(cell_mapping.uuid, host_mapping.cell_mapping.uuid)
-
-    def test_map_cell_and_hosts_duplicate(self):
-        # Create a cell mapping and hosts and check that nothing new is created
-        ctxt = context.RequestContext()
-        cell_mapping_uuid = uuidutils.generate_uuid()
-        cell_mapping = objects.CellMapping(
-                ctxt, uuid=cell_mapping_uuid, name='fake',
-                transport_url='fake://', database_connection='fake://')
-        cell_mapping.create()
-        # Create compute nodes that will map to the cell
-        values = {
-                'vcpus': 4,
-                'memory_mb': 4096,
-                'local_gb': 1024,
-                'vcpus_used': 2,
-                'memory_mb_used': 2048,
-                'local_gb_used': 512,
-                'hypervisor_type': 'Hyper-Dan-VM-ware',
-                'hypervisor_version': 1001,
-                'cpu_info': 'Schmintel i786',
-            }
-        for i in range(3):
-            host = 'host%s' % i
-            compute_node = objects.ComputeNode(ctxt, host=host, **values)
-            compute_node.create()
-            host_mapping = objects.HostMapping(
-                    ctxt, host=host, cell_mapping=cell_mapping)
-            host_mapping.create()
-        cell_transport_url = "fake://guest:devstack@127.0.0.1:9999/"
-        retval = self.commands.map_cell_and_hosts(cell_transport_url,
-                                                  name='ssd',
-                                                  verbose=True)
-        self.assertEqual(0, retval)
-        output = sys.stdout.getvalue().strip()
-        expected = ''
-        for i in range(3):
-            expected += ('Host host%s is already mapped to cell %s\n' %
-                         (i, cell_mapping_uuid))
-        expected += 'All hosts are already mapped to cell(s), exiting.'
-        self.assertEqual(expected, output)
-
-    def test_map_cell_and_hosts_partial_update(self):
-        # Create a cell mapping and partial hosts and check that
-        # missing HostMappings are created
-        ctxt = context.RequestContext()
-        cell_mapping_uuid = uuidutils.generate_uuid()
-        cell_mapping = objects.CellMapping(
-                ctxt, uuid=cell_mapping_uuid, name='fake',
-                transport_url='fake://', database_connection='fake://')
-        cell_mapping.create()
-        # Create compute nodes that will map to the cell
-        values = {
-                'vcpus': 4,
-                'memory_mb': 4096,
-                'local_gb': 1024,
-                'vcpus_used': 2,
-                'memory_mb_used': 2048,
-                'local_gb_used': 512,
-                'hypervisor_type': 'Hyper-Dan-VM-ware',
-                'hypervisor_version': 1001,
-                'cpu_info': 'Schmintel i786',
-            }
-        for i in range(3):
-            host = 'host%s' % i
-            compute_node = objects.ComputeNode(ctxt, host=host, **values)
-            compute_node.create()
-        # Only create 2 existing HostMappings out of 3
-        for i in range(2):
-            host = 'host%s' % i
-            host_mapping = objects.HostMapping(
-                    ctxt, host=host, cell_mapping=cell_mapping)
-            host_mapping.create()
-        cell_transport_url = "fake://guest:devstack@127.0.0.1:9999/"
-        self.commands.map_cell_and_hosts(cell_transport_url,
-                                         name='ssd',
-                                         verbose=True)
-        # Verify the HostMapping for the last host was created
-        host_mapping = objects.HostMapping.get_by_host(ctxt, 'host2')
-        self.assertEqual(cell_mapping.uuid, host_mapping.cell_mapping.uuid)
-        # Verify the output
-        output = sys.stdout.getvalue().strip()
-        expected = ''
-        for i in range(2):
-            expected += ('Host host%s is already mapped to cell %s\n' %
-                         (i, cell_mapping_uuid))
-        # The expected CellMapping UUID for the last host should be the same
-        expected += cell_mapping.uuid
-        self.assertEqual(expected, output)
-
-    def test_map_cell_and_hosts_no_hosts_found(self):
-        cell_transport_url = "fake://guest:devstack@127.0.0.1:9999/"
-        retval = self.commands.map_cell_and_hosts(cell_transport_url,
-                                                  name='ssd',
-                                                  verbose=True)
-        self.assertEqual(0, retval)
-        output = sys.stdout.getvalue().strip()
-        expected = 'No hosts found to map to cell, exiting.'
-        self.assertEqual(expected, output)

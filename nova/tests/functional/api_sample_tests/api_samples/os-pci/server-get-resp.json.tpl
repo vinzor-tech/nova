@@ -53,7 +53,7 @@
         ],
         "progress": 0,
         "status": "ACTIVE",
-        "tenant_id": "6f70656e737461636b20342065766572",
+        "tenant_id": "openstack",
         "updated": "%(isotime)s",
         "user_id": "fake"
     }

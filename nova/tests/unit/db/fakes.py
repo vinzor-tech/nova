@@ -21,6 +21,7 @@ import datetime
 
 import six
 
+from nova import db
 from nova import exception
 
 
@@ -45,12 +46,12 @@ class FakeModel(object):
         return self.values[name]
 
 
-def stub_out(test, funcs):
+def stub_out(stubs, funcs):
     """Set the stubs in mapping in the db api."""
     for func in funcs:
         func_name = '_'.join(func.__name__.split('_')[1:])
-        test.stub_out('nova.db.' + func_name, func)
-        test.stub_out('nova.db.api.' + func_name, func)
+        stubs.Set(db, func_name, func)
+        stubs.Set(db.api, func_name, func)
 
 
 fixed_ip_fields = {'id': 0,
@@ -106,8 +107,10 @@ networks = [network_fields]
 
 def fake_floating_ip_allocate_address(context, project_id, pool,
                                       auto_assigned=False):
-    ips = [i for i in floating_ips if i['fixed_ip_id'] is None and
-           i['project_id'] is None and i['pool'] == pool]
+    ips = filter(lambda i: i['fixed_ip_id'] is None and
+                           i['project_id'] is None and
+                           i['pool'] == pool,
+                 floating_ips)
     if not ips:
         raise exception.NoMoreFloatingIps()
     ips[0]['project_id'] = project_id
@@ -116,14 +119,16 @@ def fake_floating_ip_allocate_address(context, project_id, pool,
 
 
 def fake_floating_ip_deallocate(context, address):
-    ips = [i for i in floating_ips if i['address'] == address]
+    ips = filter(lambda i: i['address'] == address,
+                 floating_ips)
     if ips:
         ips[0]['project_id'] = None
         ips[0]['auto_assigned'] = False
 
 
 def fake_floating_ip_disassociate(context, address):
-    ips = [i for i in floating_ips if i['address'] == address]
+    ips = filter(lambda i: i['address'] == address,
+                 floating_ips)
     if ips:
         fixed_ip_address = None
         if ips[0]['fixed_ip']:
@@ -135,8 +140,10 @@ def fake_floating_ip_disassociate(context, address):
 
 def fake_floating_ip_fixed_ip_associate(context, floating_address,
                                         fixed_address, host):
-    float = [i for i in floating_ips if i['address'] == floating_address]
-    fixed = [i for i in fixed_ips if i['address'] == fixed_address]
+    float = filter(lambda i: i['address'] == floating_address,
+                   floating_ips)
+    fixed = filter(lambda i: i['address'] == fixed_address,
+                   fixed_ips)
     if float and fixed:
         float[0]['fixed_ip'] = fixed[0]
         float[0]['fixed_ip_id'] = fixed[0]['id']
@@ -154,14 +161,16 @@ def fake_floating_ip_get_by_address(context, address):
     if isinstance(address, FakeModel):
         # NOTE(tr3buchet): yo dawg, i heard you like addresses
         address = address['address']
-    ips = [i for i in floating_ips if i['address'] == address]
+    ips = filter(lambda i: i['address'] == address,
+                 floating_ips)
     if not ips:
         raise exception.FloatingIpNotFoundForAddress(address=address)
     return FakeModel(ips[0])
 
 
 def fake_fixed_ip_associate(context, address, instance_id):
-    ips = [i for i in fixed_ips if i['address'] == address]
+    ips = filter(lambda i: i['address'] == address,
+                 fixed_ips)
     if not ips:
         raise exception.NoMoreFixedIps(net='fake_net')
     ips[0]['instance'] = True
@@ -169,8 +178,9 @@ def fake_fixed_ip_associate(context, address, instance_id):
 
 
 def fake_fixed_ip_associate_pool(context, network_id, instance_id):
-    ips = [i for i in fixed_ips if not i['instance'] and
-           (i['network_id'] == network_id or i['network_id'] is None)]
+    ips = filter(lambda i: (i['network_id'] == network_id or
+                            i['network_id'] is None) and not i['instance'],
+                 fixed_ips)
     if not ips:
         raise exception.NoMoreFixedIps(net=network_id)
     ips[0]['instance'] = True
@@ -187,7 +197,8 @@ def fake_fixed_ip_create(context, values):
 
 
 def fake_fixed_ip_disassociate(context, address):
-    ips = [i for i in fixed_ips if i['address'] == address]
+    ips = filter(lambda i: i['address'] == address,
+                 fixed_ips)
     if ips:
         ips[0]['instance_id'] = None
         ips[0]['instance'] = None
@@ -204,25 +215,28 @@ def fake_fixed_ip_get_all(context):
 
 
 def fake_fixed_ip_get_by_instance(context, instance_uuid):
-    ips = [i for i in fixed_ips if i['instance_uuid'] == instance_uuid]
+    ips = filter(lambda i: i['instance_uuid'] == instance_uuid,
+                 fixed_ips)
     return [FakeModel(i) for i in ips]
 
 
 def fake_fixed_ip_get_by_address(context, address):
-    ips = [i for i in fixed_ips if i['address'] == address]
+    ips = filter(lambda i: i['address'] == address,
+                 fixed_ips)
     if ips:
         return FakeModel(ips[0])
 
 
 def fake_fixed_ip_update(context, address, values):
-    ips = [i for i in fixed_ips if i['address'] == address]
+    ips = filter(lambda i: i['address'] == address,
+                 fixed_ips)
     fif = copy.deepcopy(fixed_ip_fields)
     if ips:
         for key in values:
             ips[0][key] = values[key]
             if key == 'virtual_interface_id':
-                vif = [v for v in virtual_interfacees
-                       if v['id'] == values[key]]
+                vif = filter(lambda x: x['id'] == values[key],
+                             virtual_interfacees)
                 if not vif:
                     continue
                 fif['virtual_interface'] = FakeModel(vif[0])
@@ -260,8 +274,9 @@ def fake_virtual_interface_get_by_instance(context, instance_id):
 def fake_virtual_interface_get_by_instance_and_network(context,
                                                        instance_id,
                                                        network_id):
-    vif = [v for v in virtual_interfacees if v['instance_id'] == instance_id
-           and v['network_id'] == network_id]
+    vif = filter(lambda m: m['instance_id'] == instance_id and
+                           m['network_id'] == network_id,
+                 virtual_interfacees)
     if not vif:
         return None
     return FakeModel(vif[0])
@@ -276,7 +291,7 @@ def fake_network_create_safe(context, values):
 
 
 def fake_network_get(context, network_id):
-    net = [n for n in networks if n['id'] == network_id]
+    net = filter(lambda n: n['id'] == network_id, networks)
     if not net:
         return None
     return FakeModel(net[0])
@@ -287,19 +302,19 @@ def fake_network_get_all(context):
 
 
 def fake_network_get_all_by_host(context, host):
-    nets = [n for n in networks if n['host'] == host]
+    nets = filter(lambda n: n['host'] == host, networks)
     return [FakeModel(n) for n in nets]
 
 
 def fake_network_set_host(context, network_id, host_id):
-    nets = [n for n in networks if n['id'] == network_id]
+    nets = filter(lambda n: n['id'] == network_id, networks)
     for net in nets:
         net['host'] = host_id
     return host_id
 
 
 def fake_network_update(context, network_id, values):
-    nets = [n for n in networks if n['id'] == network_id]
+    nets = filter(lambda n: n['id'] == network_id, networks)
     for net in nets:
         for key in values:
             net[key] = values[key]
@@ -310,7 +325,7 @@ def fake_project_get_networks(context, project_id):
             if n['project_id'] == project_id]
 
 
-def stub_out_db_network_api(test):
+def stub_out_db_network_api(stubs):
 
     funcs = [fake_floating_ip_allocate_address,
              fake_floating_ip_deallocate,
@@ -340,10 +355,10 @@ def stub_out_db_network_api(test):
              fake_network_update,
              fake_project_get_networks]
 
-    stub_out(test, funcs)
+    stub_out(stubs, funcs)
 
 
-def stub_out_db_instance_api(test, injected=True):
+def stub_out_db_instance_api(stubs, injected=True):
     """Stubs out the db API for creating Instances."""
 
     def _create_instance_type(**updates):
@@ -449,4 +464,4 @@ def stub_out_db_instance_api(test, injected=True):
              fake_flavor_get_by_name,
              fake_flavor_get,
              fake_fixed_ip_get_by_instance]
-    stub_out(test, funcs)
+    stub_out(stubs, funcs)

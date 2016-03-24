@@ -91,7 +91,6 @@ VIR_CRED_EXTERNAL = 9
 VIR_MIGRATE_LIVE = 1
 VIR_MIGRATE_PEER2PEER = 2
 VIR_MIGRATE_TUNNELLED = 4
-VIR_MIGRATE_PERSIST_DEST = 8
 VIR_MIGRATE_UNDEFINE_SOURCE = 16
 VIR_MIGRATE_NON_SHARED_INC = 128
 
@@ -151,7 +150,7 @@ VIR_SECRET_USAGE_TYPE_CEPH = 2
 VIR_SECRET_USAGE_TYPE_ISCSI = 3
 
 # Libvirt version
-FAKE_LIBVIRT_VERSION = 10002
+FAKE_LIBVIRT_VERSION = 9011
 
 
 class HostInfo(object):
@@ -573,8 +572,8 @@ class Domain(object):
 
     def info(self):
         return [self._state,
-                int(self._def['memory']),
-                int(self._def['memory']),
+                long(self._def['memory']),
+                long(self._def['memory']),
                 self._def['vcpu'],
                 123456789]
 
@@ -586,13 +585,6 @@ class Domain(object):
                 error_domain=VIR_FROM_QEMU)
 
     def migrateToURI2(self, dconnuri, miguri, dxml, flags, dname, bandwidth):
-        raise make_libvirtError(
-                libvirtError,
-                "Migration always fails for fake libvirt!",
-                error_code=VIR_ERR_INTERNAL_ERROR,
-                error_domain=VIR_FROM_QEMU)
-
-    def migrateToURI3(self, dconnuri, params, logical_sum):
         raise make_libvirtError(
                 libvirtError,
                 "Migration always fails for fake libvirt!",
@@ -781,12 +773,6 @@ class Domain(object):
     def abortJob(self):
         pass
 
-    def fsFreeze(self):
-        pass
-
-    def fsThaw(self):
-        pass
-
 
 class DomainSnapshot(object):
     def __init__(self, name, domain):
@@ -798,7 +784,7 @@ class DomainSnapshot(object):
 
 
 class Connection(object):
-    def __init__(self, uri=None, readonly=False, version=FAKE_LIBVIRT_VERSION,
+    def __init__(self, uri=None, readonly=False, version=9011,
                  hv_version=1001000, host_info=None):
         if not uri or uri == '':
             if allow_default_uri_connection:
@@ -882,7 +868,7 @@ class Connection(object):
         return len(self._running_vms)
 
     def listDomainsID(self):
-        return list(self._running_vms.keys())
+        return self._running_vms.keys()
 
     def lookupByID(self, id):
         if id in self._running_vms:

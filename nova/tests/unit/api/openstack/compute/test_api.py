@@ -13,7 +13,6 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-import mock
 from oslo_serialization import jsonutils
 import six
 import webob
@@ -21,7 +20,6 @@ import webob.dec
 import webob.exc
 
 from nova.api import openstack as openstack_api
-from nova.api.openstack import extensions
 from nova.api.openstack import wsgi
 from nova import exception
 from nova import test
@@ -32,12 +30,7 @@ class APITest(test.NoDBTestCase):
 
     def setUp(self):
         super(APITest, self).setUp()
-
-    @property
-    def wsgi_app(self):
-        with mock.patch.object(extensions.ExtensionManager, 'load_extension'):
-            # patch load_extension because it's expensive in fakes.wsgi_app
-            return fakes.wsgi_app(init_only=('versions',))
+        self.wsgi_app = fakes.wsgi_app()
 
     def _wsgi_app(self, inner_app):
         # simpler version of the app than fakes.wsgi_app
@@ -46,7 +39,7 @@ class APITest(test.NoDBTestCase):
     def test_malformed_json(self):
         req = webob.Request.blank('/')
         req.method = 'POST'
-        req.body = b'{'
+        req.body = '{'
         req.headers["content-type"] = "application/json"
 
         res = req.get_response(self.wsgi_app)
@@ -55,7 +48,7 @@ class APITest(test.NoDBTestCase):
     def test_malformed_xml(self):
         req = webob.Request.blank('/')
         req.method = 'POST'
-        req.body = b'<hi im not xml>'
+        req.body = '<hi im not xml>'
         req.headers["content-type"] = "application/xml"
 
         res = req.get_response(self.wsgi_app)
@@ -176,9 +169,9 @@ class APITest(test.NoDBTestCase):
 
 class APITestV21(APITest):
 
-    @property
-    def wsgi_app(self):
-        return fakes.wsgi_app_v21(init_only=('versions',))
+    def setUp(self):
+        super(APITestV21, self).setUp()
+        self.wsgi_app = fakes.wsgi_app_v21()
 
     # TODO(alex_xu): Get rid of the case translate NovaException to
     # HTTPException after V2 api code removed. Because V2.1 API required raise

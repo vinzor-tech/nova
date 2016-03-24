@@ -14,7 +14,7 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-"""Quotas for resources per project."""
+"""Quotas for instances, and floating ips."""
 
 import datetime
 

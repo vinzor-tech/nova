@@ -151,8 +151,9 @@ def read_stored_info(target, field=None, timestamped=False):
         # There is an assumption here that target is a base image filename.
         old_filename = target + '.sha1'
         if field == 'sha1' and os.path.exists(old_filename):
-            with open(old_filename) as hash_file:
-                hash_value = hash_file.read()
+            hash_file = open(old_filename)
+            hash_value = hash_file.read()
+            hash_file.close()
 
             write_stored_info(target, field=field, value=hash_value)
             os.remove(old_filename)
@@ -329,7 +330,7 @@ class ImageCacheManager(imagecache.ImageCacheManager):
                             inuse_images.append(backing_path)
 
                         if backing_path in self.unexplained_images:
-                            LOG.warning(_LW('Instance %(instance)s is using a '
+                            LOG.warn(_LW('Instance %(instance)s is using a '
                                          'backing file %(backing)s which '
                                          'does not appear in the image '
                                          'service'),
@@ -449,18 +450,10 @@ class ImageCacheManager(imagecache.ImageCacheManager):
         if not exists:
             return
 
-        lock_file = os.path.split(base_file)[-1]
-
-        @utils.synchronized(lock_file, external=True,
-                            lock_path=self.lock_path)
-        def _inner_remove_old_enough_file():
-            # NOTE(mikal): recheck that the file is old enough, as a new
-            # user of the file might have come along while we were waiting
-            # for the lock
-            exists, age = self._get_age_of_file(base_file)
-            if not exists or age < maxage:
-                return
-
+        if age < maxage:
+            LOG.info(_LI('Base or swap file too young to remove: %s'),
+                         base_file)
+        else:
             LOG.info(_LI('Removing base or swap file: %s'), base_file)
             try:
                 os.remove(base_file)
@@ -474,11 +467,6 @@ class ImageCacheManager(imagecache.ImageCacheManager):
                           {'base_file': base_file,
                            'error': e})
 
-        if age < maxage:
-            LOG.info(_LI('Base or swap file too young to remove: %s'),
-                         base_file)
-        else:
-            _inner_remove_old_enough_file()
             if remove_lock:
                 try:
                     # NOTE(jichenjc) The lock file will be constructed first
@@ -486,6 +474,7 @@ class ImageCacheManager(imagecache.ImageCacheManager):
                     # like nova-9e881789030568a317fad9daae82c5b1c65e0d4a
                     # or nova-03d8e206-6500-4d91-b47d-ee74897f9b4e
                     # according to the original file name
+                    lock_file = os.path.split(base_file)[-1]
                     lockutils.remove_external_lock_file(lock_file,
                         lock_file_prefix='nova-', lock_path=self.lock_path)
                 except OSError as e:
@@ -550,7 +539,7 @@ class ImageCacheManager(imagecache.ImageCacheManager):
                 self.active_base_files.append(base_file)
 
                 if not base_file:
-                    LOG.warning(_LW('image %(id)s at (%(base_file)s): warning '
+                    LOG.warn(_LW('image %(id)s at (%(base_file)s): warning '
                                  '-- an absent base file is in use! '
                                  'instances: %(instance_list)s'),
                                 {'id': img_id,
@@ -574,7 +563,8 @@ class ImageCacheManager(imagecache.ImageCacheManager):
                           {'id': img_id,
                            'base_file': base_file})
                 if os.path.exists(base_file):
-                    libvirt_utils.update_mtime(base_file)
+                    libvirt_utils.chown(base_file, os.getuid())
+                    os.utime(base_file, None)
 
     def _age_and_verify_swap_images(self, context, base_dir):
         LOG.debug('Verify swap images')
@@ -582,13 +572,14 @@ class ImageCacheManager(imagecache.ImageCacheManager):
         for ent in self.back_swap_images:
             base_file = os.path.join(base_dir, ent)
             if ent in self.used_swap_images and os.path.exists(base_file):
-                libvirt_utils.update_mtime(base_file)
+                    libvirt_utils.chown(base_file, os.getuid())
+                    os.utime(base_file, None)
             elif self.remove_unused_base_images:
                 self._remove_swap_file(base_file)
 
         error_images = self.used_swap_images - self.back_swap_images
         for error_image in error_images:
-            LOG.warning(_LW('%s swap image was used by instance'
+            LOG.warn(_LW('%s swap image was used by instance'
                          ' but no back files existing!'), error_image)
 
     def _age_and_verify_cached_images(self, context, all_instances, base_dir):
@@ -614,7 +605,7 @@ class ImageCacheManager(imagecache.ImageCacheManager):
 
         # Anything left is an unknown base image
         for img in self.unexplained_images:
-            LOG.warning(_LW('Unknown base file: %s'), img)
+            LOG.warn(_LW('Unknown base file: %s'), img)
             self.removable_base_files.append(img)
 
         # Dump these lists

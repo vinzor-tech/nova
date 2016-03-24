@@ -19,24 +19,18 @@ _hints = {
     'type': 'object',
     'properties': {
         'group': {
-            'type': 'string',
-            'format': 'uuid'
+            # NOTE: The value of 'group' is stored to value which is
+            # defined as varchar(255) in instance_system_metadata table.
+            'type': 'string', 'maxLength': 255,
         },
         'different_host': {
             # NOTE: The value of 'different_host' is the set of server
             # uuids where a new server is scheduled on a different host.
             # A user can specify one server as string parameter and should
             # specify multiple servers as array parameter instead.
-            'oneOf': [
-                {
-                    'type': 'string',
-                    'format': 'uuid'
-                },
-                {
-                    'type': 'array',
-                    'items': parameter_types.server_id
-                }
-            ]
+            'type': ['string', 'array'],
+            'format': 'uuid',
+            'items': parameter_types.server_id
         },
         'same_host': {
             # NOTE: The value of 'different_host' is the set of server

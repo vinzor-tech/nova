@@ -25,7 +25,7 @@ _fake_alias1 = """{
                "capability_type": "pci",
                "product_id": "4443",
                "vendor_id": "8086",
-               "device_type": "type-PCI"
+               "device_type": "ACCEL"
                }"""
 
 _fake_alias11 = """{
@@ -33,7 +33,7 @@ _fake_alias11 = """{
                "capability_type": "pci",
                "product_id": "4444",
                "vendor_id": "8086",
-               "device_type": "type-PCI"
+               "device_type": "ACCEL"
                }"""
 
 _fake_alias2 = """{
@@ -49,7 +49,7 @@ _fake_alias3 = """{
                "capability_type": "pci",
                "product_id": "1111",
                "vendor_id": "8086",
-               "device_type": "type-PF"
+               "device_type": "NIC"
                }"""
 
 
@@ -62,7 +62,7 @@ class AliasTestCase(test.NoDBTestCase):
             "capability_type": "pci",
             "product_id": "4443",
             "vendor_id": "8086",
-            "dev_type": "type-PCI"
+            "device_type": "ACCEL"
             }
         self.assertEqual(expect_dict, als['QuicAssist'][0])
 
@@ -74,13 +74,13 @@ class AliasTestCase(test.NoDBTestCase):
             "capability_type": "pci",
             "product_id": "4443",
             "vendor_id": "8086",
-            "dev_type": "type-PCI"
+            "device_type": "ACCEL"
             }
         expect_dict2 = {
             "capability_type": "pci",
             "product_id": "4444",
             "vendor_id": "8086",
-            "dev_type": "type-PCI"
+            "device_type": "ACCEL"
             }
 
         self.assertEqual(expect_dict1, als['QuicAssist'][0])
@@ -141,7 +141,7 @@ class AliasTestCase(test.NoDBTestCase):
                 "capability_type": "pci",
                 "product_id": "1111",
                 "vendor_id": "8086",
-                "device_type": "type-PCI"
+                "device_type": "ACCEL"
                 }"""])
         self.assertRaises(
             exception.PciInvalidAlias,
@@ -159,13 +159,13 @@ class AliasTestCase(test.NoDBTestCase):
         expect_request = [
             {'count': 3,
              'spec': [{'vendor_id': '8086', 'product_id': '4443',
-                       'dev_type': 'type-PCI',
+                       'device_type': 'ACCEL',
                        'capability_type': 'pci'}],
                        'alias_name': 'QuicAssist'},
 
             {'count': 1,
              'spec': [{'vendor_id': '8086', 'product_id': '1111',
-                       'dev_type': "type-PF",
+                       'device_type': "NIC",
                        'capability_type': 'pci'}],
              'alias_name': 'IntelNIC'}, ]
 
@@ -185,13 +185,13 @@ class AliasTestCase(test.NoDBTestCase):
         expect_request = [
             {'count': 3,
              'spec': [{'vendor_id': '8086', 'product_id': '4443',
-                       'dev_type': "type-PCI",
+                       'device_type': "ACCEL",
                        'capability_type': 'pci'}],
              'alias_name': 'QuicAssist'},
 
             {'count': 1,
              'spec': [{'vendor_id': '8086', 'product_id': '1111',
-                       'dev_type': "type-PF",
+                       'device_type': "NIC",
                        'capability_type': 'pci'}],
              'alias_name': 'IntelNIC'}, ]
 

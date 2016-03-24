@@ -22,6 +22,7 @@ from nova.compute import manager as compute_manager
 import nova.context
 from nova import db
 from nova import exception
+from nova.network import api as network_api
 from nova.network import manager as network_manager
 from nova.network import model as network_model
 from nova.network import rpcapi as network_rpcapi
@@ -32,7 +33,6 @@ from nova.objects import virtual_interface as vif_obj
 from nova.tests.unit.objects import test_fixed_ip
 from nova.tests.unit.objects import test_instance_info_cache
 from nova.tests.unit.objects import test_pci_device
-from nova.tests import uuidsentinel as uuids
 
 
 HOST = "testhost"
@@ -57,27 +57,27 @@ class FakeNetworkManager(network_manager.NetworkManager):
                  'updated_at': None,
                  'deleted_at': None,
                  'deleted': 0,
-                 'instance_uuid': uuids.instance_1,
+                 'instance_uuid': '00000000-0000-0000-0000-000000000010',
                  'network_id': 1,
-                 'uuid': uuids.vifs_1,
+                 'uuid': 'fake-uuid',
                  'address': 'DC:AD:BE:FF:EF:01'},
                 {'id': 1,
                  'created_at': None,
                  'updated_at': None,
                  'deleted_at': None,
                  'deleted': 0,
-                 'instance_uuid': uuids.instance_2,
+                 'instance_uuid': '00000000-0000-0000-0000-000000000020',
                  'network_id': 21,
-                 'uuid': uuids.vifs_2,
+                 'uuid': 'fake-uuid2',
                  'address': 'DC:AD:BE:FF:EF:02'},
                 {'id': 2,
                  'created_at': None,
                  'updated_at': None,
                  'deleted_at': None,
                  'deleted': 0,
-                 'instance_uuid': uuids.instance_1,
+                 'instance_uuid': '00000000-0000-0000-0000-000000000030',
                  'network_id': 31,
-                 'uuid': uuids.vifs_3,
+                 'uuid': 'fake-uuid3',
                  'address': 'DC:AD:BE:FF:EF:03'}]
 
         floating_ips = [dict(address='172.16.1.1',
@@ -166,7 +166,7 @@ def fake_network(network_id, ipv6=None):
     if ipv6 is None:
         ipv6 = CONF.use_ipv6
     fake_network = {'id': network_id,
-             'uuid': getattr(uuids, 'network%i' % network_id),
+             'uuid': '00000000-0000-0000-0000-00000000000000%02d' % network_id,
              'label': 'test%d' % network_id,
              'injected': False,
              'multi_host': False,
@@ -184,7 +184,7 @@ def fake_network(network_id, ipv6=None):
              'dns3': '192.168.%d.3' % network_id,
              'vlan': None,
              'host': None,
-             'project_id': uuids.project,
+             'project_id': 'fake_project',
              'vpn_public_address': '192.168.%d.2' % network_id,
              'vpn_public_port': None,
              'vpn_private_address': None,
@@ -221,9 +221,9 @@ def fake_vif(x):
            'deleted_at': None,
            'deleted': 0,
            'address': 'DE:AD:BE:EF:00:%02x' % x,
-           'uuid': getattr(uuids, 'vif%i' % x),
+           'uuid': '00000000-0000-0000-0000-00000000000000%02d' % x,
            'network_id': x,
-           'instance_uuid': uuids.vifs_1}
+           'instance_uuid': 'fake-uuid'}
 
 
 def floating_ip_ids():
@@ -247,7 +247,7 @@ def next_fixed_ip(network_id, num_floating_ips=0):
     return {'id': next_id,
             'network_id': network_id,
             'address': '192.168.%d.%03d' % (network_id, (next_id + 99)),
-            'instance_uuid': uuids.fixed_ip,
+            'instance_uuid': 1,
             'allocated': False,
             'reserved': False,
             'created_at': None,
@@ -284,9 +284,9 @@ def ipv4_like(ip, match_string):
     return True
 
 
-def fake_get_instance_nw_info(test, num_networks=1, ips_per_vif=2,
+def fake_get_instance_nw_info(stubs, num_networks=1, ips_per_vif=2,
                               floating_ips_per_fixed_ip=0):
-    # test is an instance of nova.test.TestCase
+    # stubs is the self.stubs from the test
     # ips_per_vif is the number of ips each vif will have
     # num_floating_ips is number of float ips for each fixed ip
     network = network_manager.FlatManager(host=HOST)
@@ -312,13 +312,13 @@ def fake_get_instance_nw_info(test, num_networks=1, ips_per_vif=2,
             'updated_at': None,
             'deleted_at': None,
             'deleted': False,
-            'instance_uuid': uuids.vifs_1,
+            'instance_uuid': 'fake-uuid',
             'network_info': '[]',
             }
         return fake_info_cache
 
-    test.stub_out('nova.db.fixed_ip_get_by_instance', fixed_ips_fake)
-    test.stub_out('nova.db.instance_info_cache_update', update_cache_fake)
+    stubs.Set(db, 'fixed_ip_get_by_instance', fixed_ips_fake)
+    stubs.Set(db, 'instance_info_cache_update', update_cache_fake)
 
     class FakeContext(nova.context.RequestContext):
         def is_admin(self):
@@ -330,30 +330,30 @@ def fake_get_instance_nw_info(test, num_networks=1, ips_per_vif=2,
     return nw_model
 
 
-def stub_out_nw_api_get_instance_nw_info(test, func=None,
+def stub_out_nw_api_get_instance_nw_info(stubs, func=None,
                                          num_networks=1,
                                          ips_per_vif=1,
                                          floating_ips_per_fixed_ip=0):
 
     def get_instance_nw_info(self, context, instance, conductor_api=None):
-        return fake_get_instance_nw_info(test, num_networks=num_networks,
+        return fake_get_instance_nw_info(stubs, num_networks=num_networks,
                         ips_per_vif=ips_per_vif,
                         floating_ips_per_fixed_ip=floating_ips_per_fixed_ip)
 
     if func is None:
         func = get_instance_nw_info
-    test.stub_out('nova.network.api.API.get_instance_nw_info', func)
+    stubs.Set(network_api.API, 'get_instance_nw_info', func)
 
 
-def stub_out_network_cleanup(test):
-    test.stub_out('nova.network.api.API.deallocate_for_instance',
+def stub_out_network_cleanup(stubs):
+    stubs.Set(network_api.API, 'deallocate_for_instance',
               lambda *args, **kwargs: None)
 
 
 _real_functions = {}
 
 
-def set_stub_network_methods(test):
+def set_stub_network_methods(stubs):
     global _real_functions
     cm = compute_manager.ComputeManager
     if not _real_functions:
@@ -367,18 +367,16 @@ def set_stub_network_methods(test):
     def fake_async_networkinfo(*args, **kwargs):
         return network_model.NetworkInfoAsyncWrapper(fake_networkinfo)
 
-    test.stub_out('nova.compute.manager.ComputeManager._allocate_network',
-                  fake_async_networkinfo)
-    test.stub_out('nova.compute.manager.ComputeManager._deallocate_network',
-                  lambda *args, **kwargs: None)
+    stubs.Set(cm, '_allocate_network', fake_async_networkinfo)
+    stubs.Set(cm, '_deallocate_network', lambda *args, **kwargs: None)
 
 
-def unset_stub_network_methods(test):
+def unset_stub_network_methods(stubs):
     global _real_functions
     if _real_functions:
+        cm = compute_manager.ComputeManager
         for name in _real_functions:
-            test.stub_out('nova.compute.manager.ComputeManager.' + name,
-                          _real_functions[name])
+            stubs.Set(cm, name, _real_functions[name])
 
 
 def stub_compute_with_ips(stubs):

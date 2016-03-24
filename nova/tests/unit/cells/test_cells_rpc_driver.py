@@ -19,17 +19,19 @@ Tests For Cells RPC Communication Driver
 
 import mock
 from mox3 import mox
+from oslo_config import cfg
 import oslo_messaging
 
 from nova.cells import messaging
 from nova.cells import rpc_driver
-import nova.conf
 from nova import context
 from nova import rpc
 from nova import test
 from nova.tests.unit.cells import fakes
 
-CONF = nova.conf.CONF
+CONF = cfg.CONF
+CONF.import_opt('rpc_driver_queue_base', 'nova.cells.rpc_driver',
+                group='cells')
 
 
 class CellsRPCDriverTestCase(test.NoDBTestCase):

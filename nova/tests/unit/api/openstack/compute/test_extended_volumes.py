@@ -21,6 +21,7 @@ from nova.api.openstack.compute import (extended_volumes
                                                    as extended_volumes_v21)
 from nova.api.openstack import wsgi as os_wsgi
 from nova import compute
+from nova import db
 from nova import objects
 from nova.objects import instance as instance_obj
 from nova import test
@@ -40,43 +41,22 @@ def fake_compute_get(*args, **kwargs):
 
 
 def fake_compute_get_all(*args, **kwargs):
-    db_list = [
-        fakes.stub_instance(1, uuid=UUID1),
-        fakes.stub_instance(2, uuid=UUID2),
-    ]
+    db_list = [fakes.stub_instance(1), fakes.stub_instance(2)]
     fields = instance_obj.INSTANCE_DEFAULT_FIELDS
     return instance_obj._make_instance_list(args[1],
                                             objects.InstanceList(),
                                             db_list, fields)
 
 
-def fake_bdms_get_all_by_instance_uuids(*args, **kwargs):
-    return [
-        fake_block_device.FakeDbBlockDeviceDict({
-            'id': 1,
-            'volume_id': 'some_volume_1',
-            'instance_uuid': UUID1,
-            'source_type': 'volume',
-            'destination_type': 'volume',
-            'delete_on_termination': True,
-        }),
-        fake_block_device.FakeDbBlockDeviceDict({
-            'id': 2,
-            'volume_id': 'some_volume_2',
-            'instance_uuid': UUID2,
-            'source_type': 'volume',
-            'destination_type': 'volume',
-            'delete_on_termination': False,
-        }),
-        fake_block_device.FakeDbBlockDeviceDict({
-            'id': 3,
-            'volume_id': 'some_volume_3',
-            'instance_uuid': UUID2,
-            'source_type': 'volume',
-            'destination_type': 'volume',
-            'delete_on_termination': False,
-        }),
-    ]
+def fake_bdms_get_all_by_instance(*args, **kwargs):
+    return [fake_block_device.FakeDbBlockDeviceDict(
+            {'volume_id': UUID1, 'source_type': 'volume',
+             'destination_type': 'volume', 'id': 1,
+             'delete_on_termination': True}),
+            fake_block_device.FakeDbBlockDeviceDict(
+            {'volume_id': UUID2, 'source_type': 'volume',
+             'destination_type': 'volume', 'id': 2,
+             'delete_on_termination': False})]
 
 
 def fake_volume_get(*args, **kwargs):
@@ -86,24 +66,20 @@ def fake_volume_get(*args, **kwargs):
 class ExtendedVolumesTestV21(test.TestCase):
     content_type = 'application/json'
     prefix = 'os-extended-volumes:'
-    exp_volumes_show = [{'id': 'some_volume_1'}]
-    exp_volumes_detail = [
-        [{'id': 'some_volume_1'}],
-        [{'id': 'some_volume_2'}, {'id': 'some_volume_3'}],
-    ]
+    exp_volumes = [{'id': UUID1}, {'id': UUID2}]
     wsgi_api_version = os_wsgi.DEFAULT_API_VERSION
 
     def setUp(self):
         super(ExtendedVolumesTestV21, self).setUp()
-        fakes.stub_out_nw_api(self)
+        fakes.stub_out_nw_api(self.stubs)
         self.stubs.Set(compute.api.API, 'get', fake_compute_get)
         self.stubs.Set(compute.api.API, 'get_all', fake_compute_get_all)
-        self.stub_out('nova.db.block_device_mapping_get_all_by_instance_uuids',
-                       fake_bdms_get_all_by_instance_uuids)
+        self.stubs.Set(db, 'block_device_mapping_get_all_by_instance',
+                       fake_bdms_get_all_by_instance)
         self._setUp()
         self.app = self._setup_app()
         return_server = fakes.fake_instance_get()
-        self.stub_out('nova.db.instance_get_by_uuid', return_server)
+        self.stubs.Set(db, 'instance_get_by_uuid', return_server)
 
     def _setup_app(self):
         return fakes.wsgi_app_v21(init_only=('os-extended-volumes',
@@ -112,6 +88,7 @@ class ExtendedVolumesTestV21(test.TestCase):
     def _setUp(self):
         self.Controller = extended_volumes_v21.ExtendedVolumesController()
         self.stubs.Set(volume.cinder.API, 'get', fake_volume_get)
+        self.action_url = "/%s/action" % UUID1
 
     def _make_request(self, url, body=None):
         req = webob.Request.blank('/v2/fake/servers' + url)
@@ -119,7 +96,7 @@ class ExtendedVolumesTestV21(test.TestCase):
         req.headers = {os_wsgi.API_VERSION_REQUEST_HEADER:
                        self.wsgi_api_version}
         if body:
-            req.body = jsonutils.dump_as_bytes(body)
+            req.body = jsonutils.dumps(body)
             req.method = 'POST'
         req.content_type = self.content_type
         res = req.get_response(self.app)
@@ -137,7 +114,7 @@ class ExtendedVolumesTestV21(test.TestCase):
         self.assertEqual(200, res.status_int)
         server = self._get_server(res.body)
         actual = server.get('%svolumes_attached' % self.prefix)
-        self.assertEqual(self.exp_volumes_show, actual)
+        self.assertEqual(self.exp_volumes, actual)
 
     def test_detail(self):
         res = self._make_request('/detail')
@@ -145,7 +122,7 @@ class ExtendedVolumesTestV21(test.TestCase):
         self.assertEqual(200, res.status_int)
         for i, server in enumerate(self._get_servers(res.body)):
             actual = server.get('%svolumes_attached' % self.prefix)
-            self.assertEqual(self.exp_volumes_detail[i], actual)
+            self.assertEqual(self.exp_volumes, actual)
 
 
 class ExtendedVolumesTestV2(ExtendedVolumesTestV21):
@@ -162,18 +139,8 @@ class ExtendedVolumesTestV2(ExtendedVolumesTestV21):
 
 class ExtendedVolumesTestV23(ExtendedVolumesTestV21):
 
-    exp_volumes_show = [
-        {'id': 'some_volume_1', 'delete_on_termination': True},
-    ]
-    exp_volumes_detail = [
-        [
-            {'id': 'some_volume_1', 'delete_on_termination': True},
-        ],
-        [
-            {'id': 'some_volume_2', 'delete_on_termination': False},
-            {'id': 'some_volume_3', 'delete_on_termination': False},
-        ],
-    ]
+    exp_volumes = [{'id': UUID1, 'delete_on_termination': True},
+                   {'id': UUID2, 'delete_on_termination': False}]
     wsgi_api_version = '2.3'
 
 

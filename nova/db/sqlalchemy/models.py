@@ -39,7 +39,8 @@ def MediumText():
     return Text().with_variant(MEDIUMTEXT(), 'mysql')
 
 
-class NovaBase(models.TimestampMixin,
+class NovaBase(models.SoftDeleteMixin,
+               models.TimestampMixin,
                models.ModelBase):
     metadata = None
 
@@ -72,8 +73,16 @@ class NovaBase(models.TimestampMixin,
         session.expunge(copy)
         return copy
 
+    def save(self, session=None):
+        from nova.db.sqlalchemy import api
 
-class Service(BASE, NovaBase, models.SoftDeleteMixin):
+        if session is None:
+            session = api.get_session()
+
+        super(NovaBase, self).save(session=session)
+
+
+class Service(BASE, NovaBase):
     """Represents a running service on a host."""
 
     __tablename__ = 'services'
@@ -95,17 +104,8 @@ class Service(BASE, NovaBase, models.SoftDeleteMixin):
     forced_down = Column(Boolean, default=False)
     version = Column(Integer, default=0)
 
-    instance = orm.relationship(
-        "Instance",
-        backref='services',
-        primaryjoin='and_(Service.host == Instance.host,'
-                    'Service.binary == "nova-compute",'
-                    'Instance.deleted == 0)',
-        foreign_keys=host,
-    )
 
-
-class ComputeNode(BASE, NovaBase, models.SoftDeleteMixin):
+class ComputeNode(BASE, NovaBase):
     """Represents a running compute service on a host."""
 
     __tablename__ = 'compute_nodes'
@@ -123,7 +123,6 @@ class ComputeNode(BASE, NovaBase, models.SoftDeleteMixin):
     # This field has to be set non-nullable in a later cycle (probably Lxxx)
     # once we are sure that all compute nodes in production report it.
     host = Column(String(255), nullable=True)
-    uuid = Column(String(36), nullable=True)
     vcpus = Column(Integer, nullable=False)
     memory_mb = Column(Integer, nullable=False)
     local_gb = Column(Integer, nullable=False)
@@ -159,7 +158,7 @@ class ComputeNode(BASE, NovaBase, models.SoftDeleteMixin):
     metrics = Column(Text)
 
     # Note(yongli): json string PCI Stats
-    # '[{"vendor_id":"8086", "product_id":"1234", "count":3 }, ...]'
+    # '{"vendor_id":"8086", "product_id":"1234", "count":3 }'
     pci_stats = Column(Text)
 
     # extra_resources is a json string containing arbitrary
@@ -176,10 +175,9 @@ class ComputeNode(BASE, NovaBase, models.SoftDeleteMixin):
     # allocation ratios provided by the RT
     ram_allocation_ratio = Column(Float, nullable=True)
     cpu_allocation_ratio = Column(Float, nullable=True)
-    disk_allocation_ratio = Column(Float, nullable=True)
 
 
-class Certificate(BASE, NovaBase, models.SoftDeleteMixin):
+class Certificate(BASE, NovaBase):
     """Represents a x509 certificate."""
     __tablename__ = 'certificates'
     __table_args__ = (
@@ -193,7 +191,7 @@ class Certificate(BASE, NovaBase, models.SoftDeleteMixin):
     file_name = Column(String(255))
 
 
-class Instance(BASE, NovaBase, models.SoftDeleteMixin):
+class Instance(BASE, NovaBase):
     """Represents a guest VM."""
     __tablename__ = 'instances'
     __table_args__ = (
@@ -212,8 +210,6 @@ class Instance(BASE, NovaBase, models.SoftDeleteMixin):
               'host', 'node', 'deleted'),
         Index('instances_host_deleted_cleaned_idx',
               'host', 'deleted', 'cleaned'),
-        Index('instances_deleted_created_at_idx',
-              'deleted', 'created_at'),
         schema.UniqueConstraint('uuid', name='uniq_instances0uuid'),
     )
     injected_files = []
@@ -343,7 +339,7 @@ class Instance(BASE, NovaBase, models.SoftDeleteMixin):
     cleaned = Column(Integer, default=0)
 
 
-class InstanceInfoCache(BASE, NovaBase, models.SoftDeleteMixin):
+class InstanceInfoCache(BASE, NovaBase):
     """Represents a cache of information about an instance
     """
     __tablename__ = 'instance_info_caches'
@@ -364,7 +360,7 @@ class InstanceInfoCache(BASE, NovaBase, models.SoftDeleteMixin):
                             primaryjoin=instance_uuid == Instance.uuid)
 
 
-class InstanceExtra(BASE, NovaBase, models.SoftDeleteMixin):
+class InstanceExtra(BASE, NovaBase):
     __tablename__ = 'instance_extra'
     __table_args__ = (
         Index('instance_extra_idx', 'instance_uuid'),)
@@ -383,7 +379,7 @@ class InstanceExtra(BASE, NovaBase, models.SoftDeleteMixin):
                             primaryjoin=instance_uuid == Instance.uuid)
 
 
-class InstanceTypes(BASE, NovaBase, models.SoftDeleteMixin):
+class InstanceTypes(BASE, NovaBase):
     """Represents possible flavors for instances.
 
     Note: instance_type and flavor are synonyms and the term instance_type is
@@ -414,7 +410,7 @@ class InstanceTypes(BASE, NovaBase, models.SoftDeleteMixin):
     is_public = Column(Boolean, default=True)
 
 
-class Quota(BASE, NovaBase, models.SoftDeleteMixin):
+class Quota(BASE, NovaBase):
     """Represents a single quota override for a project.
 
     If there is no row for a given project id and resource, then the
@@ -438,7 +434,7 @@ class Quota(BASE, NovaBase, models.SoftDeleteMixin):
     hard_limit = Column(Integer)
 
 
-class ProjectUserQuota(BASE, NovaBase, models.SoftDeleteMixin):
+class ProjectUserQuota(BASE, NovaBase):
     """Represents a single quota override for a user with in a project."""
 
     __tablename__ = 'project_user_quotas'
@@ -460,7 +456,7 @@ class ProjectUserQuota(BASE, NovaBase, models.SoftDeleteMixin):
     hard_limit = Column(Integer)
 
 
-class QuotaClass(BASE, NovaBase, models.SoftDeleteMixin):
+class QuotaClass(BASE, NovaBase):
     """Represents a single quota override for a quota class.
 
     If there is no row for a given quota class and resource, then the
@@ -480,7 +476,7 @@ class QuotaClass(BASE, NovaBase, models.SoftDeleteMixin):
     hard_limit = Column(Integer)
 
 
-class QuotaUsage(BASE, NovaBase, models.SoftDeleteMixin):
+class QuotaUsage(BASE, NovaBase):
     """Represents the current usage for a given resource."""
 
     __tablename__ = 'quota_usages'
@@ -504,7 +500,7 @@ class QuotaUsage(BASE, NovaBase, models.SoftDeleteMixin):
     until_refresh = Column(Integer)
 
 
-class Reservation(BASE, NovaBase, models.SoftDeleteMixin):
+class Reservation(BASE, NovaBase):
     """Represents a resource reservation for quotas."""
 
     __tablename__ = 'reservations'
@@ -533,7 +529,7 @@ class Reservation(BASE, NovaBase, models.SoftDeleteMixin):
                          'QuotaUsage.deleted == 0)')
 
 
-class Snapshot(BASE, NovaBase, models.SoftDeleteMixin):
+class Snapshot(BASE, NovaBase):
     """Represents a block storage device that can be attached to a VM."""
     __tablename__ = 'snapshots'
     __table_args__ = ()
@@ -561,7 +557,7 @@ class Snapshot(BASE, NovaBase, models.SoftDeleteMixin):
     display_description = Column(String(255))
 
 
-class BlockDeviceMapping(BASE, NovaBase, models.SoftDeleteMixin):
+class BlockDeviceMapping(BASE, NovaBase):
     """Represents block device mapping that is defined by EC2."""
     __tablename__ = "block_device_mapping"
     __table_args__ = (
@@ -615,7 +611,7 @@ class BlockDeviceMapping(BASE, NovaBase, models.SoftDeleteMixin):
     connection_info = Column(MediumText())
 
 
-class SecurityGroupInstanceAssociation(BASE, NovaBase, models.SoftDeleteMixin):
+class SecurityGroupInstanceAssociation(BASE, NovaBase):
     __tablename__ = 'security_group_instance_association'
     __table_args__ = (
         Index('security_group_instance_association_instance_uuid_idx',
@@ -626,7 +622,7 @@ class SecurityGroupInstanceAssociation(BASE, NovaBase, models.SoftDeleteMixin):
     instance_uuid = Column(String(36), ForeignKey('instances.uuid'))
 
 
-class SecurityGroup(BASE, NovaBase, models.SoftDeleteMixin):
+class SecurityGroup(BASE, NovaBase):
     """Represents a security group."""
     __tablename__ = 'security_groups'
     __table_args__ = (
@@ -657,7 +653,7 @@ class SecurityGroup(BASE, NovaBase, models.SoftDeleteMixin):
                              backref='security_groups')
 
 
-class SecurityGroupIngressRule(BASE, NovaBase, models.SoftDeleteMixin):
+class SecurityGroupIngressRule(BASE, NovaBase):
     """Represents a rule in a security group."""
     __tablename__ = 'security_group_rules'
     __table_args__ = ()
@@ -685,7 +681,7 @@ class SecurityGroupIngressRule(BASE, NovaBase, models.SoftDeleteMixin):
         'SecurityGroupIngressRule.deleted == 0)')
 
 
-class SecurityGroupIngressDefaultRule(BASE, NovaBase, models.SoftDeleteMixin):
+class SecurityGroupIngressDefaultRule(BASE, NovaBase):
     __tablename__ = 'security_group_default_rules'
     __table_args__ = ()
     id = Column(Integer, primary_key=True, nullable=False)
@@ -695,7 +691,7 @@ class SecurityGroupIngressDefaultRule(BASE, NovaBase, models.SoftDeleteMixin):
     cidr = Column(types.CIDR())
 
 
-class ProviderFirewallRule(BASE, NovaBase, models.SoftDeleteMixin):
+class ProviderFirewallRule(BASE, NovaBase):
     """Represents a rule in a security group."""
     __tablename__ = 'provider_fw_rules'
     __table_args__ = ()
@@ -707,7 +703,7 @@ class ProviderFirewallRule(BASE, NovaBase, models.SoftDeleteMixin):
     cidr = Column(types.CIDR())
 
 
-class KeyPair(BASE, NovaBase, models.SoftDeleteMixin):
+class KeyPair(BASE, NovaBase):
     """Represents a public key pair for ssh / WinRM."""
     __tablename__ = 'key_pairs'
     __table_args__ = (
@@ -726,15 +722,22 @@ class KeyPair(BASE, NovaBase, models.SoftDeleteMixin):
                   nullable=False, server_default='ssh')
 
 
-class Migration(BASE, NovaBase, models.SoftDeleteMixin):
+class Migration(BASE, NovaBase):
     """Represents a running host-to-host migration."""
     __tablename__ = 'migrations'
     __table_args__ = (
         Index('migrations_instance_uuid_and_status_idx', 'deleted',
               'instance_uuid', 'status'),
+        # MySQL has a limit of 3072 bytes for an multi-column index. This
+        # index ends up being larger than that using the utf-8 encoding.
+        # Limiting the index to the prefixes will keep it under the limit.
+        # FIXME(johannes): Is it MySQL or InnoDB that imposes the limit?
         Index('migrations_by_host_nodes_and_status_idx', 'deleted',
               'source_compute', 'dest_compute', 'source_node', 'dest_node',
-              'status'),
+              'status', mysql_length={'source_compute': 100,
+                                      'dest_compute': 100,
+                                      'source_node': 100,
+                                      'dest_node': 100}),
     )
     id = Column(Integer, primary_key=True, nullable=False)
     # NOTE(tr3buchet): the ____compute variables are instance['host']
@@ -754,12 +757,6 @@ class Migration(BASE, NovaBase, models.SoftDeleteMixin):
                                  'evacuation'),
                             nullable=True)
     hidden = Column(Boolean, default=False)
-    memory_total = Column(BigInteger, nullable=True)
-    memory_processed = Column(BigInteger, nullable=True)
-    memory_remaining = Column(BigInteger, nullable=True)
-    disk_total = Column(BigInteger, nullable=True)
-    disk_processed = Column(BigInteger, nullable=True)
-    disk_remaining = Column(BigInteger, nullable=True)
 
     instance = orm.relationship("Instance", foreign_keys=instance_uuid,
                             primaryjoin='and_(Migration.instance_uuid == '
@@ -767,7 +764,7 @@ class Migration(BASE, NovaBase, models.SoftDeleteMixin):
                                         '0)')
 
 
-class Network(BASE, NovaBase, models.SoftDeleteMixin):
+class Network(BASE, NovaBase):
     """Represents a network."""
     __tablename__ = 'networks'
     __table_args__ = (
@@ -819,7 +816,7 @@ class Network(BASE, NovaBase, models.SoftDeleteMixin):
     share_address = Column(Boolean, default=False)
 
 
-class VirtualInterface(BASE, NovaBase, models.SoftDeleteMixin):
+class VirtualInterface(BASE, NovaBase):
     """Represents a virtual interface on an instance."""
     __tablename__ = 'virtual_interfaces'
     __table_args__ = (
@@ -837,8 +834,8 @@ class VirtualInterface(BASE, NovaBase, models.SoftDeleteMixin):
 
 
 # TODO(vish): can these both come from the same baseclass?
-class FixedIp(BASE, NovaBase, models.SoftDeleteMixin):
-    """Represents a fixed IP for an instance."""
+class FixedIp(BASE, NovaBase):
+    """Represents a fixed ip for an instance."""
     __tablename__ = 'fixed_ips'
     __table_args__ = (
         schema.UniqueConstraint(
@@ -895,8 +892,8 @@ class FixedIp(BASE, NovaBase, models.SoftDeleteMixin):
                                 'VirtualInterface.deleted == 0)')
 
 
-class FloatingIp(BASE, NovaBase, models.SoftDeleteMixin):
-    """Represents a floating IP that dynamically forwards to a fixed IP."""
+class FloatingIp(BASE, NovaBase):
+    """Represents a floating ip that dynamically forwards to a fixed ip."""
     __tablename__ = 'floating_ips'
     __table_args__ = (
         schema.UniqueConstraint("address", "deleted",
@@ -925,7 +922,7 @@ class FloatingIp(BASE, NovaBase, models.SoftDeleteMixin):
                                 'FixedIp.deleted == 0)')
 
 
-class DNSDomain(BASE, NovaBase, models.SoftDeleteMixin):
+class DNSDomain(BASE, NovaBase):
     """Represents a DNS domain with availability zone or project info."""
     __tablename__ = 'dns_domains'
     __table_args__ = (
@@ -939,7 +936,7 @@ class DNSDomain(BASE, NovaBase, models.SoftDeleteMixin):
     project_id = Column(String(255))
 
 
-class ConsolePool(BASE, NovaBase, models.SoftDeleteMixin):
+class ConsolePool(BASE, NovaBase):
     """Represents pool of consoles on the same physical node."""
     __tablename__ = 'console_pools'
     __table_args__ = (
@@ -957,7 +954,7 @@ class ConsolePool(BASE, NovaBase, models.SoftDeleteMixin):
     compute_host = Column(String(255))
 
 
-class Console(BASE, NovaBase, models.SoftDeleteMixin):
+class Console(BASE, NovaBase):
     """Represents a console session for an instance."""
     __tablename__ = 'consoles'
     __table_args__ = (
@@ -972,7 +969,7 @@ class Console(BASE, NovaBase, models.SoftDeleteMixin):
     pool = orm.relationship(ConsolePool, backref=orm.backref('consoles'))
 
 
-class InstanceMetadata(BASE, NovaBase, models.SoftDeleteMixin):
+class InstanceMetadata(BASE, NovaBase):
     """Represents a user-provided metadata key/value pair for an instance."""
     __tablename__ = 'instance_metadata'
     __table_args__ = (
@@ -990,7 +987,7 @@ class InstanceMetadata(BASE, NovaBase, models.SoftDeleteMixin):
                                 'InstanceMetadata.deleted == 0)')
 
 
-class InstanceSystemMetadata(BASE, NovaBase, models.SoftDeleteMixin):
+class InstanceSystemMetadata(BASE, NovaBase):
     """Represents a system-owned metadata key/value pair for an instance."""
     __tablename__ = 'instance_system_metadata'
     __table_args__ = (
@@ -1007,7 +1004,7 @@ class InstanceSystemMetadata(BASE, NovaBase, models.SoftDeleteMixin):
                             foreign_keys=instance_uuid)
 
 
-class InstanceTypeProjects(BASE, NovaBase, models.SoftDeleteMixin):
+class InstanceTypeProjects(BASE, NovaBase):
     """Represent projects associated instance_types."""
     __tablename__ = "instance_type_projects"
     __table_args__ = (schema.UniqueConstraint(
@@ -1027,7 +1024,7 @@ class InstanceTypeProjects(BASE, NovaBase, models.SoftDeleteMixin):
                  'InstanceTypeProjects.deleted == 0)')
 
 
-class InstanceTypeExtraSpecs(BASE, NovaBase, models.SoftDeleteMixin):
+class InstanceTypeExtraSpecs(BASE, NovaBase):
     """Represents additional specs as key/value pairs for an instance_type."""
     __tablename__ = 'instance_type_extra_specs'
     __table_args__ = (
@@ -1052,7 +1049,7 @@ class InstanceTypeExtraSpecs(BASE, NovaBase, models.SoftDeleteMixin):
                  'InstanceTypeExtraSpecs.deleted == 0)')
 
 
-class Cell(BASE, NovaBase, models.SoftDeleteMixin):
+class Cell(BASE, NovaBase):
     """Represents parent and child cells of this cell.  Cells can
     have multiple parents and children, so there could be any number
     of entries with is_parent=True or False
@@ -1074,7 +1071,7 @@ class Cell(BASE, NovaBase, models.SoftDeleteMixin):
     is_parent = Column(Boolean())
 
 
-class AggregateHost(BASE, NovaBase, models.SoftDeleteMixin):
+class AggregateHost(BASE, NovaBase):
     """Represents a host that is member of an aggregate."""
     __tablename__ = 'aggregate_hosts'
     __table_args__ = (schema.UniqueConstraint(
@@ -1087,7 +1084,7 @@ class AggregateHost(BASE, NovaBase, models.SoftDeleteMixin):
     aggregate_id = Column(Integer, ForeignKey('aggregates.id'), nullable=False)
 
 
-class AggregateMetadata(BASE, NovaBase, models.SoftDeleteMixin):
+class AggregateMetadata(BASE, NovaBase):
     """Represents a metadata key/value pair for an aggregate."""
     __tablename__ = 'aggregate_metadata'
     __table_args__ = (
@@ -1102,12 +1099,11 @@ class AggregateMetadata(BASE, NovaBase, models.SoftDeleteMixin):
     aggregate_id = Column(Integer, ForeignKey('aggregates.id'), nullable=False)
 
 
-class Aggregate(BASE, NovaBase, models.SoftDeleteMixin):
+class Aggregate(BASE, NovaBase):
     """Represents a cluster of hosts that exists in this zone."""
     __tablename__ = 'aggregates'
-    __table_args__ = (Index('aggregate_uuid_idx', 'uuid'),)
+    __table_args__ = ()
     id = Column(Integer, primary_key=True, autoincrement=True)
-    uuid = Column(String(36))
     name = Column(String(255))
     _hosts = orm.relationship(AggregateHost,
                           primaryjoin='and_('
@@ -1140,7 +1136,7 @@ class Aggregate(BASE, NovaBase, models.SoftDeleteMixin):
         return self.metadetails['availability_zone']
 
 
-class AgentBuild(BASE, NovaBase, models.SoftDeleteMixin):
+class AgentBuild(BASE, NovaBase):
     """Represents an agent build."""
     __tablename__ = 'agent_builds'
     __table_args__ = (
@@ -1158,7 +1154,7 @@ class AgentBuild(BASE, NovaBase, models.SoftDeleteMixin):
     md5hash = Column(String(255))
 
 
-class BandwidthUsage(BASE, NovaBase, models.SoftDeleteMixin):
+class BandwidthUsage(BASE, NovaBase):
     """Cache for instance bandwidth usage data pulled from the hypervisor."""
     __tablename__ = 'bw_usage_cache'
     __table_args__ = (
@@ -1176,7 +1172,7 @@ class BandwidthUsage(BASE, NovaBase, models.SoftDeleteMixin):
     last_ctr_out = Column(BigInteger)
 
 
-class VolumeUsage(BASE, NovaBase, models.SoftDeleteMixin):
+class VolumeUsage(BASE, NovaBase):
     """Cache for volume usage data pulled from the hypervisor."""
     __tablename__ = 'volume_usage_cache'
     __table_args__ = ()
@@ -1198,7 +1194,7 @@ class VolumeUsage(BASE, NovaBase, models.SoftDeleteMixin):
     curr_write_bytes = Column(BigInteger, default=0)
 
 
-class S3Image(BASE, NovaBase, models.SoftDeleteMixin):
+class S3Image(BASE, NovaBase):
     """Compatibility layer for the S3 image service talking to Glance."""
     __tablename__ = 's3_images'
     __table_args__ = ()
@@ -1206,7 +1202,7 @@ class S3Image(BASE, NovaBase, models.SoftDeleteMixin):
     uuid = Column(String(36), nullable=False)
 
 
-class VolumeIdMapping(BASE, NovaBase, models.SoftDeleteMixin):
+class VolumeIdMapping(BASE, NovaBase):
     """Compatibility layer for the EC2 volume service."""
     __tablename__ = 'volume_id_mappings'
     __table_args__ = ()
@@ -1214,7 +1210,7 @@ class VolumeIdMapping(BASE, NovaBase, models.SoftDeleteMixin):
     uuid = Column(String(36), nullable=False)
 
 
-class SnapshotIdMapping(BASE, NovaBase, models.SoftDeleteMixin):
+class SnapshotIdMapping(BASE, NovaBase):
     """Compatibility layer for the EC2 snapshot service."""
     __tablename__ = 'snapshot_id_mappings'
     __table_args__ = ()
@@ -1222,7 +1218,7 @@ class SnapshotIdMapping(BASE, NovaBase, models.SoftDeleteMixin):
     uuid = Column(String(36), nullable=False)
 
 
-class InstanceFault(BASE, NovaBase, models.SoftDeleteMixin):
+class InstanceFault(BASE, NovaBase):
     __tablename__ = 'instance_faults'
     __table_args__ = (
         Index('instance_faults_host_idx', 'host'),
@@ -1239,7 +1235,7 @@ class InstanceFault(BASE, NovaBase, models.SoftDeleteMixin):
     host = Column(String(255))
 
 
-class InstanceAction(BASE, NovaBase, models.SoftDeleteMixin):
+class InstanceAction(BASE, NovaBase):
     """Track client actions on an instance.
 
     The intention is that there will only be one of these per user request.  A
@@ -1263,7 +1259,7 @@ class InstanceAction(BASE, NovaBase, models.SoftDeleteMixin):
     message = Column(String(255))
 
 
-class InstanceActionEvent(BASE, NovaBase, models.SoftDeleteMixin):
+class InstanceActionEvent(BASE, NovaBase):
     """Track events that occur during an InstanceAction."""
     __tablename__ = 'instance_actions_events'
     __table_args__ = ()
@@ -1279,7 +1275,7 @@ class InstanceActionEvent(BASE, NovaBase, models.SoftDeleteMixin):
     details = Column(Text)
 
 
-class InstanceIdMapping(BASE, NovaBase, models.SoftDeleteMixin):
+class InstanceIdMapping(BASE, NovaBase):
     """Compatibility layer for the EC2 instance service."""
     __tablename__ = 'instance_id_mappings'
     __table_args__ = (
@@ -1289,7 +1285,7 @@ class InstanceIdMapping(BASE, NovaBase, models.SoftDeleteMixin):
     uuid = Column(String(36), nullable=False)
 
 
-class TaskLog(BASE, NovaBase, models.SoftDeleteMixin):
+class TaskLog(BASE, NovaBase):
     """Audit log for background periodic tasks."""
     __tablename__ = 'task_log'
     __table_args__ = (
@@ -1314,7 +1310,7 @@ class TaskLog(BASE, NovaBase, models.SoftDeleteMixin):
     errors = Column(Integer(), default=0)
 
 
-class InstanceGroupMember(BASE, NovaBase, models.SoftDeleteMixin):
+class InstanceGroupMember(BASE, NovaBase):
     """Represents the members for an instance group."""
     __tablename__ = 'instance_group_member'
     __table_args__ = (
@@ -1326,7 +1322,7 @@ class InstanceGroupMember(BASE, NovaBase, models.SoftDeleteMixin):
                       nullable=False)
 
 
-class InstanceGroupPolicy(BASE, NovaBase, models.SoftDeleteMixin):
+class InstanceGroupPolicy(BASE, NovaBase):
     """Represents the policy type for an instance group."""
     __tablename__ = 'instance_group_policy'
     __table_args__ = (
@@ -1338,7 +1334,7 @@ class InstanceGroupPolicy(BASE, NovaBase, models.SoftDeleteMixin):
                       nullable=False)
 
 
-class InstanceGroup(BASE, NovaBase, models.SoftDeleteMixin):
+class InstanceGroup(BASE, NovaBase):
     """Represents an instance group.
 
     A group will maintain a collection of instances and the relationship
@@ -1374,7 +1370,7 @@ class InstanceGroup(BASE, NovaBase, models.SoftDeleteMixin):
         return [m.instance_id for m in self._members]
 
 
-class PciDevice(BASE, NovaBase, models.SoftDeleteMixin):
+class PciDevice(BASE, NovaBase):
     """Represents a PCI host device that can be passed through to instances.
     """
     __tablename__ = 'pci_devices'
@@ -1383,8 +1379,6 @@ class PciDevice(BASE, NovaBase, models.SoftDeleteMixin):
               'compute_node_id', 'deleted'),
         Index('ix_pci_devices_instance_uuid_deleted',
               'instance_uuid', 'deleted'),
-        Index('ix_pci_devices_compute_node_id_parent_addr_deleted',
-              'compute_node_id', 'parent_addr', 'deleted'),
         schema.UniqueConstraint(
             "compute_node_id", "address", "deleted",
             name="uniq_pci_devices0compute_node_id0address0deleted")
@@ -1417,7 +1411,6 @@ class PciDevice(BASE, NovaBase, models.SoftDeleteMixin):
 
     numa_node = Column(Integer, nullable=True)
 
-    parent_addr = Column(String(12), nullable=True)
     instance = orm.relationship(Instance, backref="pci_devices",
                             foreign_keys=instance_uuid,
                             primaryjoin='and_('
@@ -1442,87 +1435,3 @@ class Tag(BASE, models.ModelBase):
                     'Instance.deleted == 0)',
         foreign_keys=resource_id
     )
-
-
-class ResourceProvider(BASE, models.ModelBase):
-    """Represents a mapping to a providers of resources."""
-
-    __tablename__ = "resource_providers"
-    __table_args__ = (
-        Index('resource_providers_uuid_idx', 'uuid'),
-        schema.UniqueConstraint('uuid',
-            name='uniq_resource_providers0uuid'),
-        Index('resource_providers_name_idx', 'name'),
-        schema.UniqueConstraint('name',
-            name='uniq_resource_providers0name')
-    )
-
-    id = Column(Integer, primary_key=True, nullable=False)
-    uuid = Column(String(36), nullable=False)
-    name = Column(Unicode(200), nullable=True)
-    generation = Column(Integer, default=0)
-    can_host = Column(Integer, default=0)
-
-
-class Inventory(BASE, models.ModelBase):
-    """Represents a quantity of available resource."""
-
-    __tablename__ = "inventories"
-    __table_args__ = (
-        Index('inventories_resource_provider_id_idx',
-              'resource_provider_id'),
-        Index('inventories_resource_class_id_idx',
-              'resource_class_id'),
-        Index('inventories_resource_provider_resource_class_idx',
-              'resource_provider_id', 'resource_class_id'),
-        schema.UniqueConstraint('resource_provider_id', 'resource_class_id',
-            name='uniq_inventories0resource_provider_resource_class')
-    )
-
-    id = Column(Integer, primary_key=True, nullable=False)
-    resource_provider_id = Column(Integer, nullable=False)
-    resource_class_id = Column(Integer, nullable=False)
-    total = Column(Integer, nullable=False)
-    reserved = Column(Integer, nullable=False)
-    min_unit = Column(Integer, nullable=False)
-    max_unit = Column(Integer, nullable=False)
-    step_size = Column(Integer, nullable=False)
-    allocation_ratio = Column(Float, nullable=False)
-    resource_provider = orm.relationship(
-        "ResourceProvider",
-        primaryjoin=('and_(Inventory.resource_provider_id == '
-                     'ResourceProvider.id)'),
-        foreign_keys=resource_provider_id)
-
-
-class Allocation(BASE, models.ModelBase):
-    """A use of inventory."""
-
-    __tablename__ = "allocations"
-    __table_args__ = (
-        Index('allocations_resource_provider_class_used_idx',
-              'resource_provider_id', 'resource_class_id',
-              'used'),
-        Index('allocations_resource_class_id_idx',
-              'resource_class_id'),
-        Index('allocations_consumer_id_idx', 'consumer_id')
-    )
-
-    id = Column(Integer, primary_key=True, nullable=False)
-    resource_provider_id = Column(Integer, nullable=False)
-    consumer_id = Column(String(36), nullable=False)
-    resource_class_id = Column(Integer, nullable=False)
-    used = Column(Integer, nullable=False)
-
-
-class ResourceProviderAggregate(BASE, models.ModelBase):
-    """Assocate a resource provider with an aggregate."""
-
-    __tablename__ = 'resource_provider_aggregates'
-    __table_args__ = (
-        Index('resource_provider_aggregates_aggregate_id_idx',
-              'aggregate_id'),
-    )
-
-    resource_provider_id = Column(Integer, primary_key=True, nullable=False)
-    aggregate_id = Column(Integer, primary_key=True, nullable=False)

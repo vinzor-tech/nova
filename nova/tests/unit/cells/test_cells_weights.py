@@ -20,7 +20,6 @@ Cells with higher weights should be given priority for new builds.
 
 import datetime
 
-from oslo_utils import fixture as utils_fixture
 from oslo_utils import timeutils
 
 from nova.cells import state
@@ -180,11 +179,15 @@ class MuteWeigherTestClass(_WeigherTestClass):
                    group='cells')
 
         self.now = timeutils.utcnow()
-        self.useFixture(utils_fixture.TimeFixture(self.now))
+        timeutils.set_time_override(self.now)
 
         self.cells = _get_fake_cells()
         for cell in self.cells:
             cell.last_seen = self.now
+
+    def tearDown(self):
+        super(MuteWeigherTestClass, self).tearDown()
+        timeutils.clear_time_override()
 
     def test_non_mute(self):
         weight_properties = {}

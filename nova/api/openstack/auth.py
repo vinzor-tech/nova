@@ -74,14 +74,10 @@ class NoAuthMiddleware(NoAuthMiddlewareBase):
         return self.base_call(req, True, always_admin=False)
 
 
-class NoAuthMiddlewareV2_18(NoAuthMiddlewareBase):
-    """Return a fake token if one isn't specified.
-
-    This provides a version of the middleware which does not add
-    project_id into server management urls.
-
-    """
+# TODO(johnthetubaguy) this should be removed in the M release
+class NoAuthMiddlewareV3(NoAuthMiddlewareBase):
+    """Return a fake token if one isn't specified."""
 
     @webob.dec.wsgify(RequestClass=wsgi.Request)
     def __call__(self, req):
-        return self.base_call(req, False, always_admin=False)
+        return self.base_call(req, False)

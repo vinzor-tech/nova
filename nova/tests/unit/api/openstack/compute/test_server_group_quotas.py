@@ -21,6 +21,7 @@ from nova.api.openstack.compute.legacy_v2.contrib import server_groups
 from nova.api.openstack.compute import server_groups as sg_v21
 from nova.api.openstack import extensions
 from nova import context
+import nova.db
 from nova import quota
 from nova import test
 from nova.tests.unit.api.openstack import fakes
@@ -145,10 +146,10 @@ class ServerGroupQuotasTestV21(test.TestCase):
             self.assertEqual(sg['id'], group_id)
             return server_group_db(sg)
 
-        self.stub_out('nova.db.instance_group_delete',
-                      server_group_delete)
-        self.stub_out('nova.db.instance_group_get',
-                      return_server_group)
+        self.stubs.Set(nova.db, 'instance_group_delete',
+                       server_group_delete)
+        self.stubs.Set(nova.db, 'instance_group_get',
+                       return_server_group)
 
         resp = self.controller.delete(self.req, '123')
         self.assertTrue(self.called)

@@ -66,6 +66,5 @@ class TestUtilsTestCase(test.TestCase):
                 self.assertTrue(test_utils.is_ipv6_supported())
 
             with fixtures.MonkeyPatch('sys.platform', 'linux2'):
-                with fixtures.MonkeyPatch('six.moves.builtins.open',
-                                          fake_open):
+                with fixtures.MonkeyPatch('__builtin__.open', fake_open):
                     self.assertFalse(test_utils.is_ipv6_supported())

@@ -25,7 +25,9 @@ class ExtendedVolumesController(wsgi.Controller):
     def __init__(self, *args, **kwargs):
         super(ExtendedVolumesController, self).__init__(*args, **kwargs)
 
-    def _extend_server(self, context, server, bdms):
+    def _extend_server(self, context, server, instance):
+        bdms = objects.BlockDeviceMappingList.get_by_instance_uuid(
+                context, instance.uuid)
         volume_ids = [bdm.volume_id for bdm in bdms if bdm.volume_id]
         key = "%s:volumes_attached" % Extended_volumes.alias
         server[key] = [{'id': volume_id} for volume_id in volume_ids]
@@ -35,29 +37,21 @@ class ExtendedVolumesController(wsgi.Controller):
         context = req.environ['nova.context']
         if authorize(context):
             server = resp_obj.obj['server']
-            bdms = objects.BlockDeviceMappingList.bdms_by_instance_uuid(
-                context, [server['id']])
-            instance_bdms = self._get_instance_bdms(bdms, server)
-            self._extend_server(context, server, instance_bdms)
+            db_instance = req.get_db_instance(server['id'])
+            # server['id'] is guaranteed to be in the cache due to
+            # the core API adding it in its 'show' method.
+            self._extend_server(context, server, db_instance)
 
     @wsgi.extends
     def detail(self, req, resp_obj):
         context = req.environ['nova.context']
         if authorize(context):
             servers = list(resp_obj.obj['servers'])
-            instance_uuids = [server['id'] for server in servers]
-            bdms = objects.BlockDeviceMappingList.bdms_by_instance_uuid(
-                context, instance_uuids)
             for server in servers:
-                instance_bdms = self._get_instance_bdms(bdms, server)
-                self._extend_server(context, server, instance_bdms)
-
-    def _get_instance_bdms(self, bdms, server):
-        # server['id'] is guaranteed to be in the cache due to
-        # the core API adding it in the 'detail' or 'show' method.
-        # If that instance has since been deleted, it won't be in the
-        # 'bdms' dictionary though, so use 'get' to avoid KeyErrors.
-        return bdms.get(server['id'], [])
+                db_instance = req.get_db_instance(server['id'])
+                # server['id'] is guaranteed to be in the cache due to
+                # the core API adding it in its 'detail' method.
+                self._extend_server(context, server, db_instance)
 
 
 class Extended_volumes(extensions.ExtensionDescriptor):

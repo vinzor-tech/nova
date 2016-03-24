@@ -20,12 +20,12 @@
 Helper classes for Ironic HTTP PATCH creation.
 """
 
+from oslo_config import cfg
 from oslo_serialization import jsonutils
 import six
 
-import nova.conf
-
-CONF = nova.conf.CONF
+CONF = cfg.CONF
+CONF.import_opt('default_ephemeral_format', 'nova.virt.driver')
 
 
 def create(node):
@@ -106,3 +106,14 @@ class GenericDriverFields(object):
             patch.append({'path': '/instance_info/capabilities',
                           'op': 'add', 'value': jsonutils.dumps(capabilities)})
         return patch
+
+    def get_cleanup_patch(self, instance, network_info, flavor):
+        """Build a patch to clean up the fields.
+
+        :param instance: the instance object.
+        :param network_info: the instance network information.
+        :param flavor: the flavor object.
+        :returns: a json-patch with the fields that needs to be updated.
+
+        """
+        return []

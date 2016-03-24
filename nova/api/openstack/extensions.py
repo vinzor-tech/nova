@@ -211,7 +211,7 @@ class ExtensionManager(object):
 
         if isinstance(ext_factory, six.string_types):
             if ext_factory.startswith('nova.api.openstack.compute.contrib'):
-                LOG.warning(_LW("The legacy v2 API module already moved into"
+                LOG.warn(_LW("The legacy v2 API module already moved into"
                              "'nova.api.openstack.compute.legacy_v2.contrib'. "
                              "Use new path instead of old path %s"),
                          ext_factory)
@@ -391,7 +391,7 @@ def check_compute_policy(context, action, target, scope='compute'):
 
 
 # NOTE(alex_xu): The functions os_compute_authorizer and
-# os_compute_soft_authorizer are used to policy enforcement for OpenStack
+# os_compute_soft_authorizer are used to policy enforcement for Openstack
 # Compute API, now Nova V2.1 REST API will invoke it.
 #
 
@@ -484,9 +484,9 @@ def expected_errors(errors):
                         t_errors = errors
                     if exc.code in t_errors:
                         raise
-                elif isinstance(exc, exception.Forbidden):
+                elif isinstance(exc, exception.PolicyNotAuthorized):
                     # Note(cyeoh): Special case to handle
-                    # Forbidden exceptions so every
+                    # PolicyNotAuthorized exceptions so every
                     # extension method does not need to wrap authorize
                     # calls. ResourceExceptionHandler silently
                     # converts NotAuthorized to HTTPForbidden

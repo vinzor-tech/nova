@@ -10,7 +10,6 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from nova import objects
 from nova.scheduler.filters import retry_filter
 from nova import test
 from nova.tests.unit.scheduler import fakes
@@ -25,30 +24,23 @@ class TestRetryFilter(test.NoDBTestCase):
     def test_retry_filter_disabled(self):
         # Test case where retry/re-scheduling is disabled.
         host = fakes.FakeHostState('host1', 'node1', {})
-        spec_obj = objects.RequestSpec(retry=None)
-        self.assertTrue(self.filt_cls.host_passes(host, spec_obj))
+        filter_properties = {}
+        self.assertTrue(self.filt_cls.host_passes(host, filter_properties))
 
     def test_retry_filter_pass(self):
         # Node not previously tried.
         host = fakes.FakeHostState('host1', 'nodeX', {})
-        retry = objects.SchedulerRetries(
-            num_attempts=2,
-            hosts=objects.ComputeNodeList(objects=[
-                # same host, different node
-                objects.ComputeNode(host='host1', hypervisor_hostname='node1'),
-                # different host and node
-                objects.ComputeNode(host='host2', hypervisor_hostname='node2'),
-            ]))
-        spec_obj = objects.RequestSpec(retry=retry)
-        self.assertTrue(self.filt_cls.host_passes(host, spec_obj))
+        retry = dict(num_attempts=2,
+                     hosts=[['host1', 'node1'],  # same host, different node
+                            ['host2', 'node2'],  # different host and node
+                            ])
+        filter_properties = dict(retry=retry)
+        self.assertTrue(self.filt_cls.host_passes(host, filter_properties))
 
     def test_retry_filter_fail(self):
         # Node was already tried.
         host = fakes.FakeHostState('host1', 'node1', {})
-        retry = objects.SchedulerRetries(
-            num_attempts=1,
-            hosts=objects.ComputeNodeList(objects=[
-                objects.ComputeNode(host='host1', hypervisor_hostname='node1')
-            ]))
-        spec_obj = objects.RequestSpec(retry=retry)
-        self.assertFalse(self.filt_cls.host_passes(host, spec_obj))
+        retry = dict(num_attempts=1,
+                     hosts=[['host1', 'node1']])
+        filter_properties = dict(retry=retry)
+        self.assertFalse(self.filt_cls.host_passes(host, filter_properties))

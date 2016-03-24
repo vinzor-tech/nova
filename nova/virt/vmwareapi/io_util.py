@@ -34,7 +34,6 @@ IMAGE_API = image.API()
 
 IO_THREAD_SLEEP_TIME = .01
 GLANCE_POLL_INTERVAL = 5
-CHUNK_SIZE = 64 * 1024  # default chunk size for image transfer
 
 
 class ThreadSafePipe(queue.LightQueue):
@@ -174,7 +173,7 @@ class IOThread(object):
             self._running = True
             while self._running:
                 try:
-                    data = self.input.read(CHUNK_SIZE)
+                    data = self.input.read(None)
                     if not data:
                         self.stop()
                         self.done.send(True)

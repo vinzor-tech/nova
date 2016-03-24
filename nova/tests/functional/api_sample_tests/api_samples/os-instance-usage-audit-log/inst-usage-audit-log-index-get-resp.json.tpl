@@ -1,7 +1,7 @@
 {
     "instance_usage_audit_logs": {
         "hosts_not_run": [
-            "%(host_name)s"
+            "%(hostid)s"
         ],
         "log": {},
         "num_hosts": 1,

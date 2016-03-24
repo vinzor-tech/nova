@@ -35,7 +35,6 @@ from nova.cells import opts as cells_opts
 from nova.cells import rpcapi as cells_rpcapi
 from nova import context
 from nova import network
-from nova.network.security_group import openstack_driver
 from nova import objects
 from nova.objects import keypair as keypair_obj
 from nova import utils
@@ -50,8 +49,7 @@ metadata_opts = [
                     'config drive'),
     cfg.StrOpt('vendordata_driver',
                default='nova.api.metadata.vendordata_json.JsonFileVendorData',
-               help='DEPRECATED: Driver to use for vendor data',
-               deprecated_for_removal=True),
+               help='Driver to use for vendor data'),
 ]
 
 CONF = cfg.CONF
@@ -129,8 +127,7 @@ class InstanceMetadata(object):
         self.availability_zone = az.get_instance_availability_zone(ctxt,
                                                                    instance)
 
-        secgroup_api = openstack_driver.get_openstack_security_group_driver()
-        self.security_groups = secgroup_api.get_instance_security_groups(
+        self.security_groups = objects.SecurityGroupList.get_by_instance(
             ctxt, instance)
 
         self.mappings = _format_instance_mapping(ctxt, instance)
@@ -345,7 +342,7 @@ class InstanceMetadata(object):
             metadata['project_id'] = self.instance.project_id
 
         self.set_mimetype(MIME_TYPE_APPLICATION_JSON)
-        return jsonutils.dump_as_bytes(metadata)
+        return jsonutils.dumps(metadata)
 
     def _handle_content(self, path_tokens):
         if len(path_tokens) == 1:
@@ -375,8 +372,8 @@ class InstanceMetadata(object):
 
     def _network_data(self, version, path):
         if self.network_metadata is None:
-            return jsonutils.dump_as_bytes({})
-        return jsonutils.dump_as_bytes(self.network_metadata)
+            return jsonutils.dumps({})
+        return jsonutils.dumps(self.network_metadata)
 
     def _password(self, version, path):
         if self._check_os_version(GRIZZLY, version):
@@ -386,7 +383,7 @@ class InstanceMetadata(object):
     def _vendor_data(self, version, path):
         if self._check_os_version(HAVANA, version):
             self.set_mimetype(MIME_TYPE_APPLICATION_JSON)
-            return jsonutils.dump_as_bytes(self.vddriver.get())
+            return jsonutils.dumps(self.vddriver.get())
         raise KeyError(path)
 
     def _check_version(self, required, requested, versions=VERSIONS):
@@ -465,7 +462,7 @@ class InstanceMetadata(object):
                 pass
 
             filepath = os.path.join('ec2', version, 'meta-data.json')
-            yield (filepath, jsonutils.dump_as_bytes(data['meta-data']))
+            yield (filepath, jsonutils.dumps(data['meta-data']))
 
         ALL_OPENSTACK_VERSIONS = OPENSTACK_VERSIONS + ["latest"]
         for version in ALL_OPENSTACK_VERSIONS:
@@ -480,11 +477,11 @@ class InstanceMetadata(object):
                 path = 'openstack/%s/%s' % (version, VD_JSON_NAME)
                 yield (path, self.lookup(path))
 
+        for (cid, content) in six.iteritems(self.content):
             if self._check_version(LIBERTY, version, ALL_OPENSTACK_VERSIONS):
                 path = 'openstack/%s/%s' % (version, NW_JSON_NAME)
                 yield (path, self.lookup(path))
 
-        for (cid, content) in six.iteritems(self.content):
             yield ('%s/%s/%s' % ("openstack", CONTENT_DIR, cid), content)
 
 
@@ -545,9 +542,7 @@ def get_metadata_by_address(address):
 def get_metadata_by_instance_id(instance_id, address, ctxt=None):
     ctxt = ctxt or context.get_admin_context()
     instance = objects.Instance.get_by_uuid(
-        ctxt, instance_id, expected_attrs=['ec2_ids', 'flavor', 'info_cache',
-                                           'metadata', 'system_metadata',
-                                           'security_groups'])
+        ctxt, instance_id, expected_attrs=['ec2_ids', 'flavor', 'info_cache'])
     return InstanceMetadata(instance, address)
 
 

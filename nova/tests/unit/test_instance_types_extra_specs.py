@@ -16,7 +16,8 @@ Unit Tests for instance types extra specs code
 
 from nova.compute import arch
 from nova import context
-from nova import objects
+from nova import db
+from nova import exception
 from nova import test
 
 
@@ -25,49 +26,61 @@ class InstanceTypeExtraSpecsTestCase(test.TestCase):
     def setUp(self):
         super(InstanceTypeExtraSpecsTestCase, self).setUp()
         self.context = context.get_admin_context()
-        flavor = objects.Flavor(context=self.context,
-                                name="cg1.4xlarge",
-                                memory_mb=22000,
-                                vcpus=8,
-                                root_gb=1690,
-                                ephemeral_gb=2000,
-                                flavorid=105)
+        values = dict(name="cg1.4xlarge",
+                      memory_mb=22000,
+                      vcpus=8,
+                      root_gb=1690,
+                      ephemeral_gb=2000,
+                      flavorid=105)
         self.specs = dict(cpu_arch=arch.X86_64,
                           cpu_model="Nehalem",
                           xpu_arch="fermi",
                           xpus="2",
                           xpu_model="Tesla 2050")
-        flavor.extra_specs = self.specs
-        flavor.create()
-        self.flavor = flavor
-        self.instance_type_id = flavor.id
-        self.flavorid = flavor.flavorid
+        values['extra_specs'] = self.specs
+        ref = db.flavor_create(self.context,
+                               values)
+        self.instance_type_id = ref["id"]
+        self.flavorid = ref["flavorid"]
 
     def tearDown(self):
         # Remove the instance type from the database
-        self.flavor.destroy()
+        db.flavor_destroy(self.context, "cg1.4xlarge")
         super(InstanceTypeExtraSpecsTestCase, self).tearDown()
 
     def test_instance_type_specs_get(self):
-        flavor = objects.Flavor.get_by_flavor_id(self.context,
-                                                 self.flavorid)
-        self.assertEqual(self.specs, flavor.extra_specs)
+        actual_specs = db.flavor_extra_specs_get(
+                              self.context,
+                              self.flavorid)
+        self.assertEqual(self.specs, actual_specs)
 
     def test_flavor_extra_specs_delete(self):
         del self.specs["xpu_model"]
-        del self.flavor.extra_specs['xpu_model']
-        self.flavor.save()
-        flavor = objects.Flavor.get_by_flavor_id(self.context,
-                                                 self.flavorid)
-        self.assertEqual(self.specs, flavor.extra_specs)
+        db.flavor_extra_specs_delete(self.context,
+                                     self.flavorid,
+                                     "xpu_model")
+        actual_specs = db.flavor_extra_specs_get(
+                              self.context,
+                              self.flavorid)
+        self.assertEqual(self.specs, actual_specs)
 
     def test_instance_type_extra_specs_update(self):
         self.specs["cpu_model"] = "Sandy Bridge"
-        self.flavor.extra_specs["cpu_model"] = "Sandy Bridge"
-        self.flavor.save()
-        flavor = objects.Flavor.get_by_flavor_id(self.context,
-                                                 self.flavorid)
-        self.assertEqual(self.specs, flavor.extra_specs)
+        db.flavor_extra_specs_update_or_create(
+                              self.context,
+                              self.flavorid,
+                              dict(cpu_model="Sandy Bridge"))
+        actual_specs = db.flavor_extra_specs_get(
+                              self.context,
+                              self.flavorid)
+        self.assertEqual(self.specs, actual_specs)
+
+    def test_instance_type_extra_specs_update_with_nonexisting_flavor(self):
+        extra_specs = dict(cpu_arch=arch.X86_64)
+        nonexisting_flavorid = "some_flavor_that_does_not_exist"
+        self.assertRaises(exception.FlavorNotFound,
+                          db.flavor_extra_specs_update_or_create,
+                          self.context, nonexisting_flavorid, extra_specs)
 
     def test_instance_type_extra_specs_create(self):
         net_attrs = {
@@ -75,35 +88,55 @@ class InstanceTypeExtraSpecsTestCase(test.TestCase):
             "net_mbps": "10000"
         }
         self.specs.update(net_attrs)
-        self.flavor.extra_specs.update(net_attrs)
-        self.flavor.save()
-        flavor = objects.Flavor.get_by_flavor_id(self.context,
-                                                 self.flavorid)
-        self.assertEqual(self.specs, flavor.extra_specs)
+        db.flavor_extra_specs_update_or_create(
+                              self.context,
+                              self.flavorid,
+                              net_attrs)
+        actual_specs = db.flavor_extra_specs_get(
+                              self.context,
+                              self.flavorid)
+        self.assertEqual(self.specs, actual_specs)
 
     def test_instance_type_get_with_extra_specs(self):
-        flavor = objects.Flavor.get_by_id(self.context, 5)
-        self.assertEqual(flavor.extra_specs, {})
+        instance_type = db.flavor_get(
+                            self.context,
+                            self.instance_type_id)
+        self.assertEqual(instance_type['extra_specs'],
+                         self.specs)
+        instance_type = db.flavor_get(
+                            self.context,
+                            5)
+        self.assertEqual(instance_type['extra_specs'], {})
 
     def test_instance_type_get_by_name_with_extra_specs(self):
-        flavor = objects.Flavor.get_by_name(self.context,
-                                            "cg1.4xlarge")
-        self.assertEqual(flavor.extra_specs, self.specs)
-        flavor = objects.Flavor.get_by_name(self.context,
-                                            "m1.small")
-        self.assertEqual(flavor.extra_specs, {})
+        instance_type = db.flavor_get_by_name(
+                            self.context,
+                            "cg1.4xlarge")
+        self.assertEqual(instance_type['extra_specs'],
+                         self.specs)
+        instance_type = db.flavor_get_by_name(
+                            self.context,
+                            "m1.small")
+        self.assertEqual(instance_type['extra_specs'], {})
 
     def test_instance_type_get_by_flavor_id_with_extra_specs(self):
-        flavor = objects.Flavor.get_by_flavor_id(self.context, 105)
-        self.assertEqual(flavor.extra_specs, self.specs)
-        flavor = objects.Flavor.get_by_flavor_id(self.context, 2)
-        self.assertEqual(flavor.extra_specs, {})
+        instance_type = db.flavor_get_by_flavor_id(
+                            self.context,
+                            105)
+        self.assertEqual(instance_type['extra_specs'],
+                         self.specs)
+        instance_type = db.flavor_get_by_flavor_id(
+                            self.context,
+                            2)
+        self.assertEqual(instance_type['extra_specs'], {})
 
     def test_instance_type_get_all(self):
-        flavors = objects.FlavorList.get_all(self.context)
+        types = db.flavor_get_all(self.context)
 
-        name2specs = {flavor.name: flavor.extra_specs
-                      for flavor in flavors}
+        name2specs = {}
+        for instance_type in types:
+            name = instance_type['name']
+            name2specs[name] = instance_type['extra_specs']
 
         self.assertEqual(name2specs['cg1.4xlarge'], self.specs)
         self.assertEqual(name2specs['m1.small'], {})

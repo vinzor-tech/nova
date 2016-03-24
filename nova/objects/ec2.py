@@ -19,8 +19,10 @@ from nova.objects import base
 from nova.objects import fields
 
 
+# TODO(berrange): Remove NovaObjectDictCompat
 @base.NovaObjectRegistry.register
-class EC2InstanceMapping(base.NovaPersistentObject, base.NovaObject):
+class EC2InstanceMapping(base.NovaPersistentObject, base.NovaObject,
+                         base.NovaObjectDictCompat):
     # Version 1.0: Initial version
     VERSION = '1.0'
 
@@ -32,7 +34,7 @@ class EC2InstanceMapping(base.NovaPersistentObject, base.NovaObject):
     @staticmethod
     def _from_db_object(context, imap, db_imap):
         for field in imap.fields:
-            setattr(imap, field, db_imap[field])
+            imap[field] = db_imap[field]
         imap._context = context
         imap.obj_reset_changes()
         return imap
@@ -58,8 +60,10 @@ class EC2InstanceMapping(base.NovaPersistentObject, base.NovaObject):
             return cls._from_db_object(context, cls(), db_imap)
 
 
+# TODO(berrange): Remove NovaObjectDictCompat
 @base.NovaObjectRegistry.register
-class EC2VolumeMapping(base.NovaPersistentObject, base.NovaObject):
+class EC2VolumeMapping(base.NovaPersistentObject, base.NovaObject,
+                       base.NovaObjectDictCompat):
     # Version 1.0: Initial version
     VERSION = '1.0'
 
@@ -71,7 +75,7 @@ class EC2VolumeMapping(base.NovaPersistentObject, base.NovaObject):
     @staticmethod
     def _from_db_object(context, vmap, db_vmap):
         for field in vmap.fields:
-            setattr(vmap, field, db_vmap[field])
+            vmap[field] = db_vmap[field]
         vmap._context = context
         vmap.obj_reset_changes()
         return vmap
@@ -97,8 +101,10 @@ class EC2VolumeMapping(base.NovaPersistentObject, base.NovaObject):
             return cls._from_db_object(context, cls(context), db_vmap)
 
 
+# TODO(berrange): Remove NovaObjectDictCompat
 @base.NovaObjectRegistry.register
-class EC2SnapshotMapping(base.NovaPersistentObject, base.NovaObject):
+class EC2SnapshotMapping(base.NovaPersistentObject, base.NovaObject,
+                         base.NovaObjectDictCompat):
     # Version 1.0: Initial version
     VERSION = '1.0'
 
@@ -110,7 +116,7 @@ class EC2SnapshotMapping(base.NovaPersistentObject, base.NovaObject):
     @staticmethod
     def _from_db_object(context, smap, db_smap):
         for field in smap.fields:
-            setattr(smap, field, db_smap[field])
+            smap[field] = db_smap[field]
         smap._context = context
         smap.obj_reset_changes()
         return smap

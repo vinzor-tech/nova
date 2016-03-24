@@ -165,8 +165,3 @@ def get_properties_for_a_collection_of_objects(vim, type,
 def get_about_info(vim):
     """Get the About Info from the service content."""
     return vim.service_content.about
-
-
-def get_entity_name(session, entity):
-    return session._call_method(vutil, 'get_object_property',
-                                entity, 'name')

@@ -34,6 +34,11 @@ class VirtCPUModel(base.NovaObject):
         'match': fields.CPUMatchField(nullable=True),
     }
 
+    obj_relationships = {
+        'topology': [('1.0', '1.0')],
+        'features': [('1.0', '1.0')],
+    }
+
     def obj_load_attr(self, attrname):
         setattr(self, attrname, None)
 
@@ -55,7 +60,7 @@ class VirtCPUModel(base.NovaObject):
 
 @base.NovaObjectRegistry.register
 class VirtCPUFeature(base.NovaObject):
-    VERSION = '1.0'
+    VERSION = VirtCPUModel.VERSION
 
     fields = {
         'policy': fields.CPUFeaturePolicyField(nullable=True),

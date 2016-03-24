@@ -12,8 +12,6 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-import copy
-
 from nova.api.validation import parameter_types
 
 
@@ -57,11 +55,6 @@ create = {
 }
 
 
-create_v20 = copy.deepcopy(create)
-create_v20['properties']['cell']['properties']['name'] = (parameter_types.
-    cell_name_leading_trailing_spaces)
-
-
 update = {
     'type': 'object',
     'properties': {
@@ -90,11 +83,6 @@ update = {
     'required': ['cell'],
     'additionalProperties': False,
 }
-
-
-update_v20 = copy.deepcopy(create)
-update_v20['properties']['cell']['properties']['name'] = (parameter_types.
-    cell_name_leading_trailing_spaces)
 
 
 sync_instances = {

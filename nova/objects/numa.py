@@ -52,6 +52,10 @@ class NUMACell(base.NovaObject):
         'mempages': fields.ListOfObjectsField('NUMAPagesTopology'),
         }
 
+    obj_relationships = {
+        'mempages': [('1.2', '1.0')]
+    }
+
     def __eq__(self, other):
         return all_things_equal(self, other)
 
@@ -92,20 +96,6 @@ class NUMACell(base.NovaObject):
             raise exception.CPUPinningInvalid(requested=list(cpus),
                                               pinned=list(self.pinned_cpus))
         self.pinned_cpus -= cpus
-
-    def pin_cpus_with_siblings(self, cpus):
-        pin_siblings = set()
-        for sib in self.siblings:
-            if cpus & sib:
-                pin_siblings.update(sib)
-        self.pin_cpus(pin_siblings)
-
-    def unpin_cpus_with_siblings(self, cpus):
-        pin_siblings = set()
-        for sib in self.siblings:
-            if cpus & sib:
-                pin_siblings.update(sib)
-        self.unpin_cpus(pin_siblings)
 
     def _to_dict(self):
         return {
@@ -185,6 +175,10 @@ class NUMATopology(base.NovaObject,
     fields = {
         'cells': fields.ListOfObjectsField('NUMACell'),
         }
+
+    obj_relationships = {
+        'cells': [('1.0', '1.0'), ('1.1', '1.1'), ('1.2', '1.2')]
+    }
 
     @classmethod
     def obj_from_primitive(cls, primitive, context=None):

@@ -19,10 +19,10 @@ from oslo_log import log as logging
 import paste.urlmap
 import six
 
-if six.PY2:
-    import urllib2
-else:
+if six.PY3:
     from urllib import request as urllib2
+else:
+    import urllib2
 
 from nova.api.openstack import wsgi
 

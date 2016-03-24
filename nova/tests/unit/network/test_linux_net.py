@@ -14,16 +14,16 @@
 # under the License.
 
 import calendar
+import contextlib
 import datetime
 import os
-import re
 import time
 
 import mock
 from mox3 import mox
-import netifaces
 from oslo_concurrency import processutils
 from oslo_config import cfg
+from oslo_log import log as logging
 from oslo_serialization import jsonutils
 from oslo_utils import fileutils
 from oslo_utils import timeutils
@@ -33,11 +33,11 @@ from nova import db
 from nova import exception
 from nova.network import driver
 from nova.network import linux_net
-from nova.network import model as network_model
 from nova import objects
 from nova import test
 from nova import utils
 
+LOG = logging.getLogger(__name__)
 CONF = cfg.CONF
 CONF.import_opt('share_dhcp_address', 'nova.objects.network')
 CONF.import_opt('network_device_mtu', 'nova.objects.network')
@@ -396,16 +396,15 @@ class LinuxNetworkTestCase(test.NoDBTestCase):
         def get_instance(_context, instance_id):
             return instances[instance_id]
 
-        self.stub_out('nova.db.virtual_interface_get_by_instance', get_vifs)
-        self.stub_out('nova.db.instance_get', get_instance)
-        self.stub_out('nova.db.network_get_associated_fixed_ips',
-                      get_associated)
+        self.stubs.Set(db, 'virtual_interface_get_by_instance', get_vifs)
+        self.stubs.Set(db, 'instance_get', get_instance)
+        self.stubs.Set(db, 'network_get_associated_fixed_ips', get_associated)
 
     def _test_add_snat_rule(self, expected, is_external):
 
         def verify_add_rule(chain, rule):
-            self.assertEqual('snat', chain)
-            self.assertEqual(expected, rule)
+            self.assertEqual(chain, 'snat')
+            self.assertEqual(rule, expected)
             self.called = True
 
         self.stubs.Set(linux_net.iptables_manager.ipv4['nat'],
@@ -506,7 +505,7 @@ class LinuxNetworkTestCase(test.NoDBTestCase):
         actual_hosts = self.driver.get_dhcp_hosts(self.context, networks[0],
                                                   fixedips)
 
-        self.assertEqual(expected, actual_hosts)
+        self.assertEqual(actual_hosts, expected)
 
     def test_get_dhcp_hosts_for_nw01(self):
         self.flags(use_single_default_gateway=True)
@@ -520,7 +519,7 @@ class LinuxNetworkTestCase(test.NoDBTestCase):
         fixedips = self._get_fixedips(networks[1], host='fake_instance01')
         actual_hosts = self.driver.get_dhcp_hosts(self.context, networks[1],
                                                   fixedips)
-        self.assertEqual(expected, actual_hosts)
+        self.assertEqual(actual_hosts, expected)
 
     def test_get_dns_hosts_for_nw00(self):
         expected = (
@@ -529,7 +528,7 @@ class LinuxNetworkTestCase(test.NoDBTestCase):
                 "192.168.0.102\tfake_instance00.novalocal"
         )
         actual_hosts = self.driver.get_dns_hosts(self.context, networks[0])
-        self.assertEqual(expected, actual_hosts)
+        self.assertEqual(actual_hosts, expected)
 
     def test_get_dns_hosts_for_nw01(self):
         expected = (
@@ -538,7 +537,7 @@ class LinuxNetworkTestCase(test.NoDBTestCase):
                 "192.168.1.102\tfake_instance01.novalocal"
         )
         actual_hosts = self.driver.get_dns_hosts(self.context, networks[1])
-        self.assertEqual(expected, actual_hosts)
+        self.assertEqual(actual_hosts, expected)
 
     def test_get_dhcp_opts_for_nw00(self):
         self.flags(use_single_default_gateway=True)
@@ -547,7 +546,7 @@ class LinuxNetworkTestCase(test.NoDBTestCase):
         actual_opts = self.driver.get_dhcp_opts(self.context, networks[0],
                                                 fixedips)
 
-        self.assertEqual(expected_opts, actual_opts)
+        self.assertEqual(actual_opts, expected_opts)
 
     def test_get_dhcp_opts_for_nw00_no_single_default_gateway(self):
         self.flags(use_single_default_gateway=False)
@@ -556,7 +555,7 @@ class LinuxNetworkTestCase(test.NoDBTestCase):
         actual_opts = self.driver.get_dhcp_opts(self.context, networks[0],
                                                 fixedips)
 
-        self.assertEqual(expected_opts, actual_opts)
+        self.assertEqual(actual_opts, expected_opts)
 
     def test_get_dhcp_opts_for_nw01(self):
         self.flags(use_single_default_gateway=True)
@@ -565,7 +564,7 @@ class LinuxNetworkTestCase(test.NoDBTestCase):
         actual_opts = self.driver.get_dhcp_opts(self.context, networks[1],
                                                 fixedips)
 
-        self.assertEqual(expected_opts, actual_opts)
+        self.assertEqual(actual_opts, expected_opts)
 
     def test_get_dhcp_leases_for_nw00(self):
         timestamp = timeutils.utcnow()
@@ -578,7 +577,7 @@ class LinuxNetworkTestCase(test.NoDBTestCase):
             data = get_associated(self.context, 0, address=lease[2])[0]
             self.assertTrue(data['allocated'])
             self.assertTrue(data['leased'])
-            self.assertTrue(int(lease[0]) > seconds_since_epoch)
+            self.assertTrue(lease[0] > seconds_since_epoch)
             self.assertEqual(data['vif_address'], lease[1])
             self.assertEqual(data['address'], lease[2])
             self.assertEqual(data['instance_hostname'], lease[3])
@@ -595,7 +594,7 @@ class LinuxNetworkTestCase(test.NoDBTestCase):
             lease = lease.split(' ')
             data = get_associated(self.context, 1, address=lease[2])[0]
             self.assertTrue(data['leased'])
-            self.assertTrue(int(lease[0]) > seconds_since_epoch)
+            self.assertTrue(lease[0] > seconds_since_epoch)
             self.assertEqual(data['vif_address'], lease[1])
             self.assertEqual(data['address'], lease[2])
             self.assertEqual(data['instance_hostname'], lease[3])
@@ -606,7 +605,7 @@ class LinuxNetworkTestCase(test.NoDBTestCase):
         fixedip = objects.FixedIPList.get_by_network(self.context,
                                                      {'id': 0})[0]
         actual = self.driver._host_dhcp_opts(fixedip.virtual_interface_id)
-        self.assertEqual(expected, actual)
+        self.assertEqual(actual, expected)
 
     def test_host_dhcp_without_default_gateway_network(self):
         expected = ','.join(['DE:AD:BE:EF:00:00',
@@ -615,7 +614,7 @@ class LinuxNetworkTestCase(test.NoDBTestCase):
         fixedip = objects.FixedIPList.get_by_network(self.context,
                                                      {'id': 0})[0]
         actual = self.driver._host_dhcp(fixedip)
-        self.assertEqual(expected, actual)
+        self.assertEqual(actual, expected)
 
     def test_host_dhcp_truncated_hostname(self):
         expected = ','.join(['DE:AD:BE:EF:00:07',
@@ -632,7 +631,7 @@ class LinuxNetworkTestCase(test.NoDBTestCase):
         fixedip = objects.FixedIPList.get_by_network(self.context,
                                                      {'id': 0})[0]
         actual = self.driver._host_dns(fixedip)
-        self.assertEqual(expected, actual)
+        self.assertEqual(actual, expected)
 
     def test_linux_bridge_driver_plug(self):
         """Makes sure plug doesn't drop FORWARD by default.
@@ -645,7 +644,7 @@ class LinuxNetworkTestCase(test.NoDBTestCase):
         self.stubs.Set(utils, 'execute', fake_execute)
 
         def verify_add_rule(chain, rule):
-            self.assertEqual('FORWARD', chain)
+            self.assertEqual(chain, 'FORWARD')
             self.assertIn('ACCEPT', rule)
         self.stubs.Set(linux_net.iptables_manager.ipv4['filter'],
                        'add_rule', verify_add_rule)
@@ -657,7 +656,7 @@ class LinuxNetworkTestCase(test.NoDBTestCase):
         self.flags(fake_network=False)
 
         def fake_execute(*args, **kwargs):
-            raise processutils.ProcessExecutionError('specific_error')
+            raise processutils.ProcessExecutionError('error')
 
         def fake_device_exists(*args, **kwargs):
             return False
@@ -665,16 +664,9 @@ class LinuxNetworkTestCase(test.NoDBTestCase):
         self.stubs.Set(utils, 'execute', fake_execute)
         self.stubs.Set(linux_net, 'device_exists', fake_device_exists)
         driver = linux_net.LinuxOVSInterfaceDriver()
-
-        exc = self.assertRaises(exception.OvsConfigurationFailure,
-                                driver.plug,
-                                {'uuid': 'fake_network_uuid'}, 'fake_mac')
-        self.assertRegex(
-            str(exc),
-            re.compile("OVS configuration failed with: .*specific_error.*",
-                       re.DOTALL))
-        self.assertIsInstance(exc.kwargs['inner_exception'],
-                              processutils.ProcessExecutionError)
+        self.assertRaises(exception.AgentError,
+                          driver.plug, {'uuid': 'fake_network_uuid'},
+                          'fake_mac')
 
     def test_vlan_override(self):
         """Makes sure vlan_interface flag overrides network bridge_interface.
@@ -701,10 +693,10 @@ class LinuxNetworkTestCase(test.NoDBTestCase):
         }
         self.flags(vlan_interface="")
         driver.plug(network, "fakemac")
-        self.assertEqual("base_interface", info['passed_interface'])
+        self.assertEqual(info['passed_interface'], "base_interface")
         self.flags(vlan_interface="override_interface")
         driver.plug(network, "fakemac")
-        self.assertEqual("override_interface", info['passed_interface'])
+        self.assertEqual(info['passed_interface'], "override_interface")
         driver.plug(network, "fakemac")
 
     def test_flat_override(self):
@@ -730,10 +722,10 @@ class LinuxNetworkTestCase(test.NoDBTestCase):
                 "share_address": False,
         }
         driver.plug(network, "fakemac")
-        self.assertEqual("base_interface", info['passed_interface'])
+        self.assertEqual(info['passed_interface'], "base_interface")
         self.flags(flat_interface="override_interface")
         driver.plug(network, "fakemac")
-        self.assertEqual("override_interface", info['passed_interface'])
+        self.assertEqual(info['passed_interface'], "override_interface")
 
     def _test_dnsmasq_execute(self, extra_expected=None):
         network_ref = {'id': 'fake',
@@ -758,7 +750,7 @@ class LinuxNetworkTestCase(test.NoDBTestCase):
         self.stubs.Set(linux_net, '_add_dhcp_mangle_rule',
                        fake_add_dhcp_mangle_rule)
 
-        self.stub_out('os.chmod', lambda *a, **kw: None)
+        self.stubs.Set(os, 'chmod', lambda *a, **kw: None)
         self.stubs.Set(linux_net, 'write_to_file', lambda *a, **kw: None)
         self.stubs.Set(linux_net, '_dnsmasq_pid_for', lambda *a, **kw: None)
         dev = 'br100'
@@ -849,32 +841,32 @@ class LinuxNetworkTestCase(test.NoDBTestCase):
                    'bridge_interface': iface}
         driver.plug(network, 'fakemac')
         expected = [
-            ('ebtables', '--concurrent', '-t', 'filter', '-D', 'INPUT', '-p',
-             'ARP', '-i', iface, '--arp-ip-dst', dhcp, '-j', 'DROP'),
-            ('ebtables', '--concurrent', '-t', 'filter', '-I', 'INPUT', '-p',
-             'ARP', '-i', iface, '--arp-ip-dst', dhcp, '-j', 'DROP'),
-            ('ebtables', '--concurrent', '-t', 'filter', '-D', 'OUTPUT', '-p',
-             'ARP', '-o', iface, '--arp-ip-src', dhcp, '-j', 'DROP'),
-            ('ebtables', '--concurrent', '-t', 'filter', '-I', 'OUTPUT', '-p',
-             'ARP', '-o', iface, '--arp-ip-src', dhcp, '-j', 'DROP'),
-            ('ebtables', '--concurrent', '-t', 'filter', '-D', 'FORWARD',
-             '-p', 'IPv4', '-i', iface, '--ip-protocol', 'udp',
-             '--ip-destination-port', '67:68', '-j', 'DROP'),
-            ('ebtables', '--concurrent', '-t', 'filter', '-I', 'FORWARD',
-             '-p', 'IPv4', '-i', iface, '--ip-protocol', 'udp',
-             '--ip-destination-port', '67:68', '-j', 'DROP'),
-            ('ebtables', '--concurrent', '-t', 'filter', '-D', 'FORWARD',
-             '-p', 'IPv4', '-o', iface, '--ip-protocol', 'udp',
-             '--ip-destination-port', '67:68', '-j', 'DROP'),
-            ('ebtables', '--concurrent', '-t', 'filter', '-I', 'FORWARD',
-             '-p', 'IPv4', '-o', iface, '--ip-protocol', 'udp',
-             '--ip-destination-port', '67:68', '-j', 'DROP'),
+            ('ebtables', '-t', 'filter', '-D', 'INPUT', '-p', 'ARP', '-i',
+             iface, '--arp-ip-dst', dhcp, '-j', 'DROP'),
+            ('ebtables', '-t', 'filter', '-I', 'INPUT', '-p', 'ARP', '-i',
+             iface, '--arp-ip-dst', dhcp, '-j', 'DROP'),
+            ('ebtables', '-t', 'filter', '-D', 'OUTPUT', '-p', 'ARP', '-o',
+             iface, '--arp-ip-src', dhcp, '-j', 'DROP'),
+            ('ebtables', '-t', 'filter', '-I', 'OUTPUT', '-p', 'ARP', '-o',
+             iface, '--arp-ip-src', dhcp, '-j', 'DROP'),
+            ('ebtables', '-t', 'filter', '-D', 'FORWARD', '-p', 'IPv4', '-i',
+             iface, '--ip-protocol', 'udp', '--ip-destination-port', '67:68',
+             '-j', 'DROP'),
+            ('ebtables', '-t', 'filter', '-I', 'FORWARD', '-p', 'IPv4', '-i',
+             iface, '--ip-protocol', 'udp', '--ip-destination-port', '67:68',
+             '-j', 'DROP'),
+            ('ebtables', '-t', 'filter', '-D', 'FORWARD', '-p', 'IPv4', '-o',
+             iface, '--ip-protocol', 'udp', '--ip-destination-port', '67:68',
+             '-j', 'DROP'),
+            ('ebtables', '-t', 'filter', '-I', 'FORWARD', '-p', 'IPv4', '-o',
+             iface, '--ip-protocol', 'udp', '--ip-destination-port', '67:68',
+             '-j', 'DROP'),
             ('iptables-save', '-c'),
             ('iptables-restore', '-c'),
             ('ip6tables-save', '-c'),
             ('ip6tables-restore', '-c'),
         ]
-        self.assertEqual(expected, executes)
+        self.assertEqual(executes, expected)
 
         executes = []
 
@@ -887,18 +879,18 @@ class LinuxNetworkTestCase(test.NoDBTestCase):
 
         driver.unplug(network)
         expected = [
-            ('ebtables', '--concurrent', '-t', 'filter', '-D', 'INPUT', '-p',
-             'ARP', '-i', iface, '--arp-ip-dst', dhcp, '-j', 'DROP'),
-            ('ebtables', '--concurrent', '-t', 'filter', '-D', 'OUTPUT', '-p',
-             'ARP', '-o', iface, '--arp-ip-src', dhcp, '-j', 'DROP'),
-            ('ebtables', '--concurrent', '-t', 'filter', '-D', 'FORWARD',
-             '-p', 'IPv4', '-i', iface, '--ip-protocol', 'udp',
-             '--ip-destination-port', '67:68', '-j', 'DROP'),
-            ('ebtables', '--concurrent', '-t', 'filter', '-D', 'FORWARD',
-             '-p', 'IPv4', '-o', iface, '--ip-protocol', 'udp',
-             '--ip-destination-port', '67:68', '-j', 'DROP'),
+            ('ebtables', '-t', 'filter', '-D', 'INPUT', '-p', 'ARP', '-i',
+             iface, '--arp-ip-dst', dhcp, '-j', 'DROP'),
+            ('ebtables', '-t', 'filter', '-D', 'OUTPUT', '-p', 'ARP', '-o',
+             iface, '--arp-ip-src', dhcp, '-j', 'DROP'),
+            ('ebtables', '-t', 'filter', '-D', 'FORWARD', '-p', 'IPv4', '-i',
+             iface, '--ip-protocol', 'udp', '--ip-destination-port', '67:68',
+             '-j', 'DROP'),
+            ('ebtables', '-t', 'filter', '-D', 'FORWARD', '-p', 'IPv4', '-o',
+             iface, '--ip-protocol', 'udp', '--ip-destination-port', '67:68',
+             '-j', 'DROP'),
         ]
-        self.assertEqual(expected, executes)
+        self.assertEqual(executes, expected)
 
     def _test_initialize_gateway(self, existing, expected, routes=''):
         self.flags(fake_network=False)
@@ -918,7 +910,7 @@ class LinuxNetworkTestCase(test.NoDBTestCase):
                    'broadcast': '192.168.1.255',
                    'cidr_v6': '2001:db8::/64'}
         self.driver.initialize_gateway_device('eth0', network)
-        self.assertEqual(expected, executes)
+        self.assertEqual(executes, expected)
 
     def test_initialize_gateway_moves_wrong_ip(self):
         existing = ("2: eth0: <BROADCAST,MULTICAST,UP,LOWER_UP> "
@@ -1067,7 +1059,7 @@ class LinuxNetworkTestCase(test.NoDBTestCase):
 
     def _test_add_metadata_accept_rule(self, expected):
         def verify_add_rule(chain, rule):
-            self.assertEqual('INPUT', chain)
+            self.assertEqual(chain, 'INPUT')
             self.assertEqual(expected, rule)
 
         self.stubs.Set(linux_net.iptables_manager.ipv4['filter'],
@@ -1076,7 +1068,7 @@ class LinuxNetworkTestCase(test.NoDBTestCase):
 
     def _test_add_metadata_accept_ipv6_rule(self, expected):
         def verify_add_rule(chain, rule):
-            self.assertEqual('INPUT', chain)
+            self.assertEqual(chain, 'INPUT')
             self.assertEqual(expected, rule)
 
         self.stubs.Set(linux_net.iptables_manager.ipv6['filter'],
@@ -1113,7 +1105,7 @@ class LinuxNetworkTestCase(test.NoDBTestCase):
 
     def _test_add_metadata_forward_rule(self, expected):
         def verify_add_rule(chain, rule):
-            self.assertEqual('PREROUTING', chain)
+            self.assertEqual(chain, 'PREROUTING')
             self.assertEqual(expected, rule)
 
         self.stubs.Set(linux_net.iptables_manager.ipv4['nat'],
@@ -1135,20 +1127,11 @@ class LinuxNetworkTestCase(test.NoDBTestCase):
         self._test_add_metadata_forward_rule(expected)
 
     def test_ensure_bridge_brings_up_interface(self):
-        # We have to bypass the CONF.fake_network check so that netifaces
-        # is actually called.
-        self.flags(fake_network=False)
-        fake_mac = 'aa:bb:cc:00:11:22'
-        fake_ifaces = {
-            netifaces.AF_LINK: [{'addr': fake_mac}]
-        }
         calls = {
             'device_exists': [mock.call('bridge')],
             '_execute': [
                 mock.call('brctl', 'addif', 'bridge', 'eth0',
                           run_as_root=True, check_exit_code=False),
-                mock.call('ip', 'link', 'set', 'bridge', 'address', fake_mac,
-                          run_as_root=True),
                 mock.call('ip', 'link', 'set', 'eth0', 'up',
                           run_as_root=True, check_exit_code=False),
                 mock.call('ip', 'route', 'show', 'dev', 'eth0'),
@@ -1156,17 +1139,14 @@ class LinuxNetworkTestCase(test.NoDBTestCase):
                           'global'),
                 ]
             }
-        with test.nested(
+        with contextlib.nested(
             mock.patch.object(linux_net, 'device_exists', return_value=True),
-            mock.patch.object(linux_net, '_execute', return_value=('', '')),
-            mock.patch.object(netifaces, 'ifaddresses')
-        ) as (device_exists, _execute, ifaddresses):
-            ifaddresses.return_value = fake_ifaces
+            mock.patch.object(linux_net, '_execute', return_value=('', ''))
+        ) as (device_exists, _execute):
             driver = linux_net.LinuxBridgeInterfaceDriver()
             driver.ensure_bridge('bridge', 'eth0')
             device_exists.assert_has_calls(calls['device_exists'])
             _execute.assert_has_calls(calls['_execute'])
-            ifaddresses.assert_called_once_with('eth0')
 
     def test_ensure_bridge_brclt_addif_exception(self):
         def fake_execute(*cmd, **kwargs):
@@ -1175,7 +1155,7 @@ class LinuxNetworkTestCase(test.NoDBTestCase):
             else:
                 return ('', '')
 
-        with test.nested(
+        with contextlib.nested(
             mock.patch.object(linux_net, 'device_exists', return_value=True),
             mock.patch.object(linux_net, '_execute', fake_execute)
         ) as (device_exists, _):
@@ -1192,7 +1172,7 @@ class LinuxNetworkTestCase(test.NoDBTestCase):
             else:
                 return ('', '')
 
-        with test.nested(
+        with contextlib.nested(
             mock.patch.object(linux_net, 'device_exists', return_value=False),
             mock.patch.object(linux_net, '_execute', fake_execute)
         ) as (device_exists, _):
@@ -1217,36 +1197,12 @@ class LinuxNetworkTestCase(test.NoDBTestCase):
             linux_net._set_device_mtu('fake-dev')
             ex.assert_has_calls(calls)
 
-    def _ovs_vif_port(self, calls, interface_type=None):
+    def _ovs_vif_port(self, calls):
         with mock.patch.object(utils, 'execute', return_value=('', '')) as ex:
             linux_net.create_ovs_vif_port('fake-bridge', 'fake-dev',
                                           'fake-iface-id', 'fake-mac',
-                                          'fake-instance-uuid',
-                                          interface_type=interface_type)
+                                          'fake-instance-uuid')
             ex.assert_has_calls(calls)
-
-    def test_ovs_vif_port_cmd(self):
-        expected = ['--', '--if-exists',
-                    'del-port', 'fake-dev', '--', 'add-port',
-                    'fake-bridge', 'fake-dev',
-                    '--', 'set', 'Interface', 'fake-dev',
-                    'external-ids:iface-id=fake-iface-id',
-                    'external-ids:iface-status=active',
-                    'external-ids:attached-mac=fake-mac',
-                    'external-ids:vm-uuid=fake-instance-uuid'
-                ]
-        cmd = linux_net._create_ovs_vif_cmd('fake-bridge', 'fake-dev',
-                                            'fake-iface-id', 'fake-mac',
-                                            'fake-instance-uuid')
-
-        self.assertEqual(expected, cmd)
-
-        expected += ['type=fake-type']
-        cmd = linux_net._create_ovs_vif_cmd('fake-bridge', 'fake-dev',
-                                            'fake-iface-id', 'fake-mac',
-                                            'fake-instance-uuid',
-                                            'fake-type')
-        self.assertEqual(expected, cmd)
 
     def test_ovs_vif_port(self):
         calls = [
@@ -1261,22 +1217,6 @@ class LinuxNetworkTestCase(test.NoDBTestCase):
                           run_as_root=True)
                 ]
         self._ovs_vif_port(calls)
-
-    @mock.patch.object(linux_net, '_ovs_vsctl')
-    @mock.patch.object(linux_net, '_create_ovs_vif_cmd')
-    @mock.patch.object(linux_net, '_set_device_mtu')
-    def test_ovs_vif_port_with_type_vhostuser(self, mock_set_device_mtu,
-                                              mock_create_cmd, mock_vsctl):
-        linux_net.create_ovs_vif_port(
-            'fake-bridge',
-            'fake-dev', 'fake-iface-id', 'fake-mac',
-            "fake-instance-uuid", mtu=1500,
-            interface_type=network_model.OVS_VHOSTUSER_INTERFACE_TYPE)
-        mock_create_cmd.assert_called_once_with('fake-bridge',
-            'fake-dev', 'fake-iface-id', 'fake-mac',
-            "fake-instance-uuid", network_model.OVS_VHOSTUSER_INTERFACE_TYPE)
-        self.assertFalse(mock_set_device_mtu.called)
-        self.assertTrue(mock_vsctl.called)
 
     def test_ovs_vif_port_with_mtu(self):
         self.flags(network_device_mtu=10000)
@@ -1417,6 +1357,16 @@ class LinuxNetworkTestCase(test.NoDBTestCase):
         self.driver._exec_ebtables('fake')
         self.assertEqual(2, len(executes))
         self.mox.UnsetStubs()
+
+    def test_ovs_set_vhostuser_type(self):
+        calls = [
+                 mock.call('ovs-vsctl', '--timeout=120', '--', 'set',
+                           'Interface', 'fake-dev', 'type=dpdkvhostuser',
+                           run_as_root=True)
+                 ]
+        with mock.patch.object(utils, 'execute', return_value=('', '')) as ex:
+            linux_net.ovs_set_vhostuser_port_type('fake-dev')
+            ex.assert_has_calls(calls)
 
     @mock.patch('os.path.exists', return_value=True)
     @mock.patch('nova.utils.execute')

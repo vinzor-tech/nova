@@ -83,6 +83,10 @@ class SecurityGroupList(base.ObjectListBase, base.NovaObject):
     fields = {
         'objects': fields.ListOfObjectsField('SecurityGroup'),
         }
+    # NOTE(danms): SecurityGroup was at 1.1 before we added this
+    obj_relationships = {
+        'objects': [('1.0', '1.1')],
+        }
 
     def __init__(self, *args, **kwargs):
         super(SecurityGroupList, self).__init__(*args, **kwargs)

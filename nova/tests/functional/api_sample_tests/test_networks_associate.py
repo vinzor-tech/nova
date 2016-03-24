@@ -15,6 +15,7 @@
 
 from oslo_config import cfg
 
+from nova.network import api as network_api
 from nova.tests.functional.api_sample_tests import api_sample_base
 
 CONF = cfg.CONF
@@ -48,7 +49,7 @@ class NetworksAssociateJsonTests(api_sample_base.ApiSampleTestBaseV21):
                            project=NetworksAssociateJsonTests._sentinel):
             return True
 
-        self.stub_out("nova.network.api.API.associate", fake_associate)
+        self.stubs.Set(network_api.API, "associate", fake_associate)
 
     def test_disassociate(self):
         response = self._do_post('os-networks/1/action',

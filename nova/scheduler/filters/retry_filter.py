@@ -15,7 +15,6 @@
 
 from oslo_log import log as logging
 
-from nova.i18n import _LI
 from nova.scheduler import filters
 
 LOG = logging.getLogger(__name__)
@@ -26,26 +25,22 @@ class RetryFilter(filters.BaseHostFilter):
     purposes
     """
 
-    def host_passes(self, host_state, spec_obj):
+    def host_passes(self, host_state, filter_properties):
         """Skip nodes that have already been attempted."""
-        retry = spec_obj.retry
+        retry = filter_properties.get('retry', None)
         if not retry:
             # Re-scheduling is disabled
             LOG.debug("Re-scheduling is disabled")
             return True
 
-        # TODO(sbauza): Once the HostState is actually a ComputeNode, we could
-        # easily get this one...
+        hosts = retry.get('hosts', [])
         host = [host_state.host, host_state.nodename]
-        # TODO(sbauza)... and we wouldn't need to primitive the hosts into
-        # lists
-        hosts = [[cn.host, cn.hypervisor_hostname] for cn in retry.hosts]
 
         passes = host not in hosts
 
         if not passes:
-            LOG.info(_LI("Host %(host)s fails.  Previously tried hosts: "
-                     "%(hosts)s"), {'host': host, 'hosts': hosts})
+            LOG.debug("Host %(host)s fails.  Previously tried hosts: "
+                        "%(hosts)s", {'host': host, 'hosts': hosts})
 
         # Host passes if it's not in the list of previously attempted hosts:
         return passes

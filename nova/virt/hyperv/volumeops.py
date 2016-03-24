@@ -22,18 +22,17 @@ import os
 import re
 import time
 
-from os_win import exceptions as os_win_exc
-from os_win import utilsfactory
 from oslo_config import cfg
 from oslo_log import log as logging
 from oslo_utils import excutils
 from six.moves import range
 
-from nova import block_device
 from nova import exception
 from nova.i18n import _, _LE, _LW
 from nova import utils
 from nova.virt import driver
+from nova.virt.hyperv import utilsfactory
+from nova.virt.hyperv import vmutils
 
 LOG = logging.getLogger(__name__)
 
@@ -66,7 +65,7 @@ class VolumeOps(object):
 
     def __init__(self):
         self._vmutils = utilsfactory.get_vmutils()
-        self._volutils = utilsfactory.get_iscsi_initiator_utils()
+        self._volutils = utilsfactory.get_volumeutils()
         self._initiator = None
         self._default_root_device = 'vda'
         self.volume_drivers = {'smbfs': SMBFSVolumeDriver(),
@@ -112,27 +111,23 @@ class VolumeOps(object):
             root_device = block_device_info.get('root_device_name')
             if not root_device:
                 root_device = self._default_root_device
-            return block_device.volume_in_mapping(root_device,
-                                                  block_device_info)
+            return self._volutils.volume_in_mapping(root_device,
+                                                    block_device_info)
 
     def fix_instance_volume_disk_paths(self, instance_name, block_device_info):
-        # Mapping containing the current disk paths for each volume.
-        actual_disk_mapping = self.get_disk_path_mapping(block_device_info)
-        if not actual_disk_mapping:
-            return
+        mapping = driver.block_device_info_get_mapping(block_device_info)
 
-        # Mapping containing virtual disk resource path and the physical
-        # disk path for each volume serial number. The physical path
-        # associated with this resource may not be the right one,
-        # as physical disk paths can get swapped after host reboots.
-        vm_disk_mapping = self._vmutils.get_vm_physical_disk_mapping(
-            instance_name)
+        if self.ebs_root_in_block_devices(block_device_info):
+            mapping = mapping[1:]
 
-        for serial, vm_disk in vm_disk_mapping.items():
-            actual_disk_path = actual_disk_mapping[serial]
-            if vm_disk['mounted_disk_path'] != actual_disk_path:
-                self._vmutils.set_disk_host_res(vm_disk['resource_path'],
-                                                actual_disk_path)
+        disk_address = 0
+        for vol in mapping:
+            connection_info = vol['connection_info']
+            volume_driver = self._get_volume_driver(
+                connection_info=connection_info)
+            volume_driver.fix_instance_volume_disk_path(
+                instance_name, connection_info, disk_address)
+            disk_address += 1
 
     def get_volume_connector(self, instance):
         if not self._initiator:
@@ -154,17 +149,6 @@ class VolumeOps(object):
                 connection_info=connection_info)
             volume_driver.initialize_volume_connection(connection_info)
 
-    def get_disk_path_mapping(self, block_device_info):
-        block_mapping = driver.block_device_info_get_mapping(block_device_info)
-        disk_path_mapping = {}
-        for vol in block_mapping:
-            connection_info = vol['connection_info']
-            disk_serial = connection_info['serial']
-
-            disk_path = self.get_mounted_disk_path_from_volume(connection_info)
-            disk_path_mapping[disk_serial] = disk_path
-        return disk_path_mapping
-
     def _group_block_devices_by_type(self, block_device_mapping):
         block_devices = collections.defaultdict(list)
         for volume in block_device_mapping:
@@ -173,17 +157,11 @@ class VolumeOps(object):
             block_devices[volume_type].append(volume)
         return block_devices
 
-    def get_mounted_disk_path_from_volume(self, connection_info):
-        volume_driver = self._get_volume_driver(
-            connection_info=connection_info)
-        return volume_driver.get_mounted_disk_path_from_volume(
-            connection_info)
-
 
 class ISCSIVolumeDriver(object):
     def __init__(self):
         self._vmutils = utilsfactory.get_vmutils()
-        self._volutils = utilsfactory.get_iscsi_initiator_utils()
+        self._volutils = utilsfactory.get_volumeutils()
 
     def login_storage_target(self, connection_info):
         data = connection_info['data']
@@ -195,12 +173,11 @@ class ISCSIVolumeDriver(object):
         auth_password = data.get('auth_password')
 
         if auth_method and auth_method.upper() != 'CHAP':
-            LOG.error(_LE("Cannot log in target %(target_iqn)s. Unsupported "
-                          "iSCSI authentication method: %(auth_method)s."),
-                      {'target_iqn': target_iqn,
-                       'auth_method': auth_method})
-            raise exception.UnsupportedBDMVolumeAuthMethod(
-                auth_method=auth_method)
+            raise vmutils.HyperVException(
+                _("Cannot log in target %(target_iqn)s. Unsupported iSCSI "
+                  "authentication method: %(auth_method)s.") %
+                 {'target_iqn': target_iqn,
+                  'auth_method': auth_method})
 
         # Check if we already logged in
         if self._volutils.get_device_number_for_target(target_iqn, target_lun):
@@ -241,15 +218,6 @@ class ISCSIVolumeDriver(object):
             LOG.debug("Skipping disconnecting target %s as there "
                       "are LUNs still being used.", target_iqn)
 
-    def get_mounted_disk_path_from_volume(self, connection_info):
-        data = connection_info['data']
-        target_lun = data['target_lun']
-        target_iqn = data['target_iqn']
-
-        # Getting the mounted disk
-        return self._get_mounted_disk_from_lun(target_iqn, target_lun,
-                                               wait_for_device=True)
-
     def attach_volume(self, connection_info, instance_name, ebs_root=False):
         """Attach a volume to the SCSI controller or to the IDE controller if
         ebs_root is True
@@ -261,10 +229,13 @@ class ISCSIVolumeDriver(object):
         try:
             self.login_storage_target(connection_info)
 
-            serial = connection_info['serial']
+            data = connection_info['data']
+            target_lun = data['target_lun']
+            target_iqn = data['target_iqn']
+
             # Getting the mounted disk
-            mounted_disk_path = self.get_mounted_disk_path_from_volume(
-                connection_info)
+            mounted_disk_path = self._get_mounted_disk_from_lun(target_iqn,
+                                                                target_lun)
 
             if ebs_root:
                 # Find the IDE controller for the vm.
@@ -281,13 +252,11 @@ class ISCSIVolumeDriver(object):
             self._vmutils.attach_volume_to_controller(instance_name,
                                                       ctrller_path,
                                                       slot,
-                                                      mounted_disk_path,
-                                                      serial=serial)
+                                                      mounted_disk_path)
         except Exception:
             with excutils.save_and_reraise_exception():
                 LOG.error(_LE('Unable to attach volume to instance %s'),
                           instance_name)
-                target_iqn = connection_info['data']['target_iqn']
                 if target_iqn:
                     self.logout_storage_target(target_iqn)
 
@@ -298,9 +267,13 @@ class ISCSIVolumeDriver(object):
                   {'connection_info': connection_info,
                    'instance_name': instance_name})
 
-        target_iqn = connection_info['data']['target_iqn']
-        mounted_disk_path = self.get_mounted_disk_path_from_volume(
-                connection_info)
+        data = connection_info['data']
+        target_lun = data['target_lun']
+        target_iqn = data['target_iqn']
+
+        # Getting the mounted disk
+        mounted_disk_path = self._get_mounted_disk_from_lun(target_iqn,
+                                                            target_lun)
 
         LOG.debug("Detaching physical disk from instance: %s",
                   mounted_disk_path)
@@ -350,6 +323,18 @@ class ISCSIVolumeDriver(object):
     def get_target_from_disk_path(self, physical_drive_path):
         return self._volutils.get_target_from_disk_path(physical_drive_path)
 
+    def fix_instance_volume_disk_path(self, instance_name, connection_info,
+                                      disk_address):
+        data = connection_info['data']
+        target_lun = data['target_lun']
+        target_iqn = data['target_iqn']
+
+        mounted_disk_path = self._get_mounted_disk_from_lun(
+            target_iqn, target_lun, True)
+        ctrller_path = self._vmutils.get_vm_scsi_controller(instance_name)
+        self._vmutils.set_disk_host_resource(
+            instance_name, ctrller_path, disk_address, mounted_disk_path)
+
     def get_target_lun_count(self, target_iqn):
         return self._volutils.get_target_lun_count(target_iqn)
 
@@ -370,13 +355,11 @@ def export_path_synchronized(f):
 
 class SMBFSVolumeDriver(object):
     def __init__(self):
-        self._smbutils = utilsfactory.get_smbutils()
+        self._pathutils = utilsfactory.get_pathutils()
         self._vmutils = utilsfactory.get_vmutils()
+        self._volutils = utilsfactory.get_volumeutils()
         self._username_regex = re.compile(r'user(?:name)?=([^, ]+)')
         self._password_regex = re.compile(r'pass(?:word)?=([^, ]+)')
-
-    def get_mounted_disk_path_from_volume(self, connection_info):
-        return self._get_disk_path(connection_info)
 
     @export_path_synchronized
     def attach_volume(self, connection_info, instance_name, ebs_root=False):
@@ -398,13 +381,10 @@ class SMBFSVolumeDriver(object):
                                        disk_path,
                                        ctrller_path,
                                        slot)
-        except os_win_exc.HyperVException as exn:
-            LOG.exception(_LE('Attach volume failed to %(instance_name)s: '
-                              '%(exn)s'), {'instance_name': instance_name,
-                                           'exn': exn})
-            raise exception.VolumeAttachFailed(
-                volume_id=connection_info['data']['volume_id'],
-                reason=exn.message)
+        except vmutils.HyperVException as exn:
+            LOG.exception(_LE('Attach volume failed: %s'), exn)
+            raise vmutils.HyperVException(_('Unable to attach volume '
+                                            'to instance %s') % instance_name)
 
     def detach_volume(self, connection_info, instance_name):
         LOG.debug("Detaching volume: %(connection_info)s "
@@ -441,12 +421,12 @@ class SMBFSVolumeDriver(object):
     def ensure_share_mounted(self, connection_info):
         export_path = self._get_export_path(connection_info)
 
-        if not self._smbutils.check_smb_mapping(export_path):
+        if not self._pathutils.check_smb_mapping(export_path):
             opts_str = connection_info['data'].get('options', '')
             username, password = self._parse_credentials(opts_str)
-            self._smbutils.mount_smb_share(export_path,
-                                           username=username,
-                                           password=password)
+            self._pathutils.mount_smb_share(export_path,
+                                            username=username,
+                                            password=password)
 
     def _parse_credentials(self, opts_str):
         match = self._username_regex.findall(opts_str)
@@ -456,6 +436,10 @@ class SMBFSVolumeDriver(object):
         password = match[0] if match else None
 
         return username, password
+
+    def fix_instance_volume_disk_path(self, instance_name, connection_info,
+                                      disk_address):
+        self.ensure_share_mounted(connection_info)
 
     def initialize_volume_connection(self, connection_info):
         self.ensure_share_mounted(connection_info)
@@ -467,5 +451,5 @@ class SMBFSVolumeDriver(object):
         # an instance.
         @utils.synchronized(export_path)
         def unmount_synchronized():
-            self._smbutils.unmount_smb_share(export_path)
+            self._pathutils.unmount_smb_share(export_path)
         unmount_synchronized()

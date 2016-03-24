@@ -13,7 +13,6 @@
 
 import mock
 
-from nova import objects
 from nova.scheduler.filters import io_ops_filter
 from nova import test
 from nova.tests.unit.scheduler import fakes
@@ -26,16 +25,16 @@ class TestNumInstancesFilter(test.NoDBTestCase):
         self.filt_cls = io_ops_filter.IoOpsFilter()
         host = fakes.FakeHostState('host1', 'node1',
                                    {'num_io_ops': 7})
-        spec_obj = objects.RequestSpec()
-        self.assertTrue(self.filt_cls.host_passes(host, spec_obj))
+        filter_properties = {}
+        self.assertTrue(self.filt_cls.host_passes(host, filter_properties))
 
     def test_filter_num_iops_fails(self):
         self.flags(max_io_ops_per_host=8)
         self.filt_cls = io_ops_filter.IoOpsFilter()
         host = fakes.FakeHostState('host1', 'node1',
                                    {'num_io_ops': 8})
-        spec_obj = objects.RequestSpec()
-        self.assertFalse(self.filt_cls.host_passes(host, spec_obj))
+        filter_properties = {}
+        self.assertFalse(self.filt_cls.host_passes(host, filter_properties))
 
     @mock.patch('nova.scheduler.filters.utils.aggregate_values_from_key')
     def test_aggregate_filter_num_iops_value(self, agg_mock):
@@ -43,12 +42,12 @@ class TestNumInstancesFilter(test.NoDBTestCase):
         self.filt_cls = io_ops_filter.AggregateIoOpsFilter()
         host = fakes.FakeHostState('host1', 'node1',
                                    {'num_io_ops': 7})
-        spec_obj = objects.RequestSpec(context=mock.sentinel.ctx)
+        filter_properties = {'context': mock.sentinel.ctx}
         agg_mock.return_value = set([])
-        self.assertFalse(self.filt_cls.host_passes(host, spec_obj))
+        self.assertFalse(self.filt_cls.host_passes(host, filter_properties))
         agg_mock.assert_called_once_with(host, 'max_io_ops_per_host')
         agg_mock.return_value = set(['8'])
-        self.assertTrue(self.filt_cls.host_passes(host, spec_obj))
+        self.assertTrue(self.filt_cls.host_passes(host, filter_properties))
 
     @mock.patch('nova.scheduler.filters.utils.aggregate_values_from_key')
     def test_aggregate_filter_num_iops_value_error(self, agg_mock):
@@ -57,6 +56,6 @@ class TestNumInstancesFilter(test.NoDBTestCase):
         host = fakes.FakeHostState('host1', 'node1',
                                    {'num_io_ops': 7})
         agg_mock.return_value = set(['XXX'])
-        spec_obj = objects.RequestSpec(context=mock.sentinel.ctx)
-        self.assertTrue(self.filt_cls.host_passes(host, spec_obj))
+        filter_properties = {'context': mock.sentinel.ctx}
+        self.assertTrue(self.filt_cls.host_passes(host, filter_properties))
         agg_mock.assert_called_once_with(host, 'max_io_ops_per_host')

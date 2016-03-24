@@ -33,6 +33,7 @@ import socket
 import sys
 import threading
 
+import eventlet
 from eventlet import greenio
 from eventlet import greenthread
 from eventlet import patcher
@@ -42,7 +43,6 @@ from oslo_log import log as logging
 from oslo_utils import excutils
 from oslo_utils import importutils
 from oslo_utils import units
-from oslo_utils import versionutils
 import six
 
 from nova import context as nova_context
@@ -63,7 +63,7 @@ LOG = logging.getLogger(__name__)
 
 native_socket = patcher.original('socket')
 native_threading = patcher.original("threading")
-native_Queue = patcher.original("Queue" if six.PY2 else "queue")
+native_Queue = patcher.original("queue" if six.PY3 else "Queue")
 
 CONF = cfg.CONF
 CONF.import_opt('host', 'nova.netconf')
@@ -385,7 +385,7 @@ class Host(object):
         """Emit events - possibly delayed."""
         def event_cleanup(gt, *args, **kwargs):
             """Callback function for greenthread. Called
-            to cleanup the _events_delayed dictionary when an event
+            to cleanup the _events_delayed dictionary when a event
             was called.
             """
             event = args[0]
@@ -456,7 +456,7 @@ class Host(object):
         self._event_thread.start()
 
         LOG.debug("Starting green dispatch thread")
-        utils.spawn(self._dispatch_thread)
+        eventlet.spawn(self._dispatch_thread)
 
     def _get_new_connection(self):
         # call with _wrapped_conn_lock held
@@ -485,7 +485,7 @@ class Host(object):
                 self._event_lifecycle_callback,
                 self)
         except Exception as e:
-            LOG.warning(_LW("URI %(uri)s does not support events: %(error)s"),
+            LOG.warn(_LW("URI %(uri)s does not support events: %(error)s"),
                      {'uri': self._uri, 'error': e})
 
         try:
@@ -501,7 +501,7 @@ class Host(object):
             LOG.debug("The version of python-libvirt does not support "
                       "registerCloseCallback or is too old: %s", e)
         except libvirt.libvirtError as e:
-            LOG.warning(_LW("URI %(uri)s does not support connection"
+            LOG.warn(_LW("URI %(uri)s does not support connection"
                          " events: %(error)s"),
                      {'uri': self._uri, 'error': e})
 
@@ -562,14 +562,13 @@ class Host(object):
         try:
             if lv_ver is not None:
                 libvirt_version = conn.getLibVersion()
-                if op(libvirt_version,
-                      versionutils.convert_version_to_int(lv_ver)):
+                if op(libvirt_version, utils.convert_version_to_int(lv_ver)):
                     return False
 
             if hv_ver is not None:
                 hypervisor_version = conn.getVersion()
                 if op(hypervisor_version,
-                      versionutils.convert_version_to_int(hv_ver)):
+                      utils.convert_version_to_int(hv_ver)):
                     return False
 
             if hv_type is not None:
@@ -599,7 +598,7 @@ class Host(object):
         corresponding to the Nova instance, based on
         its name. If not found it will raise an
         exception.InstanceNotFound exception. On other
-        errors, it will raise an exception.NovaException
+        errors, it will raise a exception.NovaException
         exception.
 
         :returns: a libvirt.Domain object
@@ -694,19 +693,6 @@ class Host(object):
 
         return doms
 
-    def list_guests(self, only_running=True, only_guests=True):
-        """Get a list of Guest objects for nova instances
-
-        :param only_running: True to only return running instances
-        :param only_guests: True to filter out any host domain (eg Dom-0)
-
-        See method "list_instance_domains" for more information.
-
-        :returns: list of Guest objects
-        """
-        return [libvirt_guest.Guest(dom) for dom in self.list_instance_domains(
-            only_running=only_running, only_guests=only_guests)]
-
     def list_instance_domains(self, only_running=True, only_guests=True):
         """Get a list of libvirt.Domain objects for nova instances
 
@@ -780,10 +766,7 @@ class Host(object):
             LOG.info(_LI("Libvirt host capabilities %s"), xmlstr)
             self._caps = vconfig.LibvirtConfigCaps()
             self._caps.parse_str(xmlstr)
-            # NOTE(mriedem): Don't attempt to get baseline CPU features
-            # if libvirt can't determine the host cpu model.
-            if (hasattr(libvirt, 'VIR_CONNECT_BASELINE_CPU_EXPAND_FEATURES')
-                and self._caps.host.cpu.model is not None):
+            if hasattr(libvirt, 'VIR_CONNECT_BASELINE_CPU_EXPAND_FEATURES'):
                 try:
                     features = self.get_connection().baselineCPU(
                         [self._caps.host.cpu.to_xml()],
@@ -799,7 +782,7 @@ class Host(object):
                 except libvirt.libvirtError as ex:
                     error_code = ex.get_error_code()
                     if error_code == libvirt.VIR_ERR_NO_SUPPORT:
-                        LOG.warning(_LW("URI %(uri)s does not support full set"
+                        LOG.warn(_LW("URI %(uri)s does not support full set"
                                      " of host capabilities: %(error)s"),
                                      {'uri': self._uri, 'error': ex})
                     else:
@@ -891,7 +874,7 @@ class Host(object):
             return secret
         except libvirt.libvirtError:
             with excutils.save_and_reraise_exception():
-                LOG.error(_LE('Error defining a secret with XML: %s'), xml)
+                LOG.error(_LE('Error defining a secret with XML: %s') % xml)
 
     def delete_secret(self, usage_type, usage_id):
         """Delete a secret.
@@ -936,17 +919,20 @@ class Host(object):
         idx3 = m.index('Cached:')
         if CONF.libvirt.virt_type == 'xen':
             used = 0
-            for guest in self.list_guests(only_guests=False):
+            for dom in self.list_instance_domains(only_guests=False):
                 try:
+                    # TODO(sahid): we should have method list_guests()
+                    # which returns Guest's objects
+                    guest = libvirt_guest.Guest(dom)
                     # TODO(sahid): Use get_info...
                     dom_mem = int(guest._get_domain_info(self)[2])
                 except libvirt.libvirtError as e:
-                    LOG.warning(_LW("couldn't obtain the memory from domain:"
-                                    " %(uuid)s, exception: %(ex)s"),
-                                {"uuid": guest.uuid, "ex": e})
+                    LOG.warn(_LW("couldn't obtain the memory from domain:"
+                                 " %(uuid)s, exception: %(ex)s") %
+                             {"uuid": dom.UUIDString(), "ex": e})
                     continue
                 # skip dom0
-                if guest.id != 0:
+                if dom.ID() != 0:
                     used += dom_mem
                 else:
                     # the mem reported by dom0 is be greater of what
@@ -956,11 +942,11 @@ class Host(object):
                               int(m[idx2 + 1]) +
                               int(m[idx3 + 1])))
             # Convert it to MB
-            return used // units.Ki
+            return used / units.Ki
         else:
             avail = (int(m[idx1 + 1]) + int(m[idx2 + 1]) + int(m[idx3 + 1]))
             # Convert it to MB
-            return self.get_memory_mb_total() - avail // units.Ki
+            return self.get_memory_mb_total() - avail / units.Ki
 
     def get_cpu_stats(self):
         """Returns the current CPU state of the host with frequency."""
@@ -998,20 +984,3 @@ class Host(object):
     def compare_cpu(self, xmlDesc, flags=0):
         """Compares the given CPU description with the host CPU."""
         return self.get_connection().compareCPU(xmlDesc, flags)
-
-    def is_cpu_control_policy_capable(self):
-        """Returns whether kernel configuration CGROUP_SCHED is enabled
-
-        CONFIG_CGROUP_SCHED may be disabled in some kernel configs to
-        improve scheduler latency.
-        """
-        try:
-            with open("/proc/self/mounts", "r") as fd:
-                for line in fd.readlines():
-                    # mount options and split options
-                    bits = line.split()[3].split(",")
-                    if "cpu" in bits:
-                        return True
-                return False
-        except IOError:
-            return False

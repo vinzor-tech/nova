@@ -55,9 +55,8 @@ class PciDevTracker(object):
         super(PciDevTracker, self).__init__()
         self.stale = {}
         self.node_id = node_id
+        self.stats = stats.PciDeviceStats()
         self.dev_filter = whitelist.Whitelist(CONF.pci_passthrough_whitelist)
-        self.stats = stats.PciDeviceStats(dev_filter=self.dev_filter)
-        self._context = context
         if node_id:
             self.pci_devs = objects.PciDeviceList.get_by_compute_node(
                     context, node_id)
@@ -113,6 +112,9 @@ class PciDevTracker(object):
 
         devices = []
         for dev in jsonutils.loads(devices_json):
+            if dev.get('dev_type') == fields.PciDeviceType.SRIOV_PF:
+                continue
+
             if self.dev_filter.device_assignable(dev):
                 devices.append(dev)
         self._set_hvdevs(devices)
@@ -165,7 +167,8 @@ class PciDevTracker(object):
         for dev in [dev for dev in devices if
                     dev['address'] in new_addrs - exist_addrs]:
             dev['compute_node_id'] = self.node_id
-            dev_obj = objects.PciDevice.create(self._context, dev)
+            # NOTE(danms): These devices are created with no context
+            dev_obj = objects.PciDevice.create(dev)
             self.pci_devs.objects.append(dev_obj)
             self.stats.add_device(dev_obj)
 
@@ -215,12 +218,11 @@ class PciDevTracker(object):
         return None
 
     def _free_device(self, dev, instance=None):
-        freed_devs = dev.free(instance)
+        dev.free(instance)
         stale = self.stale.pop(dev.address, None)
         if stale:
             dev.update_device(stale)
-        for dev in freed_devs:
-            self.stats.add_device(dev)
+        self.stats.add_device(dev)
 
     def _free_instance(self, instance):
         # Note(yjiang5): When an instance is resized, the devices in the

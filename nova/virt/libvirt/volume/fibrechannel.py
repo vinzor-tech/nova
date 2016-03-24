@@ -45,7 +45,6 @@ class LibvirtFibreChannelVolumeDriver(libvirt_volume.LibvirtBaseVolumeDriver):
 
         conf.source_type = "block"
         conf.source_path = connection_info['data']['device_path']
-        conf.driver_io = "native"
         return conf
 
     def connect_volume(self, connection_info, disk_info):

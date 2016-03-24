@@ -62,13 +62,12 @@ class Mount(object):
                 return importutils.import_object(
                     "nova.virt.disk.mount.nbd.NbdMount",
                     image, mountdir, partition)
-        elif isinstance(image, imgmodel.LocalBlockImage):
-            LOG.debug("Using BlockMount")
-            return importutils.import_object(
-                    "nova.virt.disk.mount.block.BlockMount",
-                    image, mountdir, partition)
         else:
-            # TODO(berrange) We could mount RBDImage directly
+            # TODO(berrange) we could mount images of
+            # type LocalBlockImage directly without
+            # involving loop or nbd devices
+            #
+            # We could also mount RBDImage directly
             # using kernel RBD block dev support.
             #
             # This is left as an enhancement for future
@@ -99,15 +98,10 @@ class Mount(object):
             return importutils.import_object(
                 "nova.virt.disk.mount.loop.LoopMount",
                 image, mountdir, partition, device)
-        elif "nbd" in device:
+        else:
             LOG.debug("Using NbdMount")
             return importutils.import_object(
                 "nova.virt.disk.mount.nbd.NbdMount",
-                image, mountdir, partition, device)
-        else:
-            LOG.debug("Using BlockMount")
-            return importutils.import_object(
-                "nova.virt.disk.mount.block.BlockMount",
                 image, mountdir, partition, device)
 
     def __init__(self, image, mount_dir, partition=None, device=None):
@@ -145,9 +139,8 @@ class Mount(object):
         if os.path.isabs(device) and os.path.exists(device):
             if device.startswith('/dev/mapper/'):
                 device = os.path.basename(device)
-                if 'p' in device:
-                    device, self.partition = device.rsplit('p', 1)
-                    self.device = os.path.join('/dev', device)
+                device, self.partition = device.rsplit('p', 1)
+                self.device = os.path.join('/dev', device)
 
     def get_dev(self):
         """Make the image available as a block device in the file system."""

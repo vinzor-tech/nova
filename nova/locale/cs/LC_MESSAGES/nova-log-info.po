@@ -5,22 +5,25 @@
 # Translators:
 # Zbyněk Schwarz <zbynek.schwarz@gmail.com>, 2015
 # OpenStack Infra <zanata@openstack.org>, 2015. #zanata
-# Zbyněk Schwarz <zbynek.schwarz@gmail.com>, 2015. #zanata
 msgid ""
 msgstr ""
-"Project-Id-Version: nova 13.0.0.0b4.dev129\n"
+"Project-Id-Version: nova 12.0.0.0b4.dev203\n"
 "Report-Msgid-Bugs-To: EMAIL@ADDRESS\n"
-"POT-Creation-Date: 2016-03-10 03:26+0000\n"
+"POT-Creation-Date: 2015-09-16 19:02+0000\n"
+"PO-Revision-Date: 2015-08-30 04:53+0000\n"
+"Last-Translator: Zbyněk Schwarz <zbynek.schwarz@gmail.com>\n"
+"Language-Team: Czech (http://www.transifex.com/openstack/nova/language/cs/)\n"
+"Language: cs\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
-"PO-Revision-Date: 2015-12-16 03:45+0000\n"
-"Last-Translator: Zbyněk Schwarz <zbynek.schwarz@gmail.com>\n"
-"Language: cs\n"
-"Plural-Forms: nplurals=3; plural=(n==1) ? 0 : (n>=2 && n<=4) ? 1 : 2;\n"
 "Generated-By: Babel 2.0\n"
-"X-Generator: Zanata 3.7.3\n"
-"Language-Team: Czech\n"
+"Plural-Forms: nplurals=3; plural=(n==1) ? 0 : (n>=2 && n<=4) ? 1 : 2;\n"
+"X-Generator: Zanata 3.7.1\n"
+
+#, python-format
+msgid "%(action_str)s instance"
+msgstr "%(action_str)s instance"
 
 #, python-format
 msgid "%(id)s (%(base_file)s): generating checksum"
@@ -29,10 +32,6 @@ msgstr "%(id)s (%(base_file)s): vytváření kontrolního součtu"
 #, python-format
 msgid "%(name)s listening on %(host)s:%(port)s"
 msgstr "%(name)s poslouchá na %(host)s:%(port)s"
-
-#, python-format
-msgid "%(num_values)d values found, of which the maximum value will be used."
-msgstr "%(num_values)d hodnot nalezeno, z nich bude použita maximální hodnota."
 
 #, python-format
 msgid "%(num_values)d values found, of which the minimum value will be used."
@@ -64,12 +63,23 @@ msgid "Adding security group %(security_group_id)s to port %(port_id)s"
 msgstr ""
 "Přidávání bezpečnostní skupiny %(security_group_id)s k portu %(port_id)s"
 
+msgid "Allocate address"
+msgstr "Přidělit adresu"
+
 #, python-format
 msgid "Allocated network: '%s' for instance"
 msgstr "Přidělena síť: '%s' pro instanci"
 
+#, python-format
+msgid "Associate address %(public_ip)s to instance %(instance_id)s"
+msgstr "Přidružit adresu %(public_ip)s k instanci %(instance_id)s"
+
 msgid "Attach interface"
 msgstr "Připojit rozhraní"
+
+#, python-format
+msgid "Attach volume %(volume_id)s to instance %(instance_id)s at %(device)s"
+msgstr "Připojit svazek %(volume_id)s k instanci %(instance_id)s na %(device)s"
 
 #, python-format
 msgid "Attach volume %(volume_id)s to instance %(server_id)s at %(device)s"
@@ -81,14 +91,6 @@ msgstr "Připojování svazku %(volume_id)s do %(mountpoint)s"
 
 msgid "Attempted to unfilter instance which is not filtered"
 msgstr "Pokus o odfiltrování instance, která není filtrována"
-
-#, python-format
-msgid ""
-"Attempting claim: memory %(memory_mb)d MB, disk %(disk_gb)d GB, vcpus "
-"%(vcpus)d CPU"
-msgstr ""
-"Pokus o získání: paměť  %(memory_mb)d MB, disk %(disk_gb)d GB, virtuální "
-"procesory %(vcpus)d CPU"
 
 #, python-format
 msgid "Auditing locally available compute resources for node %(node)s"
@@ -105,17 +107,6 @@ msgid "Automatically hard rebooting"
 msgstr "Automatický tvrdý restart"
 
 #, python-format
-msgid ""
-"Automatically selected compute RPC version %(rpc)s from minimum service "
-"version %(service)i"
-msgstr ""
-"Automaticky vybraná verze výpočtové RPC %(rpc)s z minimální verze služby "
-"%(service)i"
-
-msgid "Bandwidth usage not supported by hypervisor."
-msgstr "Využití šířky pásma není hypervizorem podporováno."
-
-#, python-format
 msgid "Base or swap file too young to remove: %s"
 msgstr "Základní nebo odkládací soubor je příliš nový k odstranění: %s"
 
@@ -126,21 +117,8 @@ msgid "Beginning live snapshot process"
 msgstr "Zahajování procesu snímkování za provozu"
 
 #, python-format
-msgid "Booting with blank volume at %(mountpoint)s"
-msgstr "Zavádění pomocí prázdného svazku ve %(mountpoint)s"
-
-#, python-format
 msgid "Booting with volume %(volume_id)s at %(mountpoint)s"
 msgstr "Zavádění pomocí svazku %(volume_id)s ve %(mountpoint)s"
-
-#, python-format
-msgid "Booting with volume snapshot %(snapshot_id)s at %(mountpoint)s"
-msgstr "Zavádění pomocí snímku svazku %(snapshot_id)s ve %(mountpoint)s"
-
-#, python-format
-msgid "Booting with volume-backed-image %(image_id)s at %(mountpoint)s"
-msgstr ""
-"Zavádění pomocí obrazu %(image_id)s zálohovaném na svazku ve %(mountpoint)s"
 
 msgid "Called setup_basic_filtering in nwfilter"
 msgstr "Voláno základní nastavení filtrování v nwfilter"
@@ -215,8 +193,20 @@ msgid "Create assisted snapshot from volume %s"
 msgstr "Vytvořit snímek s pomocí ze svazku %s"
 
 #, python-format
+msgid "Create key pair %s"
+msgstr "Vytvořit pár klíčů %s"
+
+#, python-format
 msgid "Create snapshot from volume %s"
 msgstr "Vytvořit snímek ze svazku %s"
+
+#, python-format
+msgid "Create snapshot of volume %s"
+msgstr "Vytvořit snímek svazku %s"
+
+#, python-format
+msgid "Create volume from snapshot %s"
+msgstr "Vytvořit svazek ze snímku %s"
 
 #, python-format
 msgid "Create volume of %s GB"
@@ -243,6 +233,14 @@ msgid ""
 msgstr ""
 "Zbývající data %(remaining)d bajtů, nejnižší hladina %(watermark)d bajtů "
 "před %(last)d vteřinami"
+
+#, python-format
+msgid "De-registering image %s"
+msgstr "Zrušení registrace obrazu %s"
+
+#, python-format
+msgid "Delete key pair %s"
+msgstr "Smazat pár klíčů %s"
 
 #, python-format
 msgid "Delete security group %s"
@@ -323,6 +321,10 @@ msgstr "Přidělení zařízení selhalo. Další pokus za 2 vteřiny."
 #, python-format
 msgid "Disabling host %s."
 msgstr "Zakazování hostitele %s."
+
+#, python-format
+msgid "Disassociate address %s"
+msgstr "Odloučit adresu %s"
 
 #, python-format
 msgid "Disconnecting stale VDI %s from compute domU"
@@ -426,11 +428,12 @@ msgstr "Filtr %s vrátil 0 hostitelů"
 
 #, python-format
 msgid ""
-"Filtering removed all hosts for the request with instance ID "
-"'%(inst_uuid)s'. Filter results: %(str_results)s"
+"Filtering removed all hosts for the request with reservation ID '%(res_id)s' "
+"and instance ID '%(inst_uuid)s'. Filter results: %(str_results)s"
 msgstr ""
-"Filtrování odstranilo všechny hostitele z žádosti ID instance "
-"'%(inst_uuid)s'. Výsledky filtrování: %(str_results)s"
+"Filtrování odstranilo všechny hostitele z žádosti mající ID rezervace "
+"'%(res_id)s' a ID instance '%(inst_uuid)s'. Výsledky filtrování: "
+"%(str_results)s"
 
 #, python-format
 msgid ""
@@ -494,6 +497,10 @@ msgid "Get console output"
 msgstr "Získat výstup konzole"
 
 #, python-format
+msgid "Get console output for instance %s"
+msgstr "Získat výstup konzole pro instanci %s"
+
+#, python-format
 msgid ""
 "Getting block stats failed, device might have been detached. Instance="
 "%(instance_name)s Disk=%(disk)s Code=%(errcode)s Error=%(e)s"
@@ -554,9 +561,13 @@ msgstr ""
 "%(downloaded)s trvání: %(duration).2f vteřin pro obraz %(image_id)s"
 
 #, python-format
+msgid "Import key %s"
+msgstr "Importovat klíč %s"
+
+#, python-format
 msgid ""
-"Increasing downtime to %(downtime)d ms after %(waittime)d sec elapsed time"
-msgstr "Snižování odstávky na %(downtime)d ms po uplynutí %(waittime)d vteřin"
+"Increasing downtime to %(downtime)dms after %(waittime)d sec elapsed time"
+msgstr "Snižování odstávky na %(downtime)dms po uplynutí %(waittime)d vteřin"
 
 #, python-format
 msgid ""
@@ -655,9 +666,6 @@ msgstr "Instance byla úspěšně znovu sestavena"
 msgid "Invalid request: %s"
 msgstr "Neplatný požadavek: %s"
 
-msgid "It's not supported to backup volume backed instance."
-msgstr "Zálohovat instance zálohované použitím svazku není podporováno."
-
 #, python-format
 msgid "Libvirt host capabilities %s"
 msgstr "Schopnosti hostitele libvirt: %s"
@@ -726,8 +734,8 @@ msgid "NBD mount error: %s"
 msgstr "Chyba připojení NBD: %s"
 
 #, python-format
-msgid "Network deallocated for instance (fixed IPs: '%s')"
-msgstr "Přidělení sítě zrušeno pro instanci (pevné IP adresy: '%s')"
+msgid "Network deallocated for instance (fixed ips: '%s')"
+msgstr "Přidělení sítě zrušeno pro instanci (pevné ip adresy: '%s')"
 
 #, python-format
 msgid ""
@@ -781,6 +789,10 @@ msgstr ""
 msgid "Putting host %(host_name)s in maintenance mode %(mode)s."
 msgstr "Přepínání hostitele %(host_name)s do režimu údržby %(mode)s."
 
+#, python-format
+msgid "Reboot instance %r"
+msgstr "Restartovat instanci %r"
+
 msgid "Rebooting instance"
 msgstr "Restartování instance"
 
@@ -825,11 +837,17 @@ msgstr ""
 "Připojení k serveru memcache obnoveno a stav služby může být znovu "
 "kontrolován."
 
-msgid "Recovered from being unable to report status."
-msgstr "Nemožnost hlásit stav byla opravena."
+msgid "Recovered connection to nova-conductor for reporting service status."
+msgstr ""
+"Připojení k nová-conductor obnoveno a stav služby může být znovu kontrolován."
 
-msgid "Reloading compute RPC API"
-msgstr "Znovu načítání výpočtové API RPC"
+#, python-format
+msgid "Registered image %(image_location)s with id %(image_id)s"
+msgstr "Obraz %(image_location)s registrován s id %(image_id)s"
+
+#, python-format
+msgid "Release address %s"
+msgstr "Uvolnit adresu %s"
 
 #, python-format
 msgid "Removable base files: %s"
@@ -931,6 +949,9 @@ msgstr "Spouštění uzlu %(topic)s (verze %(version)s)"
 msgid "Starting halted instance found during reboot"
 msgstr "Spouštění zastavené instance nalezené během restartování"
 
+msgid "Starting instance..."
+msgstr "Spouštění instance..."
+
 #, python-format
 msgid "Starting migration network for instance %s"
 msgstr "Zahajování přesunutí sítě instance %s"
@@ -978,6 +999,9 @@ msgstr "Vyměňování svazku %(old_volume)s za %(new_volume)s"
 msgid "Task possibly preempted: %s"
 msgstr "Úkol možná prošel preempcí: %s"
 
+msgid "The ISCSI initiator name can't be found. Choosing the default one"
+msgstr "Název iniciátoru ISCSI nelze nalézt. Zvolen výchozí."
+
 msgid "The imported VM was unregistered"
 msgstr "Importovaná VM nebyla registrována"
 
@@ -998,26 +1022,6 @@ msgstr ""
 
 msgid "Timestamp is invalid."
 msgstr "Časové razítko je neplatné."
-
-#, python-format
-msgid "Took %(time).2f seconds to detach %(num)s volumes for instance."
-msgstr "Odpojení %(num)s svazků z instance trvalo %(time).2f vteřin."
-
-#, python-format
-msgid "Took %0.2f seconds to build instance."
-msgstr "Sestavení instance trvalo %0.2f vteřin."
-
-#, python-format
-msgid "Took %0.2f seconds to deallocate network for instance."
-msgstr "Zrušení přidělení síti k instanci trvalo %0.2f vteřin."
-
-#, python-format
-msgid "Took %0.2f seconds to destroy the instance on the hypervisor."
-msgstr "Smazání instance na hypervizoru trvalo %0.2f vteřin."
-
-#, python-format
-msgid "Took %0.2f seconds to spawn the instance on the hypervisor."
-msgstr "Vytvoření instance na hypervizoru trvalo %0.2f vteřin."
 
 #, python-format
 msgid "Total %(type)s: %(total)d %(unit)s, used: %(used).02f %(unit)s"
@@ -1054,6 +1058,11 @@ msgstr ""
 "%(ex)s"
 
 #, python-format
+msgid ""
+"Unauthorized request for controller=%(controller)s and action=%(action)s"
+msgstr "Neoprávněný požadavek pro ovladač=%(controller)s a činnost=%(action)s"
+
+#, python-format
 msgid "Unexpected error: %s"
 msgstr "Neočekávaná chyba: %s"
 
@@ -1071,23 +1080,18 @@ msgid "Updating from migration %s"
 msgstr "Aktualizování z přesunu %s"
 
 #, python-format
-msgid "Updating instance to original state: '%s'"
-msgstr "Aktualizování instance do původního stavu: '%s'"
+msgid "Updating image %s publicity"
+msgstr "Aktualizace zveřejnění obrazu %s"
 
 #, python-format
-msgid ""
-"Updating service version for %(binary)s on %(host)s from %(old)i to %(new)i"
-msgstr ""
-"Aktualizování verze služby pro %(binary)s na %(host)s z %(old)i na %(new)i"
+msgid "Updating instance to original state: '%s'"
+msgstr "Aktualizování instance do původního stavu: '%s'"
 
 msgid "Using config drive"
 msgstr "Používání konfigurační jednotky"
 
 msgid "Using config drive for instance"
 msgstr "Konfigurační jednotka je použita pro instnaci"
-
-msgid "V2.1 API has been disabled by configuration"
-msgstr "V2.1 API bylo zakázáno v nastavení"
 
 #, python-format
 msgid ""

@@ -13,10 +13,24 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-import nova.conf
+from oslo_config import cfg
+
 from nova.scheduler import filters
 
-CONF = nova.conf.CONF
+isolated_opts = [
+    cfg.ListOpt('isolated_images',
+                default=[],
+                help='Images to run on isolated host'),
+    cfg.ListOpt('isolated_hosts',
+                default=[],
+                help='Host reserved for specific images'),
+    cfg.BoolOpt('restrict_isolated_hosts_to_isolated_images',
+                default=True,
+                help='Whether to force isolated hosts to run only isolated '
+                     'images'),
+]
+CONF = cfg.CONF
+CONF.register_opts(isolated_opts)
 
 
 class IsolatedHostsFilter(filters.BaseHostFilter):
@@ -25,7 +39,7 @@ class IsolatedHostsFilter(filters.BaseHostFilter):
     # The configuration values do not change within a request
     run_filter_once_per_request = True
 
-    def host_passes(self, host_state, spec_obj):
+    def host_passes(self, host_state, filter_properties):
         """Result Matrix with 'restrict_isolated_hosts_to_isolated_images' set
         to True::
 
@@ -57,7 +71,9 @@ class IsolatedHostsFilter(filters.BaseHostFilter):
             return ((not restrict_isolated_hosts_to_isolated_images) or
                    (host_state.host not in isolated_hosts))
 
-        image_ref = spec_obj.image.id if spec_obj.image else None
+        spec = filter_properties.get('request_spec', {})
+        props = spec.get('instance_properties', {})
+        image_ref = props.get('image_ref')
         image_isolated = image_ref in isolated_images
         host_isolated = host_state.host in isolated_hosts
 

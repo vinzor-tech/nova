@@ -17,7 +17,6 @@
 import inspect
 
 import six
-from webob.util import status_reasons
 
 from nova import context
 from nova import exception
@@ -57,9 +56,9 @@ class WrapExceptionTestCase(test.NoDBTestCase):
         ctxt = context.get_admin_context()
         self.assertRaises(test.TestingException,
                           wrapped(bad_function_exception), 1, ctxt, 3, zoo=3)
-        self.assertEqual("bad_function_exception", notifier.provided_event)
+        self.assertEqual(notifier.provided_event, "bad_function_exception")
         self.assertEqual(notifier.provided_context, ctxt)
-        self.assertEqual(3, notifier.provided_payload['args']['extra'])
+        self.assertEqual(notifier.provided_payload['args']['extra'], 3)
         for key in ['exception', 'args']:
             self.assertIn(key, notifier.provided_payload.keys())
 
@@ -70,34 +69,34 @@ class NovaExceptionTestCase(test.NoDBTestCase):
             msg_fmt = "default message"
 
         exc = FakeNovaException()
-        self.assertEqual('default message', six.text_type(exc))
+        self.assertEqual(six.text_type(exc), 'default message')
 
     def test_error_msg(self):
-        self.assertEqual('test',
-                         six.text_type(exception.NovaException('test')))
+        self.assertEqual(six.text_type(exception.NovaException('test')),
+                         'test')
 
     def test_default_error_msg_with_kwargs(self):
         class FakeNovaException(exception.NovaException):
             msg_fmt = "default message: %(code)s"
 
         exc = FakeNovaException(code=500)
-        self.assertEqual('default message: 500', six.text_type(exc))
-        self.assertEqual('default message: 500', exc.message)
+        self.assertEqual(six.text_type(exc), 'default message: 500')
+        self.assertEqual(exc.message, 'default message: 500')
 
     def test_error_msg_exception_with_kwargs(self):
         class FakeNovaException(exception.NovaException):
             msg_fmt = "default message: %(misspelled_code)s"
 
         exc = FakeNovaException(code=500, misspelled_code='blah')
-        self.assertEqual('default message: blah', six.text_type(exc))
-        self.assertEqual('default message: blah', exc.message)
+        self.assertEqual(six.text_type(exc), 'default message: blah')
+        self.assertEqual(exc.message, 'default message: blah')
 
     def test_default_error_code(self):
         class FakeNovaException(exception.NovaException):
             code = 404
 
         exc = FakeNovaException()
-        self.assertEqual(404, exc.kwargs['code'])
+        self.assertEqual(exc.kwargs['code'], 404)
 
     def test_error_code_from_kwarg(self):
         class FakeNovaException(exception.NovaException):
@@ -108,10 +107,10 @@ class NovaExceptionTestCase(test.NoDBTestCase):
 
     def test_cleanse_dict(self):
         kwargs = {'foo': 1, 'blah_pass': 2, 'zoo_password': 3, '_pass': 4}
-        self.assertEqual({'foo': 1}, exception._cleanse_dict(kwargs))
+        self.assertEqual(exception._cleanse_dict(kwargs), {'foo': 1})
 
         kwargs = {}
-        self.assertEqual({}, exception._cleanse_dict(kwargs))
+        self.assertEqual(exception._cleanse_dict(kwargs), {})
 
     def test_format_message_local(self):
         class FakeNovaException(exception.NovaException):
@@ -124,16 +123,16 @@ class NovaExceptionTestCase(test.NoDBTestCase):
         class FakeNovaException_Remote(exception.NovaException):
             msg_fmt = "some message"
 
-            if six.PY2:
-                def __unicode__(self):
-                    return u"print the whole trace"
-            else:
+            if six.PY3:
                 def __str__(self):
                     return "print the whole trace"
+            else:
+                def __unicode__(self):
+                    return u"print the whole trace"
 
         exc = FakeNovaException_Remote()
-        self.assertEqual(u"print the whole trace", six.text_type(exc))
-        self.assertEqual("some message", exc.format_message())
+        self.assertEqual(six.text_type(exc), u"print the whole trace")
+        self.assertEqual(exc.format_message(), "some message")
 
     def test_format_message_remote_error(self):
         class FakeNovaException_Remote(exception.NovaException):
@@ -144,32 +143,13 @@ class NovaExceptionTestCase(test.NoDBTestCase):
 
         self.flags(fatal_exception_format_errors=False)
         exc = FakeNovaException_Remote(lame_arg='lame')
-        self.assertEqual("some message %(somearg)s", exc.format_message())
-
-
-class ConvertedExceptionTestCase(test.NoDBTestCase):
-    def test_instantiate(self):
-        exc = exception.ConvertedException(400, 'Bad Request', 'reason')
-        self.assertEqual(exc.code, 400)
-        self.assertEqual(exc.title, 'Bad Request')
-        self.assertEqual(exc.explanation, 'reason')
-
-    def test_instantiate_without_title_known_code(self):
-        exc = exception.ConvertedException(500)
-        self.assertEqual(exc.title, status_reasons[500])
-
-    def test_instantiate_without_title_unknown_code(self):
-        exc = exception.ConvertedException(499)
-        self.assertEqual(exc.title, 'Unknown Client Error')
-
-    def test_instantiate_bad_code(self):
-        self.assertRaises(KeyError, exception.ConvertedException, 10)
+        self.assertEqual(exc.format_message(), "some message %(somearg)s")
 
 
 class ExceptionTestCase(test.NoDBTestCase):
     @staticmethod
     def _raise_exc(exc):
-        raise exc(500)
+        raise exc()
 
     def test_exceptions_raise(self):
         # NOTE(dprince): disable format errors since we are not passing kwargs

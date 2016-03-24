@@ -13,35 +13,40 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+from oslo_config import cfg
 from oslo_log import log as logging
 
-import nova.conf
 from nova.i18n import _LW
 from nova.scheduler import filters
 from nova.scheduler.filters import utils
 
 LOG = logging.getLogger(__name__)
 
-CONF = nova.conf.CONF
+disk_allocation_ratio_opt = cfg.FloatOpt("disk_allocation_ratio", default=1.0,
+                         help="Virtual disk to physical disk allocation ratio")
+
+CONF = cfg.CONF
+CONF.register_opt(disk_allocation_ratio_opt)
 
 
 class DiskFilter(filters.BaseHostFilter):
     """Disk Filter with over subscription flag."""
 
-    def _get_disk_allocation_ratio(self, host_state, spec_obj):
-        return host_state.disk_allocation_ratio
+    def _get_disk_allocation_ratio(self, host_state, filter_properties):
+        return CONF.disk_allocation_ratio
 
-    def host_passes(self, host_state, spec_obj):
+    def host_passes(self, host_state, filter_properties):
         """Filter based on disk usage."""
-        requested_disk = (1024 * (spec_obj.root_gb +
-                                  spec_obj.ephemeral_gb) +
-                          spec_obj.swap)
+        instance_type = filter_properties.get('instance_type')
+        requested_disk = (1024 * (instance_type['root_gb'] +
+                                 instance_type['ephemeral_gb']) +
+                         instance_type['swap'])
 
         free_disk_mb = host_state.free_disk_mb
         total_usable_disk_mb = host_state.total_usable_disk_gb * 1024
 
         disk_allocation_ratio = self._get_disk_allocation_ratio(
-            host_state, spec_obj)
+            host_state, filter_properties)
 
         disk_mb_limit = total_usable_disk_mb * disk_allocation_ratio
         used_disk_mb = total_usable_disk_mb - free_disk_mb
@@ -67,16 +72,15 @@ class AggregateDiskFilter(DiskFilter):
     found.
     """
 
-    def _get_disk_allocation_ratio(self, host_state, spec_obj):
+    def _get_disk_allocation_ratio(self, host_state, filter_properties):
         aggregate_vals = utils.aggregate_values_from_key(
             host_state,
             'disk_allocation_ratio')
         try:
             ratio = utils.validate_num_values(
-                aggregate_vals, host_state.disk_allocation_ratio,
-                cast_to=float)
+                aggregate_vals, CONF.disk_allocation_ratio, cast_to=float)
         except ValueError as e:
             LOG.warning(_LW("Could not decode disk_allocation_ratio: '%s'"), e)
-            ratio = host_state.disk_allocation_ratio
+            ratio = CONF.disk_allocation_ratio
 
         return ratio

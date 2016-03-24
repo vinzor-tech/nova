@@ -14,6 +14,7 @@
 #    under the License.
 
 import copy
+import os
 
 from nova.api.openstack import common
 
@@ -91,5 +92,8 @@ class ViewBuilder(common.ViewBuilder):
         else:
             version_number = 'v2'
 
-        path = path or ''
-        return common.url_join(self.prefix, version_number, path)
+        if path:
+            path = path.strip('/')
+            return os.path.join(self.prefix, version_number, path)
+        else:
+            return os.path.join(self.prefix, version_number) + '/'

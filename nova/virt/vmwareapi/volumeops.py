@@ -22,6 +22,7 @@ from oslo_log import log as logging
 from oslo_vmware import exceptions as oslo_vmw_exceptions
 from oslo_vmware import vim_util as vutil
 
+from nova.compute import vm_states
 from nova import exception
 from nova.i18n import _, _LI, _LW
 from nova.virt.vmwareapi import constants
@@ -330,11 +331,10 @@ class VMwareVolumeOps(object):
         adapter_type = adapter_type or vmdk.adapter_type
 
         # IDE does not support disk hotplug
-        if adapter_type == constants.ADAPTER_TYPE_IDE:
-            state = vm_util.get_vm_state(self._session, instance)
-            if state.lower() != 'poweredoff':
-                raise exception.Invalid(_('%s does not support disk '
-                                          'hotplug.') % adapter_type)
+        if (instance.vm_state == vm_states.ACTIVE and
+            adapter_type == constants.ADAPTER_TYPE_IDE):
+            msg = _('%s does not support disk hotplug.') % adapter_type
+            raise exception.Invalid(msg)
 
         # Attach the disk to virtual machine instance
         self.attach_disk_to_vm(vm_ref, instance, adapter_type, vmdk.disk_type,
@@ -379,7 +379,7 @@ class VMwareVolumeOps(object):
                   instance=instance)
         if driver_type == constants.DISK_FORMAT_VMDK:
             self._attach_volume_vmdk(connection_info, instance, adapter_type)
-        elif driver_type == constants.DISK_FORMAT_ISCSI:
+        elif driver_type == 'iscsi':
             self._attach_volume_iscsi(connection_info, instance, adapter_type)
         else:
             raise exception.VolumeDriverNotFound(driver_type=driver_type)
@@ -479,7 +479,7 @@ class VMwareVolumeOps(object):
         except oslo_vmw_exceptions.FileNotFoundException:
             # Volume's vmdk was moved; remove the device so that we can
             # relocate the volume.
-            LOG.warning(_LW("Virtual disk: %s of volume's backing not found."),
+            LOG.warn(_LW("Virtual disk: %s of volume's backing not found."),
                      original_device_path, exc_info=True)
             LOG.debug("Removing disk device of volume's backing and "
                       "reattempting relocate.")
@@ -511,7 +511,7 @@ class VMwareVolumeOps(object):
         device = vm_util.get_vmdk_backed_disk_device(hardware_devices,
                                                      disk_uuid)
         if not device:
-            raise exception.DiskNotFound(message=_("Unable to find volume"))
+            raise exception.StorageError(reason=_("Unable to find volume"))
         return device
 
     def _detach_volume_vmdk(self, connection_info, instance):
@@ -530,11 +530,10 @@ class VMwareVolumeOps(object):
         vmdk = vm_util.get_vmdk_info(self._session, volume_ref)
 
         # IDE does not support disk hotplug
-        if vmdk.adapter_type == constants.ADAPTER_TYPE_IDE:
-            state = vm_util.get_vm_state(self._session, instance)
-            if state.lower() != 'poweredoff':
-                raise exception.Invalid(_('%s does not support disk '
-                                          'hotplug.') % vmdk.adapter_type)
+        if (instance.vm_state == vm_states.ACTIVE and
+            vmdk.adapter_type == constants.ADAPTER_TYPE_IDE):
+            msg = _('%s does not support disk hotplug.') % vmdk.adapter_type
+            raise exception.Invalid(msg)
 
         self._consolidate_vmdk_volume(instance, vm_ref, device, volume_ref,
                                       adapter_type=vmdk.adapter_type,
@@ -569,7 +568,7 @@ class VMwareVolumeOps(object):
                                                       "config.hardware.device")
         device = vm_util.get_rdm_disk(hardware_devices, uuid)
         if device is None:
-            raise exception.DiskNotFound(message=_("Unable to find volume"))
+            raise exception.StorageError(reason=_("Unable to find volume"))
         self.detach_disk_from_vm(vm_ref, instance, device, destroy_disk=True)
         LOG.debug("Detached ISCSI: %s", connection_info, instance=instance)
 
@@ -580,7 +579,7 @@ class VMwareVolumeOps(object):
                   instance=instance)
         if driver_type == constants.DISK_FORMAT_VMDK:
             self._detach_volume_vmdk(connection_info, instance)
-        elif driver_type == constants.DISK_FORMAT_ISCSI:
+        elif driver_type == 'iscsi':
             self._detach_volume_iscsi(connection_info, instance)
         else:
             raise exception.VolumeDriverNotFound(driver_type=driver_type)

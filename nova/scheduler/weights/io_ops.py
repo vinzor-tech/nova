@@ -21,10 +21,20 @@ option to a positive number and the weighing has the opposite effect of the
 default.
 """
 
-import nova.conf
+from oslo_config import cfg
+
 from nova.scheduler import weights
 
-CONF = nova.conf.CONF
+io_ops_weight_opts = [
+    cfg.FloatOpt('io_ops_weight_multiplier',
+                 default=-1.0,
+                 help='Multiplier used for weighing host io ops. Negative '
+                      'numbers mean a preference to choose light workload '
+                      'compute hosts.'),
+]
+
+CONF = cfg.CONF
+CONF.register_opts(io_ops_weight_opts)
 
 
 class IoOpsWeigher(weights.BaseHostWeigher):

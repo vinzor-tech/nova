@@ -12,15 +12,16 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+from oslo_config import cfg
+
 from nova.api.openstack.compute.schemas import availability_zone as schema
 from nova.api.openstack import extensions
 from nova.api.openstack import wsgi
 from nova import availability_zones
-import nova.conf
 from nova import objects
 from nova import servicegroup
 
-CONF = nova.conf.CONF
+CONF = cfg.CONF
 ALIAS = "os-availability-zone"
 ATTRIBUTE_NAME = "availability_zone"
 authorize = extensions.os_compute_authorizer(ALIAS)
@@ -66,12 +67,7 @@ class AvailabilityZoneController(wsgi.Controller):
                                                        set_zones=True)
         zone_hosts = {}
         host_services = {}
-        api_services = ('nova-osapi_compute', 'nova-ec2', 'nova-metadata')
         for service in enabled_services:
-            if service.binary in api_services:
-                # Skip API services in the listing since they are not
-                # maintained in the same way as other services
-                continue
             zone_hosts.setdefault(service['availability_zone'], [])
             if service['host'] not in zone_hosts[service['availability_zone']]:
                 zone_hosts[service['availability_zone']].append(
@@ -143,13 +139,7 @@ class AvailabilityZone(extensions.V21APIExtensionBase):
     # NOTE(gmann): This function is not supposed to use 'body_deprecated_param'
     # parameter as this is placed to handle scheduler_hint extension for V2.1.
     def server_create(self, server_dict, create_kwargs, body_deprecated_param):
-        # NOTE(alex_xu): For v2.1 compat mode, we strip the spaces when create
-        # availability_zone. But we don't strip at here for backward-compatible
-        # with some users already created availability_zone with
-        # leading/trailing spaces with legacy v2 API.
         create_kwargs['availability_zone'] = server_dict.get(ATTRIBUTE_NAME)
 
-    def get_server_create_schema(self, version):
-        if version == "2.0":
-            return schema.server_create_v20
+    def get_server_create_schema(self):
         return schema.server_create

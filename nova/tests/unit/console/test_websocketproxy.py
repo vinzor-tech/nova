@@ -20,6 +20,9 @@ import mock
 from nova.console import websocketproxy
 from nova import exception
 from nova import test
+from oslo_config import cfg
+
+CONF = cfg.CONF
 
 
 class NovaProxyRequestHandlerBaseTestCase(test.NoDBTestCase):

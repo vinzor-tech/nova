@@ -9,8 +9,22 @@
                         "updated_at": %(strtime_or_none)s
                     }
                 },
+                "cert": {
+                    "nova-cert": {
+                        "active": true,
+                        "available": true,
+                        "updated_at": %(strtime_or_none)s
+                    }
+                },
                 "conductor": {
                     "nova-conductor": {
+                        "active": true,
+                        "available": true,
+                        "updated_at": %(strtime_or_none)s
+                    }
+                },
+                "cells": {
+                    "nova-cells": {
                         "active": true,
                         "available": true,
                         "updated_at": %(strtime_or_none)s

@@ -83,10 +83,14 @@ class AgentsTestV21(test.NoDBTestCase):
     def setUp(self):
         super(AgentsTestV21, self).setUp()
 
-        self.stub_out("nova.db.agent_build_get_all", fake_agent_build_get_all)
-        self.stub_out("nova.db.agent_build_update", fake_agent_build_update)
-        self.stub_out("nova.db.agent_build_destroy", fake_agent_build_destroy)
-        self.stub_out("nova.db.agent_build_create", fake_agent_build_create)
+        self.stubs.Set(db, "agent_build_get_all",
+                       fake_agent_build_get_all)
+        self.stubs.Set(db, "agent_build_update",
+                       fake_agent_build_update)
+        self.stubs.Set(db, "agent_build_destroy",
+                       fake_agent_build_destroy)
+        self.stubs.Set(db, "agent_build_create",
+                       fake_agent_build_create)
         self.req = self._get_http_request()
 
     def _get_http_request(self):
@@ -152,8 +156,8 @@ class AgentsTestV21(test.NoDBTestCase):
         def fake_agent_build_create_with_exited_agent(context, values):
             raise exception.AgentBuildExists(**values)
 
-        self.stub_out('nova.db.agent_build_create',
-                      fake_agent_build_create_with_exited_agent)
+        self.stubs.Set(db, 'agent_build_create',
+                       fake_agent_build_create_with_exited_agent)
         body = {'agent': {'hypervisor': 'kvm',
                 'os': 'win',
                 'architecture': 'x86',

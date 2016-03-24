@@ -12,15 +12,10 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-import datetime
-
 import mock
 
 from nova import db
-from nova.db.sqlalchemy import api as db_api
-from nova.db.sqlalchemy import api_models
 from nova import exception
-from nova import objects
 from nova.objects import flavor as flavor_obj
 from nova.tests.unit.objects import test_objects
 
@@ -46,36 +41,10 @@ fake_flavor = {
     }
 
 
-fake_api_flavor = {
-    'created_at': None,
-    'updated_at': None,
-    'id': 1,
-    'name': 'm1.foo',
-    'memory_mb': 1024,
-    'vcpus': 4,
-    'root_gb': 20,
-    'ephemeral_gb': 0,
-    'flavorid': 'm1.foo',
-    'swap': 0,
-    'rxtx_factor': 1.0,
-    'vcpu_weight': 1,
-    'disabled': False,
-    'is_public': True,
-    'extra_specs': {'foo': 'bar'},
-    }
-
-
 class _TestFlavor(object):
     @staticmethod
     def _compare(test, db, obj):
         for field, value in db.items():
-            # NOTE(danms): The datetimes on SQLA models are tz-unaware,
-            # but the object has tz-aware datetimes. If we're comparing
-            # a model to an object (as opposed to a fake dict), just
-            # ignore the datetimes in the comparison.
-            if (isinstance(db, api_models.API_BASE) and
-                  isinstance(value, datetime.datetime)):
-                continue
             test.assertEqual(db[field], obj[field])
 
     def test_get_by_id(self):
@@ -96,64 +65,6 @@ class _TestFlavor(object):
             flavor = flavor_obj.Flavor.get_by_flavor_id(self.context,
                                                         'm1.foo')
             self._compare(self, fake_flavor, flavor)
-
-    @mock.patch('nova.objects.Flavor._flavor_get_from_db')
-    def test_api_get_by_id_from_api(self, mock_get):
-        mock_get.return_value = fake_api_flavor
-        flavor = flavor_obj.Flavor.get_by_id(self.context, 1)
-        self._compare(self, fake_api_flavor, flavor)
-        mock_get.assert_called_once_with(self.context, 1)
-
-    @mock.patch('nova.objects.Flavor._flavor_get_by_name_from_db')
-    def test_get_by_name_from_api(self, mock_get):
-        mock_get.return_value = fake_api_flavor
-        flavor = flavor_obj.Flavor.get_by_name(self.context, 'm1.foo')
-        self._compare(self, fake_api_flavor, flavor)
-        mock_get.assert_called_once_with(self.context, 'm1.foo')
-
-    @mock.patch('nova.objects.Flavor._flavor_get_by_flavor_id_from_db')
-    def test_get_by_flavor_id_from_api(self, mock_get):
-        mock_get.return_value = fake_api_flavor
-        flavor = flavor_obj.Flavor.get_by_flavor_id(self.context, 'm1.foo')
-        self._compare(self, fake_api_flavor, flavor)
-        mock_get.assert_called_once_with(self.context, 'm1.foo')
-
-    @staticmethod
-    @db_api.api_context_manager.writer
-    def _create_api_flavor(context, altid=None):
-        fake_db_flavor = dict(fake_api_flavor)
-        del fake_db_flavor['extra_specs']
-        del fake_db_flavor['id']
-        flavor = api_models.Flavors()
-        flavor.update(fake_db_flavor)
-        if altid:
-            flavor.update({'flavorid': altid,
-                           'name': altid})
-        flavor.save(context.session)
-
-        fake_db_extra_spec = {'flavor_id': flavor['id'],
-                              'key': 'foo', 'value': 'bar'}
-        flavor_es = api_models.FlavorExtraSpecs()
-        flavor_es.update(fake_db_extra_spec)
-        flavor_es.save(context.session)
-
-        return flavor
-
-    def test_get_by_id_from_db(self):
-        db_flavor = self._create_api_flavor(self.context)
-        flavor = objects.Flavor.get_by_id(self.context, db_flavor['id'])
-        self._compare(self, db_flavor, flavor)
-
-    def test_get_by_name_from_db(self):
-        db_flavor = self._create_api_flavor(self.context)
-        flavor = objects.Flavor.get_by_name(self.context, db_flavor['name'])
-        self._compare(self, db_flavor, flavor)
-
-    def test_get_by_flavor_id_from_db(self):
-        db_flavor = self._create_api_flavor(self.context)
-        flavor = objects.Flavor.get_by_flavor_id(self.context,
-                                                 db_flavor['flavorid'])
-        self._compare(self, db_flavor, flavor)
 
     def test_add_access(self):
         elevated = self.context.elevated()
@@ -316,117 +227,21 @@ class TestFlavorRemote(test_objects._RemoteTest, _TestFlavor):
 
 
 class _TestFlavorList(object):
-    def test_get_all_from_db(self):
-        db_flavors = [
-            _TestFlavor._create_api_flavor(self.context),
-            _TestFlavor._create_api_flavor(self.context, 'm1.bar'),
-        ]
-        db_flavors.extend(db_api.flavor_get_all(self.context))
-        flavors = objects.FlavorList.get_all(self.context)
-        self.assertEqual(len(db_flavors), len(flavors))
-
-    def test_get_all_from_db_with_limit(self):
-        _TestFlavor._create_api_flavor(self.context)
-        _TestFlavor._create_api_flavor(self.context, 'm1.bar')
-        flavors = objects.FlavorList.get_all(self.context,
-                                             limit=1)
-        self.assertEqual(1, len(flavors))
-
-    @mock.patch('nova.db.flavor_get_all')
-    @mock.patch('nova.objects.flavor._flavor_get_all_from_db')
-    def test_get_all(self, mock_api_get, mock_main_get):
-        _fake_api_flavor = dict(fake_api_flavor,
-                                id=2, name='m1.bar', flavorid='m1.bar')
-
-        mock_api_get.return_value = [_fake_api_flavor]
-        mock_main_get.return_value = [fake_flavor]
-        filters = {'min_memory_mb': 4096}
-        flavors = flavor_obj.FlavorList.get_all(self.context,
-                                                inactive=False,
-                                                filters=filters,
-                                                sort_key='id',
-                                                sort_dir='asc')
-        self.assertEqual(2, len(flavors))
-        _TestFlavor._compare(self, _fake_api_flavor, flavors[0])
-        _TestFlavor._compare(self, fake_flavor, flavors[1])
-        mock_api_get.assert_called_once_with(self.context, inactive=False,
-                                             filters=filters, sort_key='id',
-                                             sort_dir='asc', limit=None,
-                                             marker=None)
-
-        mock_main_get.assert_called_once_with(self.context, inactive=False,
-                                              filters=filters, sort_key='id',
-                                              sort_dir='asc', limit=None,
-                                              marker=None)
-
-    @mock.patch('nova.db.flavor_get_all')
-    @mock.patch('nova.objects.flavor._flavor_get_all_from_db')
-    def test_get_all_limit_applied_to_api(self, mock_api_get, mock_main_get):
-        _fake_api_flavor = dict(fake_api_flavor,
-                                id=2, name='m1.bar', flavorid='m1.bar')
-
-        mock_api_get.return_value = [_fake_api_flavor]
-        mock_main_get.return_value = [fake_flavor]
-        filters = {'min_memory_mb': 4096}
-        flavors = flavor_obj.FlavorList.get_all(self.context,
-                                                inactive=False,
-                                                filters=filters,
-                                                limit=2,
-                                                sort_key='id',
-                                                sort_dir='asc')
-        self.assertEqual(2, len(flavors))
-        _TestFlavor._compare(self, _fake_api_flavor, flavors[0])
-        _TestFlavor._compare(self, fake_flavor, flavors[1])
-        mock_api_get.assert_called_once_with(self.context, inactive=False,
-                                             filters=filters, sort_key='id',
-                                             sort_dir='asc', limit=2,
-                                             marker=None)
-
-        mock_main_get.assert_called_once_with(self.context, inactive=False,
-                                              filters=filters, sort_key='id',
-                                              sort_dir='asc', limit=1,
-                                              marker=None)
-
-    @mock.patch('nova.db.flavor_get_all')
-    @mock.patch('nova.objects.flavor._flavor_get_all_from_db')
-    def test_get_all_limit_no_main_call(self, mock_api_get, mock_main_get):
-        _fake_api_flavor = dict(fake_api_flavor,
-                                id=2, name='m1.bar', flavorid='m1.bar')
-
-        mock_api_get.return_value = [_fake_api_flavor]
-        mock_main_get.return_value = [fake_flavor]
-        filters = {'min_memory_mb': 4096}
-        flavors = flavor_obj.FlavorList.get_all(self.context,
-                                                inactive=False,
-                                                filters=filters,
-                                                limit=1,
-                                                sort_key='id',
-                                                sort_dir='asc')
-        self.assertEqual(1, len(flavors))
-        _TestFlavor._compare(self, _fake_api_flavor, flavors[0])
-        mock_api_get.assert_called_once_with(self.context, inactive=False,
-                                             filters=filters, sort_key='id',
-                                             sort_dir='asc', limit=1,
-                                             marker=None)
-
-        self.assertFalse(mock_main_get.called)
-
-    @mock.patch('nova.db.flavor_get_all')
-    @mock.patch('nova.objects.Flavor._flavor_get_query_from_db')
-    def test_get_no_marker_in_api(self, mock_api_get, mock_main_get):
-        mock_api_get.filter_by.return_value.first.return_value = None
-        mock_main_get.return_value = []
-        flavor_obj.FlavorList.get_all(self.context,
-                                      inactive=False,
-                                      filters=None,
-                                      limit=1,
-                                      marker='foo',
-                                      sort_key='id',
-                                      sort_dir='asc')
-        mock_main_get.assert_called_once_with(self.context, inactive=False,
-                                              filters=None, sort_key='id',
-                                              sort_dir='asc', limit=1,
-                                              marker=None)
+    def test_get_all(self):
+        with mock.patch.object(db, 'flavor_get_all') as get_all:
+            get_all.return_value = [fake_flavor]
+            filters = {'min_memory_mb': 4096}
+            flavors = flavor_obj.FlavorList.get_all(self.context,
+                                                    inactive=False,
+                                                    filters=filters,
+                                                    sort_key='id',
+                                                    sort_dir='asc')
+            self.assertEqual(1, len(flavors))
+            _TestFlavor._compare(self, fake_flavor, flavors[0])
+            get_all.assert_called_once_with(self.context, inactive=False,
+                                            filters=filters, sort_key='id',
+                                            sort_dir='asc', limit=None,
+                                            marker=None)
 
 
 class TestFlavorList(test_objects._LocalTest, _TestFlavorList):

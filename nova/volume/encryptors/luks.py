@@ -99,7 +99,8 @@ class LuksEncryptor(cryptsetup.CryptsetupEncryptor):
         """
 
         key = self._get_key(context).get_encoded()
-        passphrase = self._get_passphrase(key)
+        # LUKS uses a passphrase rather than a raw key -- convert to string
+        passphrase = ''.join(hex(x).replace('0x', '') for x in key)
 
         try:
             self._open_volume(passphrase, **kwargs)

@@ -11,13 +11,15 @@
 #    WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
 #    License for the specific language governing permissions and limitations
 #    under the License.
-import copy
 
 from nova.api.validation import parameter_types
 
 # NOTE(russellb) There is one other policy, 'legacy', but we don't allow that
 # being set via the API.  It's only used when a group gets automatically
 # created to support the legacy behavior of the 'group' scheduler hint.
+SUPPORTED_POLICIES = ['anti-affinity', 'affinity']
+
+
 create = {
     'type': 'object',
     'properties': {
@@ -27,7 +29,7 @@ create = {
                 'name': parameter_types.name,
                 'policies': {
                     'type': 'array',
-                    'items': [{'enum': ['anti-affinity', 'affinity']}],
+                    'items': [{'enum': SUPPORTED_POLICIES}],
                     'uniqueItems': True,
                     'additionalItems': False,
                 }
@@ -39,7 +41,3 @@ create = {
     'required': ['server_group'],
     'additionalProperties': False,
 }
-
-create_v215 = copy.deepcopy(create)
-policies = create_v215['properties']['server_group']['properties']['policies']
-policies['items'][0]['enum'].extend(['soft-anti-affinity', 'soft-affinity'])

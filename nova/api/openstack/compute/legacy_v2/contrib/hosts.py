@@ -89,12 +89,10 @@ class HostController(object):
         services = self.api.service_get_all(context, filters=filters,
                                             set_zones=True)
         hosts = []
-        api_services = ('nova-osapi_compute', 'nova-ec2', 'nova-metadata')
         for service in services:
-            if service.binary not in api_services:
-                hosts.append({'host_name': service['host'],
-                              'service': service['topic'],
-                              'zone': service['availability_zone']})
+            hosts.append({'host_name': service['host'],
+                          'service': service['topic'],
+                          'zone': service['availability_zone']})
         return {'hosts': hosts}
 
     def update(self, req, id, body):
@@ -136,8 +134,7 @@ class HostController(object):
         # Validate the request
         if len(params) > 0:
             # Some extra param was passed. Fail.
-            explanation = _("Invalid update setting: '%s'") % list(
-                params.keys())[0]
+            explanation = _("Invalid update setting: '%s'") % params.keys()[0]
             raise webob.exc.HTTPBadRequest(explanation=explanation)
         if orig_status is not None:
             status = read_enabled(orig_status, _("Invalid status: '%s'"))
@@ -183,9 +180,9 @@ class HostController(object):
         on the host
         """
         if enabled:
-            LOG.info(_LI("Enabling host %s."), host_name)
+            LOG.info(_LI("Enabling host %s.") % host_name)
         else:
-            LOG.info(_LI("Disabling host %s."), host_name)
+            LOG.info(_LI("Disabling host %s.") % host_name)
         try:
             result = self.api.set_host_enabled(context, host_name=host_name,
                     enabled=enabled)

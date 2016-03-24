@@ -39,12 +39,8 @@ class MigrationTask(base.TaskBase):
                                              self.filter_properties)
         scheduler_utils.populate_retry(self.filter_properties,
                                        self.instance.uuid)
-        # TODO(sbauza): Hydrate here the object until we modify the
-        # scheduler.utils methods to directly use the RequestSpec object
-        spec_obj = objects.RequestSpec.from_primitives(
-            self.context, self.request_spec, self.filter_properties)
         hosts = self.scheduler_client.select_destinations(
-            self.context, spec_obj)
+            self.context, self.request_spec, self.filter_properties)
         host_state = hosts[0]
 
         scheduler_utils.populate_filter_properties(self.filter_properties,

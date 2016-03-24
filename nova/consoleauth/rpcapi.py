@@ -50,11 +50,9 @@ class ConsoleAuthAPI(object):
 
         * 2.1 - Added access_url to authorize_console
 
-        ... Kilo, Liberty and Mitaka support message version 2.1.  So, any
-        changes to existing methods in 2.x after that point should be
-        done such that they can handle the version_cap being set to
-        2.1.
-
+        ... Kilo support message version 2.1.  So, any changes to existing
+        methods in 2.x after that point should be done such that they can
+        handle the version_cap being set to 2.1.
     '''
 
     VERSION_ALIASES = {
@@ -63,8 +61,6 @@ class ConsoleAuthAPI(object):
         'icehouse': '2.0',
         'juno': '2.0',
         'kilo': '2.1',
-        'liberty': '2.1',
-        'mitaka': '2.1',
     }
 
     def __init__(self):

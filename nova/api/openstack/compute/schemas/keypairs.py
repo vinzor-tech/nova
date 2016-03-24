@@ -12,8 +12,6 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-import copy
-
 from nova.api.validation import parameter_types
 
 
@@ -33,12 +31,6 @@ create = {
     'required': ['keypair'],
     'additionalProperties': False,
 }
-
-
-create_v20 = copy.deepcopy(create)
-create_v20['properties']['keypair']['properties']['name'] = (parameter_types.
-    name_with_leading_trailing_spaces)
-
 
 create_v22 = {
     'type': 'object',
@@ -85,8 +77,4 @@ create_v210 = {
 
 server_create = {
     'key_name': parameter_types.name,
-}
-
-server_create_v20 = {
-    'key_name': parameter_types.name_with_leading_trailing_spaces,
 }

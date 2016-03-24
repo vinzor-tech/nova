@@ -20,10 +20,19 @@ stacking, you can set the 'ram_weight_multiplier' option to a negative
 number and the weighing has the opposite effect of the default.
 """
 
-import nova.conf
+from oslo_config import cfg
+
 from nova.scheduler import weights
 
-CONF = nova.conf.CONF
+ram_weight_opts = [
+        cfg.FloatOpt('ram_weight_multiplier',
+                     default=1.0,
+                     help='Multiplier used for weighing ram.  Negative '
+                          'numbers mean to stack vs spread.'),
+]
+
+CONF = cfg.CONF
+CONF.register_opts(ram_weight_opts)
 
 
 class RAMWeigher(weights.BaseHostWeigher):

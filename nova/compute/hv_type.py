@@ -36,7 +36,6 @@ IRONIC = "ironic"
 KQEMU = "kqemu"
 KVM = "kvm"
 LXC = "lxc"
-LXD = "lxd"
 OPENVZ = "openvz"
 PARALLELS = "parallels"
 VIRTUOZZO = "vz"
@@ -59,7 +58,6 @@ ALL = (
     KQEMU,
     KVM,
     LXC,
-    LXD,
     OPENVZ,
     PARALLELS,
     PHYP,

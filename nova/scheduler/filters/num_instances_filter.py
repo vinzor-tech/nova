@@ -13,28 +13,33 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+from oslo_config import cfg
 from oslo_log import log as logging
 
-import nova.conf
 from nova.i18n import _LW
 from nova.scheduler import filters
 from nova.scheduler.filters import utils
 
 LOG = logging.getLogger(__name__)
 
-CONF = nova.conf.CONF
+max_instances_per_host_opt = cfg.IntOpt("max_instances_per_host",
+        default=50,
+        help="Ignore hosts that have too many instances")
+
+CONF = cfg.CONF
+CONF.register_opt(max_instances_per_host_opt)
 
 
 class NumInstancesFilter(filters.BaseHostFilter):
     """Filter out hosts with too many instances."""
 
-    def _get_max_instances_per_host(self, host_state, spec_obj):
+    def _get_max_instances_per_host(self, host_state, filter_properties):
         return CONF.max_instances_per_host
 
-    def host_passes(self, host_state, spec_obj):
+    def host_passes(self, host_state, filter_properties):
         num_instances = host_state.num_instances
         max_instances = self._get_max_instances_per_host(
-            host_state, spec_obj)
+            host_state, filter_properties)
         passes = num_instances < max_instances
         if not passes:
             LOG.debug("%(host_state)s fails num_instances check: Max "
@@ -51,7 +56,7 @@ class AggregateNumInstancesFilter(NumInstancesFilter):
     found.
     """
 
-    def _get_max_instances_per_host(self, host_state, spec_obj):
+    def _get_max_instances_per_host(self, host_state, filter_properties):
         aggregate_vals = utils.aggregate_values_from_key(
             host_state,
             'max_instances_per_host')

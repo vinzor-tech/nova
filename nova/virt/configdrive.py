@@ -19,22 +19,32 @@ import os
 import shutil
 
 from oslo_config import cfg
+from oslo_log import log as logging
 from oslo_utils import fileutils
+from oslo_utils import strutils
 from oslo_utils import units
 
 from nova import exception
+from nova.i18n import _LW
+from nova import objects
 from nova.objects import fields
 from nova import utils
 from nova import version
+
+LOG = logging.getLogger(__name__)
 
 configdrive_opts = [
     cfg.StrOpt('config_drive_format',
                default='iso9660',
                choices=('iso9660', 'vfat'),
                help='Config drive format.'),
-    cfg.BoolOpt('force_config_drive',
-                help='Force injection to take place on a config drive',
-                default=False),
+    # force_config_drive is a string option, to allow for future behaviors
+    #  (e.g. use config_drive based on image properties)
+    cfg.StrOpt('force_config_drive',
+               choices=('always', 'True', 'False'),
+               help='Set to "always" to force injection to take place on a '
+                    'config drive. NOTE: The "always" will be deprecated in '
+                    'the Liberty release cycle.'),
     cfg.StrOpt('mkisofs_cmd',
                default='genisoimage',
                help='Name and optionally path of the tool used for '
@@ -52,6 +62,9 @@ class ConfigDriveBuilder(object):
     """Build config drives, optionally as a context manager."""
 
     def __init__(self, instance_md=None):
+        if CONF.force_config_drive == 'always':
+            LOG.warning(_LW('The setting "always" will be deprecated in the '
+                            'Liberty version. Please use "True" instead'))
         self.imagefile = None
         self.mdfiles = []
 
@@ -166,13 +179,15 @@ class ConfigDriveBuilder(object):
 
 
 def required_by(instance):
+    image_meta = objects.ImageMeta.from_instance(instance)
 
-    image_prop = instance.image_meta.properties.get(
+    image_prop = image_meta.properties.get(
         "img_config_drive",
         fields.ConfigDrivePolicy.OPTIONAL)
 
-    return (instance.config_drive or
-            CONF.force_config_drive or
+    return (instance.get('config_drive') or
+            'always' == CONF.force_config_drive or
+            strutils.bool_from_string(CONF.force_config_drive) or
             image_prop == fields.ConfigDrivePolicy.MANDATORY
             )
 

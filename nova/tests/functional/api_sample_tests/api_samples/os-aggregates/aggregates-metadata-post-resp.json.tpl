@@ -11,6 +11,6 @@
             "key": "value"
         },
         "name": "name",
-        "updated_at": %(strtime)s
+        "updated_at": null
     }
 }

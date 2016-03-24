@@ -76,6 +76,9 @@ class AgentList(base.ObjectListBase, base.NovaObject):
     fields = {
         'objects': fields.ListOfObjectsField('Agent'),
         }
+    obj_relationships = {
+        'objects': [('1.0', '1.0')],
+        }
 
     @base.remotable_classmethod
     def get_all(cls, context, hypervisor=None):

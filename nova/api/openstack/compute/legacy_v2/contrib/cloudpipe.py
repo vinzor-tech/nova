@@ -16,6 +16,7 @@
 
 from oslo_config import cfg
 from oslo_utils import fileutils
+from oslo_utils import timeutils
 from webob import exc
 
 from nova.api.openstack import extensions
@@ -71,7 +72,7 @@ class CloudpipeController(object):
             rv['state'] = 'pending'
             return rv
         rv['instance_id'] = instance.uuid
-        rv['created_at'] = utils.isotime(instance.created_at)
+        rv['created_at'] = timeutils.isotime(instance.created_at)
         nw_info = compute_utils.get_nw_info_for_instance(instance)
         if not nw_info:
             return rv

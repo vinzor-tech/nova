@@ -57,8 +57,6 @@ def create_mapping_obj(context, **kwargs):
 
 
 class HostMappingTestCase(test.NoDBTestCase):
-    USES_DB_SELF = True
-
     def setUp(self):
         super(HostMappingTestCase, self).setUp()
         self.useFixture(fixtures.Database(database='api'))

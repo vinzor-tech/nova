@@ -12,7 +12,6 @@
 
 import mock
 
-from nova import objects
 from nova.scheduler.filters import aggregate_image_properties_isolation as aipi
 from nova import test
 from nova.tests.unit.scheduler import fakes
@@ -26,80 +25,83 @@ class TestAggImagePropsIsolationFilter(test.NoDBTestCase):
         self.filt_cls = aipi.AggregateImagePropertiesIsolation()
 
     def test_aggregate_image_properties_isolation_passes(self, agg_mock):
-        agg_mock.return_value = {'hw_vm_mode': 'hvm'}
-        spec_obj = objects.RequestSpec(
-            context=mock.sentinel.ctx,
-            image=objects.ImageMeta(properties=objects.ImageMetaProps(
-                hw_vm_mode='hvm')))
+        agg_mock.return_value = {'foo': 'bar'}
+        filter_properties = {'context': mock.sentinel.ctx,
+                             'request_spec': {
+                                 'image': {
+                                     'properties': {'foo': 'bar'}}}}
         host = fakes.FakeHostState('host1', 'compute', {})
-        self.assertTrue(self.filt_cls.host_passes(host, spec_obj))
+        self.assertTrue(self.filt_cls.host_passes(host, filter_properties))
 
     def test_aggregate_image_properties_isolation_passes_comma(self, agg_mock):
-        agg_mock.return_value = {'hw_vm_mode': 'hvm,xen'}
-        spec_obj = objects.RequestSpec(
-            context=mock.sentinel.ctx,
-            image=objects.ImageMeta(properties=objects.ImageMetaProps(
-                hw_vm_mode='hvm')))
+        agg_mock.return_value = {'foo': 'bar,bar2'}
+        filter_properties = {'context': mock.sentinel.ctx,
+                             'request_spec': {
+                                 'image': {
+                                     'properties': {'foo': 'bar'}}}}
         host = fakes.FakeHostState('host1', 'compute', {})
-        self.assertTrue(self.filt_cls.host_passes(host, spec_obj))
+        self.assertTrue(self.filt_cls.host_passes(host, filter_properties))
 
     def test_aggregate_image_properties_isolation_multi_props_passes(self,
             agg_mock):
-        agg_mock.return_value = {'hw_vm_mode': 'hvm', 'hw_cpu_cores': '2'}
-        spec_obj = objects.RequestSpec(
-            context=mock.sentinel.ctx,
-            image=objects.ImageMeta(properties=objects.ImageMetaProps(
-                hw_vm_mode='hvm', hw_cpu_cores=2)))
+        agg_mock.return_value = {'foo': 'bar', 'foo2': 'bar2'}
+        filter_properties = {'context': mock.sentinel.ctx,
+                             'request_spec': {
+                                 'image': {
+                                     'properties': {'foo': 'bar',
+                                                    'foo2': 'bar2'}}}}
         host = fakes.FakeHostState('host1', 'compute', {})
-        self.assertTrue(self.filt_cls.host_passes(host, spec_obj))
+        self.assertTrue(self.filt_cls.host_passes(host, filter_properties))
 
     def test_aggregate_image_properties_isolation_props_with_meta_passes(self,
             agg_mock):
-        agg_mock.return_value = {'hw_vm_mode': 'hvm'}
-        spec_obj = objects.RequestSpec(
-            context=mock.sentinel.ctx,
-            image=objects.ImageMeta(properties=objects.ImageMetaProps()))
+        agg_mock.return_value = {'foo': 'bar'}
+        filter_properties = {'context': mock.sentinel.ctx,
+                             'request_spec': {
+                                 'image': {
+                                     'properties': {}}}}
         host = fakes.FakeHostState('host1', 'compute', {})
-        self.assertTrue(self.filt_cls.host_passes(host, spec_obj))
+        self.assertTrue(self.filt_cls.host_passes(host, filter_properties))
 
     def test_aggregate_image_properties_isolation_props_imgprops_passes(self,
             agg_mock):
         agg_mock.return_value = {}
-        spec_obj = objects.RequestSpec(
-            context=mock.sentinel.ctx,
-            image=objects.ImageMeta(properties=objects.ImageMetaProps(
-                hw_vm_mode='hvm')))
+        filter_properties = {'context': mock.sentinel.ctx,
+                             'request_spec': {
+                                 'image': {
+                                     'properties': {'foo': 'bar'}}}}
         host = fakes.FakeHostState('host1', 'compute', {})
-        self.assertTrue(self.filt_cls.host_passes(host, spec_obj))
+        self.assertTrue(self.filt_cls.host_passes(host, filter_properties))
 
     def test_aggregate_image_properties_isolation_props_not_match_fails(self,
             agg_mock):
-        agg_mock.return_value = {'hw_vm_mode': 'hvm'}
-        spec_obj = objects.RequestSpec(
-            context=mock.sentinel.ctx,
-            image=objects.ImageMeta(properties=objects.ImageMetaProps(
-                hw_vm_mode='xen')))
+        agg_mock.return_value = {'foo': 'bar'}
+        filter_properties = {'context': mock.sentinel.ctx,
+                             'request_spec': {
+                                 'image': {
+                                     'properties': {'foo': 'no-bar'}}}}
         host = fakes.FakeHostState('host1', 'compute', {})
-        self.assertFalse(self.filt_cls.host_passes(host, spec_obj))
+        self.assertFalse(self.filt_cls.host_passes(host, filter_properties))
 
     def test_aggregate_image_properties_isolation_props_not_match2_fails(self,
             agg_mock):
-        agg_mock.return_value = {'hw_vm_mode': 'hvm', 'hw_cpu_cores': '1'}
-        spec_obj = objects.RequestSpec(
-            context=mock.sentinel.ctx,
-            image=objects.ImageMeta(properties=objects.ImageMetaProps(
-                hw_vm_mode='hvm', hw_cpu_cores=2)))
+        agg_mock.return_value = {'foo': 'bar', 'foo2': 'bar2'}
+        filter_properties = {'context': mock.sentinel.ctx,
+                             'request_spec': {
+                                 'image': {
+                                     'properties': {'foo': 'bar',
+                                                    'foo2': 'bar3'}}}}
         host = fakes.FakeHostState('host1', 'compute', {})
-        self.assertFalse(self.filt_cls.host_passes(host, spec_obj))
+        self.assertFalse(self.filt_cls.host_passes(host, filter_properties))
 
     def test_aggregate_image_properties_isolation_props_namespace(self,
             agg_mock):
-        self.flags(aggregate_image_properties_isolation_namespace="hw")
-        self.flags(aggregate_image_properties_isolation_separator="_")
-        agg_mock.return_value = {'hw_vm_mode': 'hvm', 'img_owner_id': 'foo'}
-        spec_obj = objects.RequestSpec(
-            context=mock.sentinel.ctx,
-            image=objects.ImageMeta(properties=objects.ImageMetaProps(
-                hw_vm_mode='hvm', img_owner_id='wrong')))
+        self.flags(aggregate_image_properties_isolation_namespace="np")
+        agg_mock.return_value = {'np.foo': 'bar', 'foo2': 'bar2'}
+        filter_properties = {'context': mock.sentinel.ctx,
+                             'request_spec': {
+                                 'image': {
+                                     'properties': {'np.foo': 'bar',
+                                                    'foo2': 'bar3'}}}}
         host = fakes.FakeHostState('host1', 'compute', {})
-        self.assertTrue(self.filt_cls.host_passes(host, spec_obj))
+        self.assertTrue(self.filt_cls.host_passes(host, filter_properties))

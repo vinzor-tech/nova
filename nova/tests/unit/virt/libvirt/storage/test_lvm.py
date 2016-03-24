@@ -13,6 +13,8 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+import contextlib
+
 import mock
 from oslo_concurrency import processutils
 from oslo_config import cfg
@@ -179,7 +181,7 @@ class LvmTestCase(test.NoDBTestCase):
             if 'vol2' in args:
                 raise processutils.ProcessExecutionError('Error')
 
-        with test.nested(
+        with contextlib.nested(
              mock.patch.object(lvm, 'clear_volume'),
              mock.patch.object(libvirt_utils, 'execute',
                   side_effect=fake_execute)) as (mock_clear, mock_execute):

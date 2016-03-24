@@ -9,24 +9,21 @@
 # Pablo Sanchez <furybeat@gmail.com>, 2015
 # Rafael Rivero <rafael@cloudscaling.com>, 2014
 # Sergio Cuellar Valdes <scuellarv@kionetworks.com>, 2015
-# OpenStack Infra <zanata@openstack.org>, 2015. #zanata
-# Travis Nguyen <travisn@us.ibm.com>, 2015. #zanata
-# Andreas Jaeger <jaegerandi@gmail.com>, 2016. #zanata
 msgid ""
 msgstr ""
-"Project-Id-Version: nova 13.0.0.0b4.dev129\n"
+"Project-Id-Version: nova\n"
 "Report-Msgid-Bugs-To: EMAIL@ADDRESS\n"
-"POT-Creation-Date: 2016-03-10 03:26+0000\n"
+"POT-Creation-Date: 2015-09-08 06:24+0000\n"
+"PO-Revision-Date: 2015-08-30 00:41+0000\n"
+"Last-Translator: openstackjenkins <jenkins@openstack.org>\n"
+"Language-Team: Spanish (http://www.transifex.com/openstack/nova/language/"
+"es/)\n"
+"Language: es\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
-"PO-Revision-Date: 2016-01-20 01:51+0000\n"
-"Last-Translator: Andreas Jaeger <jaegerandi@gmail.com>\n"
-"Language: es\n"
-"Plural-Forms: nplurals=2; plural=(n != 1);\n"
 "Generated-By: Babel 2.0\n"
-"X-Generator: Zanata 3.7.3\n"
-"Language-Team: Spanish\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
 
 msgid "\"Look for the VDIs failed"
 msgstr "\"Ha fallado la búsqueda de las VDIs"
@@ -66,8 +63,21 @@ msgid "An error occurred while refreshing the network cache."
 msgstr "Ha ocurrido un error al actualizar el cache de red."
 
 #, python-format
+msgid "Attach volume failed: %s"
+msgstr "Ha fallado la conexión de volumen: %s"
+
+#, python-format
 msgid "Attaching PCI devices %(dev)s to %(dom)s failed."
 msgstr "La asociación de dispositivos PCI %(dev)s a %(dom)s ha fallado."
+
+#, python-format
+msgid "Attaching network adapter failed. Exception:  %s"
+msgstr "Error al conectar el adaptador de red. Excepción: %s"
+
+#, python-format
+msgid "Cannot block migrate instance %s with mapped volumes"
+msgstr ""
+"No se puede bloquea la migración de instancia %s con volúmenes mapeados"
 
 msgid "Cannot cleanup migration files"
 msgstr "No se pueden limpiar los archivos de migración"
@@ -128,11 +138,6 @@ msgid "Could not remove tmpdir: %s"
 msgstr "No se ha podido remover directorio temporal: %s"
 
 #, python-format
-msgid "Could not start encryption for disk %(device)s: %(exception)s"
-msgstr ""
-"No pudo comenzar la encriptación para el disco %(device)s: %(exception)s"
-
-#, python-format
 msgid "Could not stat scheduler options file %(filename)s"
 msgstr ""
 "No se ha podido crear estadísticas de archivo de opciones de planificador "
@@ -147,7 +152,7 @@ msgstr "No se puede comunicar con la celda '%s'"
 
 #, python-format
 msgid "Couldn't lookup app: %s"
-msgstr "No se pudo hallar aplicación: %s"
+msgstr "No se pudo hayar aplicación: %s"
 
 #, python-format
 msgid "Couldn't unmount the GlusterFS share %s"
@@ -201,6 +206,18 @@ msgstr ""
 
 msgid "Environment variable 'NETWORK_ID' must be set."
 msgstr "La variable de entorno 'NETWORK_ID' debe ser establecida."
+
+#, python-format
+msgid "Environment: %s"
+msgstr "Entorno: %s"
+
+#, python-format
+msgid ""
+"Error contacting glance server '%(host)s:%(port)s' for '%(method)s', "
+"%(extra)s."
+msgstr ""
+"Error al contactar con el servidor de glance '%(host)s:%(port)s' para "
+"'%(method)s', %(extra)s."
 
 #, python-format
 msgid "Error copying key: %s"
@@ -348,6 +365,10 @@ msgstr "Error al intentar Rescatar Instancia"
 msgid "Error trying to reschedule"
 msgstr "Error al intentar volver a programar "
 
+#, python-format
+msgid "Error updating resources for node %(node)s: %(e)s"
+msgstr "Error al actualizar recursos para nodo %(node)s: %(e)s"
+
 msgid "Error waiting for responses from neighbor cells"
 msgstr "Error al esperar respuestas de celdas vecinas"
 
@@ -358,6 +379,12 @@ msgstr "Error al intentar limpiar imagen %s"
 #, python-format
 msgid "Error writing to %(path)s: %(exception)s"
 msgstr "Error escribiendo en %(path)s: %(exception)s"
+
+#, python-format
+msgid "Error writing vm console log file from serial console pipe. Error: %s"
+msgstr ""
+"Error al escribir archivo de inicio de sesión de consola vm a partir de "
+"canalización de consola serial. Error: %s"
 
 #, python-format
 msgid "Error: %s"
@@ -372,14 +399,14 @@ msgid "Exception handling resource: %s"
 msgstr "Excepción manejando recurso: %s"
 
 msgid "Exception in string format operation"
-msgstr "Excepción en operación de formateo de cadena"
+msgstr "Excepción en operacion de formateo de cadena"
 
 msgid "Exception loading extension"
 msgstr "Excepción cargando extensión"
 
 #, python-format
 msgid "Exception running %(name)s %(type)s-hook: %(obj)s"
-msgstr "Excepción ejecutando %(name)s %(type)s-enlace: %(obj)s"
+msgstr "Excepción ejecutándo %(name)s %(type)s-enlace: %(obj)s"
 
 msgid "Exception while creating table."
 msgstr "Excepción al crear la tabla."
@@ -434,6 +461,14 @@ msgstr "Error al cambiar el estado de vm de %(instance_name)s a %(req_state)s"
 
 msgid "Failed to check if instance shared"
 msgstr "Fallo al verificar si la instancia se encuentra compartida"
+
+#, python-format
+msgid ""
+"Failed to clean up the parameters on node %(node)s when unprovisioning the "
+"instance %(instance)s"
+msgstr ""
+"Error al limpiar los parámetros en nodo  %(node)s  mientras de se des-"
+"aprovisionaba instancia %(instance)s"
 
 #, python-format
 msgid "Failed to cleanup directory %(target)s: %(e)s"
@@ -514,6 +549,10 @@ msgstr "Fallo al obtener las redes predeterminadas"
 #, python-format
 msgid "Failed to get metadata for instance id: %s"
 msgstr "Falla al obtener metadatos para la instancia id: %s"
+
+#, python-format
+msgid "Failed to get metadata for ip: %s"
+msgstr "Falla al obtener metadatos para ip: %s"
 
 msgid "Failed to get nw_info"
 msgstr "Falla al obtener nw_info"
@@ -625,6 +664,10 @@ msgstr "Error al desarmar el sistema de archivo de contenedor "
 msgid "Failed to umount container filesystem"
 msgstr "Error al desmontar el sistema de archivos de contenedor"
 
+#, python-format
+msgid "Failed to understand rule %s"
+msgstr "Ha ocurrido un error al interpretar la regla %s"
+
 msgid "Failed to unpause instance"
 msgstr "Fallo al reanudar la instancia"
 
@@ -677,7 +720,13 @@ msgstr "Error al limpiar VDI conectados "
 
 #, python-format
 msgid "Fatal Exception running %(name)s %(type)s-hook: %(obj)s"
-msgstr "Excepción fatal ejecutando %(name)s %(type)s-enlace: %(obj)s"
+msgstr "Excepción fatal ejecutándo %(name)s %(type)s-enlace: %(obj)s"
+
+msgid "FaultWrapper error"
+msgstr "Error de FaultWrapper"
+
+msgid "Get version 2 connection error"
+msgstr "Error de conexión en obtención de versión 2"
 
 msgid "Guest does not have a console available"
 msgstr "El invitado no tiene una consola disponible"
@@ -725,6 +774,10 @@ msgid "Instance type %s not found for deletion"
 msgstr "No se ha encontrado el tipo de instancia %s para suprimirse"
 
 #, python-format
+msgid "Instance update attempted for '%(key)s' on %(instance_uuid)s"
+msgstr "Se intentado actualizar instancia para '%(key)s' en %(instance_uuid)s"
+
+#, python-format
 msgid "Interface %s not found"
 msgstr "Interfaz %s no encontrada"
 
@@ -733,11 +786,12 @@ msgid "Invalid server_string: %s"
 msgstr "Serie del servidor no válido: %s"
 
 #, python-format
+msgid "Keystone failure: %s"
+msgstr "Falla de keystone: %s"
+
+#, python-format
 msgid "Live Migration failure: %s"
 msgstr "Fallo en migración en vivo: %s"
-
-msgid "Live migration failed."
-msgstr "Falló la migración en vivo."
 
 msgid "Migrate Receive failed"
 msgstr "Ha fallado la recepción de migración"
@@ -831,6 +885,10 @@ msgid "No db access allowed in nova-network: %s"
 msgstr "No se permite acceso a base de datos en nova-network: %s"
 
 #, python-format
+msgid "No handler for matches of kind %s"
+msgstr "No hay manejador para coincidencias de clase %s"
+
+#, python-format
 msgid "No save handler for %s"
 msgstr "No hay manejador de guardado para %s"
 
@@ -838,6 +896,10 @@ msgid "Not all properties needed are implemented in the compute driver"
 msgstr ""
 "No todas las propiedades necesarias están implementadas en el controlador de "
 "cómputo"
+
+#, python-format
+msgid "PCI device %s not found"
+msgstr "El dispositivo PCI %s no se ha encontrado"
 
 msgid ""
 "Periodic sync_power_state task had an error while processing an instance."
@@ -869,6 +931,10 @@ msgstr "Previo a migración en vivo falló en %s"
 
 msgid "Read/Write data failed"
 msgstr "Fallo en la Lectura/Escritura de datos"
+
+#, python-format
+msgid "Requested VM Generation %s is not supported on  this OS."
+msgstr "Este Sistema Operativo no soporta la generación de VM %s solicitada."
 
 #, python-format
 msgid "Requested VM Generation %s, but provided VHD instead of VHDX."
@@ -915,11 +981,18 @@ msgstr "El volumen Quobyte en %s todavía esta en uso."
 
 #, python-format
 msgid ""
+"The agent call to %(method)s returned an an error: %(ret)r. args=%(args)r"
+msgstr ""
+"La llamada del agente para %(method)s ha arrojado un error: %(ret)r. args="
+"%(args)r"
+
+#, python-format
+msgid ""
 "The agent call to %(method)s returned an invalid response: %(ret)r. args="
 "%(args)r"
 msgstr ""
 "La llamada del agente para %(method)s ha arrojado una respuesta inválida: "
-"%(ret)r. args=%(args)r"
+"%(ret)r. args=$(args)r"
 
 #, python-format
 msgid "The call to %(method)s returned an error: %(e)s."
@@ -931,6 +1004,11 @@ msgstr "La llamada a %(method)s ha devuelto un error: %(e)s. args=%(args)r"
 
 msgid "Transfer data failed"
 msgstr "Ha fallado la transferencia de datos"
+
+#, python-format
+msgid "Unable to access floating IP %(fixed_ip)s for port %(port_id)s"
+msgstr ""
+"Incapaz de acceder a la IP flotante %(fixed_ip)s para el puerto %(port_id)s"
 
 #, python-format
 msgid "Unable to access floating IP %s"
@@ -987,6 +1065,15 @@ msgstr "Inposible insertar VDI para SR"
 msgid "Unable to introduce VDI on SR"
 msgstr "No es posible insertar VDI o SR"
 
+msgid ""
+"Unable to join. It is possible that either another node exists with the same "
+"name, or this node just restarted. We will try again in a short while to "
+"make sure."
+msgstr ""
+"No se ha podido unir. Es posible que exista otro nodo con el mismo nombre, o "
+"que este nodo se acabe de reiniciar. Volverá a intentarse en poco tiempo "
+"para asegurarse."
+
 msgid "Unable to load the virtualization driver"
 msgstr "Incapaz de cargar el controlador de virtualización"
 
@@ -1006,6 +1093,10 @@ msgid "Unable to parse rrd of %s"
 msgstr "Incapaz de analizar rrd de %s"
 
 #, python-format
+msgid "Unable to preallocate image at path: %(path)s"
+msgstr "No es posible pre-asignar imagen a ruta: %(path)s"
+
+#, python-format
 msgid "Unable to retrieve storage policy with name %s"
 msgstr ""
 "No ha sido posible recuperar la política de almacenamiento de nombre %s"
@@ -1022,15 +1113,11 @@ msgid "Unable to update host of port %s"
 msgstr "Incapaz de actualizar el anfitrión del puerto %s"
 
 #, python-format
-msgid "Unable to update instance VNIC index for port %s."
-msgstr "No pudo actualizar el índice VNIC de la instancia para el puerto %s."
+msgid "Unexpected %(ex_name)s raised: %(ex_str)s"
+msgstr "Inesperado %(ex_name)s: %(ex_str)s"
 
 msgid "Unexpected build failure, not rescheduling build."
 msgstr "Fallo de compilación inesperado, no se reprogramará la compilación."
-
-#, python-format
-msgid "Unexpected error while checking process %(pid)s."
-msgstr "Un error inesperado al revisar el proceso %(pid)s."
 
 msgid "Unexpected exception in API method"
 msgstr "Excepción inesperada en método API."

@@ -13,7 +13,6 @@
 from oslo_config import cfg
 from oslo_log import log as logging
 import oslo_messaging as messaging
-import six
 
 from nova.compute import power_state
 from nova.conductor.tasks import base
@@ -38,7 +37,7 @@ CONF.register_opt(migrate_opt)
 class LiveMigrationTask(base.TaskBase):
     def __init__(self, context, instance, destination,
                  block_migration, disk_over_commit, migration, compute_rpcapi,
-                 servicegroup_api, scheduler_client, request_spec=None):
+                 servicegroup_api, scheduler_client):
         super(LiveMigrationTask, self).__init__(context, instance)
         self.destination = destination
         self.block_migration = block_migration
@@ -50,7 +49,6 @@ class LiveMigrationTask(base.TaskBase):
         self.compute_rpcapi = compute_rpcapi
         self.servicegroup_api = servicegroup_api
         self.scheduler_client = scheduler_client
-        self.request_spec = request_spec
 
     def _execute(self):
         self._check_instance_is_active()
@@ -112,17 +110,9 @@ class LiveMigrationTask(base.TaskBase):
                     instance_id=self.instance.uuid, host=self.destination)
 
     def _check_destination_has_enough_memory(self):
-        compute = self._get_compute_info(self.destination)
-        free_ram_mb = compute.free_ram_mb
-        total_ram_mb = compute.memory_mb
+        avail = self._get_compute_info(self.destination)['free_ram_mb']
         mem_inst = self.instance.memory_mb
-        # NOTE(sbauza): Now the ComputeNode object reports an allocation ratio
-        # that can be provided by the compute_node if new or by the controller
-        ram_ratio = compute.ram_allocation_ratio
 
-        # NOTE(sbauza): Mimic the RAMFilter logic in order to have the same
-        # ram validation
-        avail = total_ram_mb * ram_ratio - (total_ram_mb - free_ram_mb)
         if not mem_inst or avail <= mem_inst:
             instance_uuid = self.instance.uuid
             dest = self.destination
@@ -166,40 +156,17 @@ class LiveMigrationTask(base.TaskBase):
         attempted_hosts = [self.source]
         image = utils.get_image_from_system_metadata(
             self.instance.system_metadata)
-        filter_properties = {'ignore_hosts': attempted_hosts}
-        # TODO(sbauza): Remove that once setup_instance_group() accepts a
-        # RequestSpec object
-        request_spec = {'instance_properties': {'uuid': self.instance.uuid}}
-        scheduler_utils.setup_instance_group(self.context, request_spec,
-                                                 filter_properties)
-        if not self.request_spec:
-            # NOTE(sbauza): We were unable to find an original RequestSpec
-            # object - probably because the instance is old.
-            # We need to mock that the old way
-            request_spec = objects.RequestSpec.from_components(
-                self.context, self.instance.uuid, image,
-                self.instance.flavor, self.instance.numa_topology,
-                self.instance.pci_requests,
-                filter_properties, None, self.instance.availability_zone
-            )
-        else:
-            request_spec = self.request_spec
+        request_spec = scheduler_utils.build_request_spec(self.context, image,
+                                                          [self.instance])
 
         host = None
         while host is None:
             self._check_not_over_max_retries(attempted_hosts)
-            request_spec.ignore_hosts = attempted_hosts
-            try:
-                host = self.scheduler_client.select_destinations(self.context,
-                                request_spec)[0]['host']
-            except messaging.RemoteError as ex:
-                # TODO(ShaoHe Feng) There maybe multi-scheduler, and the
-                # scheduling algorithm is R-R, we can let other scheduler try.
-                # Note(ShaoHe Feng) There are types of RemoteError, such as
-                # NoSuchMethod, UnsupportedVersion, we can distinguish it by
-                # ex.exc_type.
-                raise exception.MigrationSchedulerRPCError(
-                    reason=six.text_type(ex))
+            filter_properties = {'ignore_hosts': attempted_hosts}
+            scheduler_utils.setup_instance_group(self.context, request_spec,
+                                                 filter_properties)
+            host = self.scheduler_client.select_destinations(self.context,
+                            request_spec, filter_properties)[0]['host']
             try:
                 self._check_compatible_with_source_hypervisor(host)
                 self._call_livem_checks_on_host(host)
@@ -216,9 +183,6 @@ class LiveMigrationTask(base.TaskBase):
 
         retries = len(attempted_hosts) - 1
         if retries > CONF.migrate_max_retries:
-            if self.migration:
-                self.migration.status = 'failed'
-                self.migration.save()
             msg = (_('Exceeded max scheduling retries %(max_retries)d for '
                      'instance %(instance_uuid)s during live migration')
                    % {'max_retries': retries,

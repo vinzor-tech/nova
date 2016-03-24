@@ -31,7 +31,7 @@ class LimitsSampleJsonTest(api_sample_base.ApiSampleTestBaseV21):
         # NOTE(gmann): We have to separate the template files between V2
         # and V2.1 as the response are different.
         self.template = 'limit-get-resp'
-        if self._legacy_v2_code:
+        if(self._test == "v2"):
             self.template = 'v2-limit-get-resp'
 
     def _get_flags(self):
@@ -44,4 +44,5 @@ class LimitsSampleJsonTest(api_sample_base.ApiSampleTestBaseV21):
 
     def test_limits_get(self):
         response = self._do_get('limits')
-        self._verify_response(self.template, {}, response, 200)
+        subs = self._get_regexes()
+        self._verify_response(self.template, subs, response, 200)

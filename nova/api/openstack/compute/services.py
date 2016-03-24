@@ -39,16 +39,9 @@ class ServiceController(wsgi.Controller):
                         "disable-log-reason": self._disable_log_reason}
 
     def _get_services(self, req):
-        api_services = ('nova-osapi_compute', 'nova-ec2', 'nova-metadata')
-
         context = req.environ['nova.context']
         authorize(context)
-
-        _services = [
-           s
-           for s in self.host_api.service_get_all(context, set_zones=True)
-           if s['binary'] not in api_services
-        ]
+        _services = self.host_api.service_get_all(context, set_zones=True)
 
         host = ''
         if 'host' in req.GET:
@@ -188,7 +181,8 @@ class ServiceController(wsgi.Controller):
         """Return a list of all running services. Filter by host & service
         name
         """
-        if api_version_request.is_supported(req, min_version='2.11'):
+        req_ver = req.api_version_request
+        if req_ver >= api_version_request.APIVersionRequest("2.11"):
             _services = self._get_services_list(req, ['forced_down'])
         else:
             _services = self._get_services_list(req)
@@ -200,7 +194,9 @@ class ServiceController(wsgi.Controller):
     @validation.schema(services.service_update_v211, '2.11')
     def update(self, req, id, body):
         """Perform service update"""
-        if api_version_request.is_supported(req, min_version='2.11'):
+        req_ver = req.api_version_request
+
+        if req_ver >= api_version_request.APIVersionRequest("2.11"):
             actions = self.actions.copy()
             actions["force-down"] = self._forced_down
         else:

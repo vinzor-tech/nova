@@ -38,7 +38,7 @@ class FloatingIPBulkController(wsgi.Controller):
 
     @extensions.expected_errors(404)
     def index(self, req):
-        """Return a list of all floating IPs."""
+        """Return a list of all floating ips."""
         context = req.environ['nova.context']
         authorize(context)
 
@@ -46,7 +46,7 @@ class FloatingIPBulkController(wsgi.Controller):
 
     @extensions.expected_errors(404)
     def show(self, req, id):
-        """Return a list of all floating IPs for a given host."""
+        """Return a list of all floating ips for a given host."""
         context = req.environ['nova.context']
         authorize(context)
 
@@ -87,7 +87,7 @@ class FloatingIPBulkController(wsgi.Controller):
     @extensions.expected_errors((400, 409))
     @validation.schema(floating_ips_bulk.create)
     def create(self, req, body):
-        """Bulk create floating IPs."""
+        """Bulk create floating ips."""
         context = req.environ['nova.context']
         authorize(context)
 

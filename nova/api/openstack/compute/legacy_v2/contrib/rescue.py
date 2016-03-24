@@ -14,6 +14,7 @@
 
 """The rescue mode extension."""
 
+from oslo_config import cfg
 import webob
 from webob import exc
 
@@ -25,6 +26,7 @@ from nova import exception
 from nova import utils
 
 
+CONF = cfg.CONF
 authorize = exts.extension_authorizer('compute', 'rescue')
 
 

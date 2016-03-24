@@ -4,11 +4,11 @@
             "id": "1",
             "links": [
                 {
-                    "href": "%(versioned_compute_endpoint)s/flavors/1",
+                    "href": "%(host)s/v2/openstack/flavors/1",
                     "rel": "self"
                 },
                 {
-                    "href": "%(compute_endpoint)s/flavors/1",
+                    "href": "%(host)s/openstack/flavors/1",
                     "rel": "bookmark"
                 }
             ],
@@ -18,11 +18,11 @@
             "id": "2",
             "links": [
                 {
-                    "href": "%(versioned_compute_endpoint)s/flavors/2",
+                    "href": "%(host)s/v2/openstack/flavors/2",
                     "rel": "self"
                 },
                 {
-                    "href": "%(compute_endpoint)s/flavors/2",
+                    "href": "%(host)s/openstack/flavors/2",
                     "rel": "bookmark"
                 }
             ],
@@ -32,11 +32,11 @@
             "id": "3",
             "links": [
                 {
-                    "href": "%(versioned_compute_endpoint)s/flavors/3",
+                    "href": "%(host)s/v2/openstack/flavors/3",
                     "rel": "self"
                 },
                 {
-                    "href": "%(compute_endpoint)s/flavors/3",
+                    "href": "%(host)s/openstack/flavors/3",
                     "rel": "bookmark"
                 }
             ],
@@ -46,11 +46,11 @@
             "id": "4",
             "links": [
                 {
-                    "href": "%(versioned_compute_endpoint)s/flavors/4",
+                    "href": "%(host)s/v2/openstack/flavors/4",
                     "rel": "self"
                 },
                 {
-                    "href": "%(compute_endpoint)s/flavors/4",
+                    "href": "%(host)s/openstack/flavors/4",
                     "rel": "bookmark"
                 }
             ],
@@ -60,11 +60,11 @@
             "id": "5",
             "links": [
                 {
-                    "href": "%(versioned_compute_endpoint)s/flavors/5",
+                    "href": "%(host)s/v2/openstack/flavors/5",
                     "rel": "self"
                 },
                 {
-                    "href": "%(compute_endpoint)s/flavors/5",
+                    "href": "%(host)s/openstack/flavors/5",
                     "rel": "bookmark"
                 }
             ],

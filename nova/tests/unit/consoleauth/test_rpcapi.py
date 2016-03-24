@@ -16,6 +16,8 @@
 Unit Tests for nova.consoleauth.rpcapi
 """
 
+import contextlib
+
 import mock
 from oslo_config import cfg
 import six
@@ -45,7 +47,7 @@ class ConsoleAuthRpcAPITestCase(test.NoDBTestCase):
         rpc_kwargs = {k: v for k, v in six.iteritems(kwargs)
                       if v is not self.DROPPED_ARG}
 
-        with test.nested(
+        with contextlib.nested(
             mock.patch.object(rpcapi.client, 'cast' if do_cast else 'call'),
             mock.patch.object(rpcapi.client, 'prepare'),
             mock.patch.object(rpcapi.client, 'can_send_version'),

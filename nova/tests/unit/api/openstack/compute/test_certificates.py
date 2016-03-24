@@ -18,8 +18,6 @@ import mock
 from mox3 import mox
 from webob import exc
 
-from oslo_policy import policy as oslo_policy
-
 from nova.api.openstack.compute import certificates \
         as certificates_v21
 from nova.api.openstack.compute.legacy_v2.contrib import certificates \
@@ -27,6 +25,7 @@ from nova.api.openstack.compute.legacy_v2.contrib import certificates \
 from nova.cert import rpcapi
 from nova import context
 from nova import exception
+from nova.openstack.common import policy as common_policy
 from nova import policy
 from nova import test
 from nova.tests.unit.api.openstack import fakes
@@ -66,9 +65,10 @@ class CertificatesTestV21(test.NoDBTestCase):
 
     def test_certificates_show_policy_failed(self):
         rules = {
-            self.certificate_show_extension: "!"
+            self.certificate_show_extension:
+            common_policy.parse_rule("!")
         }
-        policy.set_rules(oslo_policy.Rules.from_dict(rules))
+        policy.set_rules(rules)
         exc = self.assertRaises(exception.PolicyNotAuthorized,
                                 self.controller.show, self.req, 'root')
         self.assertIn(self.certificate_show_extension,
@@ -95,9 +95,10 @@ class CertificatesTestV21(test.NoDBTestCase):
 
     def test_certificates_create_policy_failed(self):
         rules = {
-            self.certificate_create_extension: "!"
+            self.certificate_create_extension:
+            common_policy.parse_rule("!")
         }
-        policy.set_rules(oslo_policy.Rules.from_dict(rules))
+        policy.set_rules(rules)
         exc = self.assertRaises(exception.PolicyNotAuthorized,
                                 self.controller.create, self.req)
         self.assertIn(self.certificate_create_extension,

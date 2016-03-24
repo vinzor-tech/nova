@@ -13,12 +13,14 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+import itertools
+
 from oslo_serialization import jsonutils
-import six
 import webob
 
 from nova import compute
 from nova.compute import vm_states
+from nova import db
 from nova import exception
 from nova import objects
 from nova.objects import instance as instance_obj
@@ -47,9 +49,9 @@ class HideServerAddressesTestV21(test.TestCase):
 
     def setUp(self):
         super(HideServerAddressesTestV21, self).setUp()
-        fakes.stub_out_nw_api(self)
+        fakes.stub_out_nw_api(self.stubs)
         return_server = fakes.fake_instance_get()
-        self.stub_out('nova.db.instance_get_by_uuid', return_server)
+        self.stubs.Set(db, 'instance_get_by_uuid', return_server)
         self._setup_wsgi()
 
     def _make_request(self, url):
@@ -123,7 +125,7 @@ class HideServerAddressesTestV21(test.TestCase):
 
         self.assertEqual(len(servers), len(instances))
 
-        for instance, server in six.moves.zip(instances, servers):
+        for instance, server in itertools.izip(instances, servers):
             addresses = self._get_addresses(server)
             exists = (instance['vm_state'] == vm_states.ACTIVE)
             self._check_addresses(addresses, exists=exists)

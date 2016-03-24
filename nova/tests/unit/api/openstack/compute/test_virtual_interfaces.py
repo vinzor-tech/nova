@@ -85,7 +85,7 @@ class ServerVirtualInterfaceTestV21(test.NoDBTestCase):
     def test_get_virtual_interfaces_list(self):
         req = fakes.HTTPRequest.blank('', version=self.wsgi_api_version)
         res_dict = self.controller.index(req, 'fake_uuid')
-        self.assertEqual(self.expected_response, res_dict)
+        self.assertEqual(res_dict, self.expected_response)
 
     def test_vif_instance_not_found(self):
         self.mox.StubOutWithMock(compute_api.API, 'get')
@@ -103,18 +103,6 @@ class ServerVirtualInterfaceTestV21(test.NoDBTestCase):
             webob.exc.HTTPNotFound,
             self.controller.index,
             fake_req, 'fake_uuid')
-
-    def test_list_vifs_neutron_notimplemented(self):
-        """Tests that a 400 is returned when using neutron as the backend"""
-        # unset the get_vifs_by_instance stub from setUp
-        self.mox.UnsetStubs()
-        self.flags(use_neutron=True)
-        # reset the controller to use the neutron network API
-        self._set_controller()
-        self.stub_out('nova.compute.api.API.get', compute_api_get)
-        req = fakes.HTTPRequest.blank('', version=self.wsgi_api_version)
-        self.assertRaises(webob.exc.HTTPBadRequest,
-                          self.controller.index, req, FAKE_UUID)
 
 
 class ServerVirtualInterfaceTestV20(ServerVirtualInterfaceTestV21):

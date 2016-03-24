@@ -16,11 +16,10 @@
 Unit Tests for nova.scheduler.rpcapi
 """
 
-import mock
+from mox3 import mox
 from oslo_config import cfg
 
 from nova import context
-from nova import objects
 from nova.scheduler import rpcapi as scheduler_rpcapi
 from nova import test
 
@@ -28,8 +27,7 @@ CONF = cfg.CONF
 
 
 class SchedulerRpcAPITestCase(test.NoDBTestCase):
-    def _test_scheduler_api(self, method, rpc_method, expected_args=None,
-                            **kwargs):
+    def _test_scheduler_api(self, method, rpc_method, **kwargs):
         ctxt = context.RequestContext('fake_user', 'fake_project')
 
         rpcapi = scheduler_rpcapi.SchedulerAPI()
@@ -41,53 +39,34 @@ class SchedulerRpcAPITestCase(test.NoDBTestCase):
         expected_fanout = kwargs.pop('fanout', None)
         expected_kwargs = kwargs.copy()
 
-        if expected_args:
-            expected_kwargs = expected_args
+        self.mox.StubOutWithMock(rpcapi, 'client')
+
+        rpcapi.client.can_send_version(
+            mox.IsA(str)).MultipleTimes().AndReturn(True)
 
         prepare_kwargs = {}
         if expected_fanout:
             prepare_kwargs['fanout'] = True
         if expected_version:
             prepare_kwargs['version'] = expected_version
+        rpcapi.client.prepare(**prepare_kwargs).AndReturn(rpcapi.client)
 
-        # NOTE(sbauza): We need to persist the method before mocking it
-        orig_prepare = rpcapi.client.prepare
+        rpc_method = getattr(rpcapi.client, rpc_method)
 
-        def fake_can_send_version(version=None):
-            return orig_prepare(version=version).can_send_version()
+        rpc_method(ctxt, method, **expected_kwargs).AndReturn(expected_retval)
 
-        @mock.patch.object(rpcapi.client, rpc_method,
-                           return_value=expected_retval)
-        @mock.patch.object(rpcapi.client, 'prepare',
-                           return_value=rpcapi.client)
-        @mock.patch.object(rpcapi.client, 'can_send_version',
-                           side_effect=fake_can_send_version)
-        def do_test(mock_csv, mock_prepare, mock_rpc_method):
-            retval = getattr(rpcapi, method)(ctxt, **kwargs)
-            self.assertEqual(retval, expected_retval)
-            mock_prepare.assert_called_once_with(**prepare_kwargs)
-            mock_rpc_method.assert_called_once_with(ctxt, method,
-                                                    **expected_kwargs)
-        do_test()
+        self.mox.ReplayAll()
+
+        # NOTE(markmc): MultipleTimes() is OnceOrMore() not ZeroOrMore()
+        rpcapi.client.can_send_version('I fool you mox')
+
+        retval = getattr(rpcapi, method)(ctxt, **kwargs)
+        self.assertEqual(retval, expected_retval)
 
     def test_select_destinations(self):
-        fake_spec = objects.RequestSpec()
         self._test_scheduler_api('select_destinations', rpc_method='call',
-                spec_obj=fake_spec,
-                version='4.3')
-
-    @mock.patch.object(objects.RequestSpec, 'to_legacy_filter_properties_dict')
-    @mock.patch.object(objects.RequestSpec, 'to_legacy_request_spec_dict')
-    def test_select_destinations_with_old_manager(self, to_spec, to_props):
-        self.flags(scheduler='4.0', group='upgrade_levels')
-
-        to_spec.return_value = 'fake_request_spec'
-        to_props.return_value = 'fake_prop'
-        fake_spec = objects.RequestSpec()
-        self._test_scheduler_api('select_destinations', rpc_method='call',
-                expected_args={'request_spec': 'fake_request_spec',
-                               'filter_properties': 'fake_prop'},
-                spec_obj=fake_spec,
+                request_spec='fake_request_spec',
+                filter_properties='fake_prop',
                 version='4.0')
 
     def test_update_aggregates(self):

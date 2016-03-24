@@ -29,7 +29,6 @@ import contextlib
 from oslo_config import cfg
 from oslo_log import log as logging
 from oslo_serialization import jsonutils
-from oslo_utils import versionutils
 
 from nova.compute import arch
 from nova.compute import hv_type
@@ -37,8 +36,10 @@ from nova.compute import power_state
 from nova.compute import task_states
 from nova.compute import vm_mode
 from nova.console import type as ctype
+from nova import db
 from nova import exception
 from nova.i18n import _LW
+from nova import utils
 from nova.virt import diagnostics
 from nova.virt import driver
 from nova.virt import hardware
@@ -144,11 +145,13 @@ class FakeDriver(driver.ComputeDriver):
             local_gb=self.local_gb)
         self.host_status_base = {
           'hypervisor_type': 'fake',
-          'hypervisor_version': versionutils.convert_version_to_int('1.0'),
+          'hypervisor_version': utils.convert_version_to_int('1.0'),
           'hypervisor_hostname': CONF.host,
           'cpu_info': {},
           'disk_available_least': 0,
-          'supported_instances': [(arch.X86_64, hv_type.FAKE, vm_mode.HVM)],
+          'supported_instances': jsonutils.dumps([(arch.X86_64,
+                                                   hv_type.FAKE,
+                                                   vm_mode.HVM)]),
           'numa_topology': None,
           }
         self._mounts = {}
@@ -240,7 +243,7 @@ class FakeDriver(driver.ComputeDriver):
                  block_device_info=None):
         pass
 
-    def trigger_crash_dump(self, instance):
+    def inject_nmi(self, instance):
         pass
 
     def soft_delete(self, instance):
@@ -424,8 +427,14 @@ class FakeDriver(driver.ComputeDriver):
     def refresh_security_group_rules(self, security_group_id):
         return True
 
+    def refresh_security_group_members(self, security_group_id):
+        return True
+
     def refresh_instance_security_rules(self, instance):
         return True
+
+    def refresh_provider_fw_rules(self):
+        pass
 
     def get_available_resource(self, nodename):
         """Updates compute manager resource info on ComputeNode table.
@@ -466,12 +475,6 @@ class FakeDriver(driver.ComputeDriver):
                        migrate_data=None):
         post_method(context, instance, dest, block_migration,
                             migrate_data)
-        return
-
-    def live_migration_force_complete(self, instance):
-        return
-
-    def live_migration_abort(self, instance):
         return
 
     def check_can_live_migrate_destination_cleanup(self, context,
@@ -544,6 +547,9 @@ class FakeDriver(driver.ComputeDriver):
 
 
 class FakeVirtAPI(virtapi.VirtAPI):
+    def provider_fw_rule_get_all(self, context):
+        return db.provider_fw_rule_get_all(context)
+
     @contextlib.contextmanager
     def wait_for_instance_event(self, instance, event_names, deadline=300,
                                 error_callback=None):

@@ -27,7 +27,11 @@ cells.
 
 from distutils import versionpredicate
 
+from oslo_log import log as logging
+
 from nova.cells import filters
+
+LOG = logging.getLogger(__name__)
 
 
 class ImagePropertiesFilter(filters.BaseCellFilter):

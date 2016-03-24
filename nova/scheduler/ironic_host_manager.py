@@ -21,11 +21,37 @@ This host manager will consume all cpu's, disk space, and
 ram from a host / node as it is supporting Baremetal hosts, which can not be
 subdivided into multiple instances.
 """
+from oslo_config import cfg
+from oslo_log import log as logging
+
 from nova.compute import hv_type
-import nova.conf
 from nova.scheduler import host_manager
 
-CONF = nova.conf.CONF
+host_manager_opts = [
+    cfg.ListOpt('baremetal_scheduler_default_filters',
+                default=[
+                    'RetryFilter',
+                    'AvailabilityZoneFilter',
+                    'ComputeFilter',
+                    'ComputeCapabilitiesFilter',
+                    'ImagePropertiesFilter',
+                    'ExactRamFilter',
+                    'ExactDiskFilter',
+                    'ExactCoreFilter',
+                ],
+                help='Which filter class names to use for filtering '
+                     'baremetal hosts when not specified in the request.'),
+    cfg.BoolOpt('scheduler_use_baremetal_filters',
+                default=False,
+                help='Flag to decide whether to use '
+                     'baremetal_scheduler_default_filters or not.'),
+
+    ]
+
+CONF = cfg.CONF
+CONF.register_opts(host_manager_opts)
+
+LOG = logging.getLogger(__name__)
 
 
 class IronicNodeState(host_manager.HostState):
@@ -34,7 +60,7 @@ class IronicNodeState(host_manager.HostState):
     previously used and lock down access.
     """
 
-    def _update_from_compute_node(self, compute):
+    def update_from_compute_node(self, compute):
         """Update information about a host from a ComputeNode object."""
         self.vcpus_total = compute.vcpus
         self.vcpus_used = compute.vcpus_used
@@ -59,11 +85,11 @@ class IronicNodeState(host_manager.HostState):
         # update allocation ratios given by the ComputeNode object
         self.cpu_allocation_ratio = compute.cpu_allocation_ratio
         self.ram_allocation_ratio = compute.ram_allocation_ratio
-        self.disk_allocation_ratio = compute.disk_allocation_ratio
 
         self.updated = compute.updated_at
 
-    def _locked_consume_from_request(self, spec_obj):
+    @host_manager.set_update_time_on_success
+    def consume_from_instance(self, instance):
         """Consume nodes entire resources regardless of instance request."""
         self.free_ram_mb = 0
         self.free_disk_mb = 0
@@ -82,14 +108,14 @@ class IronicHostManager(host_manager.HostManager):
         """Factory function/property to create a new HostState."""
         compute = kwargs.get('compute')
         if compute and compute.get('hypervisor_type') == hv_type.IRONIC:
-            return IronicNodeState(host, node)
+            return IronicNodeState(host, node, **kwargs)
         else:
-            return host_manager.HostState(host, node)
+            return host_manager.HostState(host, node, **kwargs)
 
     def _init_instance_info(self):
         """Ironic hosts should not pass instance info."""
         pass
 
-    def _get_instance_info(self, context, compute):
+    def _add_instance_info(self, context, compute, host_state):
         """Ironic hosts should not pass instance info."""
-        return {}
+        host_state.instances = {}

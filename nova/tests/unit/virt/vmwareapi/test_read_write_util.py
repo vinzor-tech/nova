@@ -16,9 +16,12 @@
 import urllib
 
 import mock
+from oslo_config import cfg
 
 from nova import test
 from nova.virt.vmwareapi import read_write_util
+
+CONF = cfg.CONF
 
 
 class ReadWriteUtilTestCase(test.NoDBTestCase):

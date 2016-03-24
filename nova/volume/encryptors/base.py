@@ -16,9 +16,12 @@
 
 import abc
 
+from oslo_log import log as logging
 import six
 
 from nova import keymgr
+
+LOG = logging.getLogger(__name__)
 
 
 @six.add_metaclass(abc.ABCMeta)

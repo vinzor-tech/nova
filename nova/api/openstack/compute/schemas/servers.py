@@ -12,8 +12,6 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-import copy
-
 from nova.api.validation import parameter_types
 
 
@@ -35,8 +33,8 @@ base_create = {
                         'properties': {
                             'fixed_ip': parameter_types.ip_address,
                             'port': {
-                                'oneOf': [{'type': 'string', 'format': 'uuid'},
-                                          {'type': 'null'}]
+                                'type': ['string', 'null'],
+                                'format': 'uuid'
                             },
                             'uuid': {'type': 'string'},
                         },
@@ -52,17 +50,6 @@ base_create = {
     'additionalProperties': False,
 }
 
-
-base_create_v20 = copy.deepcopy(base_create)
-base_create_v20['properties']['server'][
-    'properties']['name'] = parameter_types.name_with_leading_trailing_spaces
-
-
-base_create_v219 = copy.deepcopy(base_create)
-base_create_v219['properties']['server'][
-    'properties']['description'] = parameter_types.description
-
-
 base_update = {
     'type': 'object',
     'properties': {
@@ -77,15 +64,6 @@ base_update = {
     'required': ['server'],
     'additionalProperties': False,
 }
-
-
-base_update_v20 = copy.deepcopy(base_update)
-base_update_v20['properties']['server'][
-    'properties']['name'] = parameter_types.name_with_leading_trailing_spaces
-
-base_update_v219 = copy.deepcopy(base_update)
-base_update_v219['properties']['server'][
-    'properties']['description'] = parameter_types.description
 
 base_rebuild = {
     'type': 'object',
@@ -106,15 +84,6 @@ base_rebuild = {
     'required': ['rebuild'],
     'additionalProperties': False,
 }
-
-
-base_rebuild_v20 = copy.deepcopy(base_rebuild)
-base_rebuild_v20['properties']['rebuild'][
-    'properties']['name'] = parameter_types.name_with_leading_trailing_spaces
-
-base_rebuild_v219 = copy.deepcopy(base_rebuild)
-base_rebuild_v219['properties']['rebuild'][
-    'properties']['description'] = parameter_types.description
 
 base_resize = {
     'type': 'object',
@@ -149,12 +118,6 @@ create_image = {
     'additionalProperties': False
 }
 
-
-create_image_v20 = copy.deepcopy(create_image)
-create_image_v20['properties']['createImage'][
-    'properties']['name'] = parameter_types.name_with_leading_trailing_spaces
-
-
 reboot = {
     'type': 'object',
     'properties': {
@@ -170,16 +133,5 @@ reboot = {
         }
     },
     'required': ['reboot'],
-    'additionalProperties': False
-}
-
-trigger_crash_dump = {
-    'type': 'object',
-    'properties': {
-        'trigger_crash_dump': {
-            'type': 'null'
-        }
-    },
-    'required': ['trigger_crash_dump'],
     'additionalProperties': False
 }

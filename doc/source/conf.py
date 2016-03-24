@@ -12,7 +12,6 @@
 # All configuration values have a default; values that are commented out
 # serve to show the default.
 
-import subprocess
 import sys
 import os
 
@@ -34,12 +33,8 @@ extensions = ['sphinx.ext.autodoc',
               'sphinx.ext.graphviz',
               'oslosphinx',
               "ext.support_matrix",
-              'oslo_config.sphinxconfiggen',
-              'ext.versioned_notifications'
+              'sphinxcontrib.seqdiag',
               ]
-
-config_generator_config_file = '../../etc/nova/nova-config-generator.conf'
-sample_config_basename = '_static/nova'
 
 todo_include_todos = True
 
@@ -113,6 +108,8 @@ modindex_common_prefix = ['nova.']
 man_pages = [
     ('man/nova-all', 'nova-all', u'Cloud controller fabric',
      [u'OpenStack'], 1),
+    ('man/nova-api-ec2', 'nova-api-ec2', u'Cloud controller fabric',
+     [u'OpenStack'], 1),
     ('man/nova-api-metadata', 'nova-api-metadata', u'Cloud controller fabric',
      [u'OpenStack'], 1),
     ('man/nova-api-os-compute', 'nova-api-os-compute',
@@ -142,6 +139,8 @@ man_pages = [
     ('man/nova-spicehtml5proxy', 'nova-spicehtml5proxy', u'Cloud controller fabric',
      [u'OpenStack'], 1),
     ('man/nova-serialproxy', 'nova-serialproxy', u'Cloud controller fabric',
+     [u'OpenStack'], 1),
+    ('man/nova-objectstore', 'nova-objectstore', u'Cloud controller fabric',
      [u'OpenStack'], 1),
     ('man/nova-rootwrap', 'nova-rootwrap', u'Cloud controller fabric',
      [u'OpenStack'], 1),
@@ -192,10 +191,8 @@ html_static_path = ['_static']
 # If not '', a 'Last updated on:' timestamp is inserted at every page bottom,
 # using the given strftime format.
 #html_last_updated_fmt = '%b %d, %Y'
-git_cmd = ["git", "log", "--pretty=format:'%ad, commit %h'", "--date=local",
-    "-n1"]
-html_last_updated_fmt = subprocess.Popen(
-    git_cmd, stdout=subprocess.PIPE).communicate()[0]
+git_cmd = "git log --pretty=format:'%ad, commit %h' --date=local -n1"
+html_last_updated_fmt = os.popen(git_cmd).read()
 
 # If true, SmartyPants will be used to convert quotes and dashes to
 # typographically correct entities.

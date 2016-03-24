@@ -26,6 +26,7 @@ import re
 import string
 import uuid
 
+from oslo_config import cfg
 from oslo_log import log as logging
 from oslo_serialization import jsonutils
 from oslo_utils import excutils
@@ -46,8 +47,6 @@ from nova.compute import rpcapi as compute_rpcapi
 from nova.compute import task_states
 from nova.compute import utils as compute_utils
 from nova.compute import vm_states
-from nova import conductor
-import nova.conf
 from nova.consoleauth import rpcapi as consoleauth_rpcapi
 from nova import crypto
 from nova.db import base
@@ -67,7 +66,6 @@ from nova import notifications
 from nova import objects
 from nova.objects import base as obj_base
 from nova.objects import block_device as block_device_obj
-from nova.objects import fields as fields_obj
 from nova.objects import keypair as keypair_obj
 from nova.objects import quotas as quotas_obj
 from nova.objects import security_group as security_group_obj
@@ -75,7 +73,6 @@ from nova.pci import request as pci_request
 import nova.policy
 from nova import rpc
 from nova.scheduler import client as scheduler_client
-from nova.scheduler import utils as scheduler_utils
 from nova import servicegroup
 from nova import utils
 from nova.virt import hardware
@@ -87,8 +84,76 @@ get_notifier = functools.partial(rpc.get_notifier, service='compute')
 wrap_exception = functools.partial(exception.wrap_exception,
                                    get_notifier=get_notifier)
 
-CONF = nova.conf.CONF
+compute_opts = [
+    cfg.BoolOpt('allow_resize_to_same_host',
+                default=False,
+                help='Allow destination machine to match source for resize. '
+                     'Useful when testing in single-host environments.'),
+    cfg.StrOpt('default_schedule_zone',
+               help='Availability zone to use when user doesn\'t specify one'),
+    cfg.ListOpt('non_inheritable_image_properties',
+                default=['cache_in_nova',
+                         'bittorrent'],
+                help='These are image properties which a snapshot should not'
+                     ' inherit from an instance'),
+    cfg.StrOpt('null_kernel',
+               default='nokernel',
+               help='Kernel image that indicates not to use a kernel, but to '
+                    'use a raw disk image instead'),
+    cfg.StrOpt('multi_instance_display_name_template',
+               default='%(name)s-%(count)d',
+               help='When creating multiple instances with a single request '
+                    'using the os-multiple-create API extension, this '
+                    'template will be used to build the display name for '
+                    'each instance. The benefit is that the instances '
+                    'end up with different hostnames. To restore legacy '
+                    'behavior of every instance having the same name, set '
+                    'this option to "%(name)s".  Valid keys for the '
+                    'template are: name, uuid, count.'),
+    cfg.IntOpt('max_local_block_devices',
+               default=3,
+               help='Maximum number of devices that will result '
+                    'in a local image being created on the hypervisor node. '
+                    'A negative number means unlimited. Setting '
+                    'max_local_block_devices to 0 means that any request that '
+                    'attempts to create a local disk will fail. This option '
+                    'is meant to limit the number of local discs (so root '
+                    'local disc that is the result of --image being used, and '
+                    'any other ephemeral and swap disks). 0 does not mean '
+                    'that images will be automatically converted to volumes '
+                    'and boot instances from volumes - it just means that all '
+                    'requests that attempt to create a local disk will fail.'),
+]
+
+ephemeral_storage_encryption_group = cfg.OptGroup(
+    name='ephemeral_storage_encryption',
+    title='Ephemeral storage encryption options')
+
+ephemeral_storage_encryption_opts = [
+    cfg.BoolOpt('enabled',
+                default=False,
+                help='Whether to encrypt ephemeral storage'),
+    cfg.StrOpt('cipher',
+               default='aes-xts-plain64',
+               help='The cipher and mode to be used to encrypt ephemeral '
+                    'storage. Which ciphers are available ciphers depends '
+                    'on kernel support. See /proc/crypto for the list of '
+                    'available options.'),
+    cfg.IntOpt('key_size',
+               default=512,
+               help='The bit length of the encryption key to be used to '
+                    'encrypt ephemeral storage (in XTS mode only half of '
+                    'the bits are used for encryption key)')
+]
+
+CONF = cfg.CONF
+CONF.register_opts(compute_opts)
+CONF.register_group(ephemeral_storage_encryption_group)
+CONF.register_opts(ephemeral_storage_encryption_opts,
+                   group='ephemeral_storage_encryption')
 CONF.import_opt('compute_topic', 'nova.compute.rpcapi')
+CONF.import_opt('enable', 'nova.cells.opts', group='cells')
+CONF.import_opt('default_ephemeral_format', 'nova.virt.driver')
 
 MAX_USERDATA_SIZE = 65535
 RO_SECURITY_GROUPS = ['default']
@@ -182,7 +247,7 @@ def check_policy(context, action, target, scope='compute'):
 
 def check_instance_cell(fn):
     def _wrapped(self, context, instance, *args, **kwargs):
-        self._validate_cell(instance)
+        self._validate_cell(instance, fn.__name__)
         return fn(self, context, instance, *args, **kwargs)
     _wrapped.__name__ = fn.__name__
     return _wrapped
@@ -220,13 +285,22 @@ class API(base.Base):
                 skip_policy_check=skip_policy_check))
         self.consoleauth_rpcapi = consoleauth_rpcapi.ConsoleAuthAPI()
         self.compute_rpcapi = compute_rpcapi.ComputeAPI()
-        self.compute_task_api = conductor.ComputeTaskAPI()
+        self._compute_task_api = None
         self.servicegroup_api = servicegroup.API()
         self.notifier = rpc.get_notifier('compute', CONF.host)
         if CONF.ephemeral_storage_encryption.enabled:
             self.key_manager = keymgr.API()
 
         super(API, self).__init__(**kwargs)
+
+    @property
+    def compute_task_api(self):
+        if self._compute_task_api is None:
+            # TODO(alaski): Remove calls into here from conductor manager so
+            # that this isn't necessary. #1180540
+            from nova import conductor
+            self._compute_task_api = conductor.ComputeTaskAPI()
+        return self._compute_task_api
 
     @property
     def cell_type(self):
@@ -236,13 +310,24 @@ class API(base.Base):
             self._cell_type = cells_opts.get_cell_type()
             return self._cell_type
 
-    def _validate_cell(self, instance):
+    def _cell_read_only(self, cell_name):
+        """Is the target cell in a read-only mode?"""
+        # FIXME(comstud): Add support for this.
+        return False
+
+    def _validate_cell(self, instance, method):
         if self.cell_type != 'api':
             return
         cell_name = instance.cell_name
         if not cell_name:
             raise exception.InstanceUnknownCell(
                     instance_uuid=instance.uuid)
+        if self._cell_read_only(cell_name):
+            raise exception.InstanceInvalidState(
+                    attr="vm_state",
+                    instance_uuid=instance.uuid,
+                    state="temporary_readonly",
+                    method=method)
 
     def _record_action_start(self, context, instance, action):
         objects.InstanceAction.action_start(context, instance.uuid,
@@ -406,9 +491,7 @@ class API(base.Base):
 
         # Because metadata is stored in the DB, we hard-code the size limits
         # In future, we may support more variable length strings, so we act
-        #  as if this is quota-controlled for forwards compatibility.
-        # Those are only used in V2 API, from V2.1 API, those checks are
-        # validated at API layer schema validation.
+        #  as if this is quota-controlled for forwards compatibility
         for k, v in six.iteritems(metadata):
             try:
                 utils.check_string_length(v)
@@ -416,6 +499,8 @@ class API(base.Base):
             except exception.InvalidInput as e:
                 raise exception.InvalidMetadata(reason=e.format_message())
 
+            # For backward compatible we need raise HTTPRequestEntityTooLarge
+            # so we need to keep InvalidMetadataSize exception here
             if len(k) > 255:
                 msg = _("Metadata property key greater than 255 characters")
                 raise exception.InvalidMetadataSize(reason=msg)
@@ -492,7 +577,7 @@ class API(base.Base):
         return kernel_id, ramdisk_id
 
     @staticmethod
-    def parse_availability_zone(context, availability_zone):
+    def _handle_availability_zone(context, availability_zone):
         # NOTE(vish): We have a legacy hack to allow admins to specify hosts
         #             via az using az:host:node. It might be nice to expose an
         #             api to specify specific hosts to force onto, but for
@@ -545,10 +630,10 @@ class API(base.Base):
             'auto_disk_config': auto_disk_config
         }
 
-    def _new_instance_name_from_template(self, uuid, display_name, index):
+    def _apply_instance_name_template(self, context, instance, index):
         params = {
-            'uuid': uuid,
-            'name': display_name,
+            'uuid': instance.uuid,
+            'name': instance.display_name,
             'count': index + 1,
         }
         try:
@@ -557,19 +642,10 @@ class API(base.Base):
         except (KeyError, TypeError):
             LOG.exception(_LE('Failed to set instance name using '
                               'multi_instance_display_name_template.'))
-            new_name = display_name
-        return new_name
-
-    def _apply_instance_name_template(self, context, instance, index):
-        original_name = instance.display_name
-        new_name = self._new_instance_name_from_template(instance.uuid,
-                instance.display_name, index)
+            new_name = instance.display_name
         instance.display_name = new_name
         if not instance.get('hostname', None):
-            if utils.sanitize_hostname(original_name) == "":
-                instance.hostname = self._default_host_name(instance.uuid)
-            else:
-                instance.hostname = utils.sanitize_hostname(new_name)
+            instance.hostname = utils.sanitize_hostname(new_name)
         instance.save()
         return instance
 
@@ -679,14 +755,12 @@ class API(base.Base):
             image_defined_bdms = block_device.from_legacy_mapping(
                 image_defined_bdms, None, root_device_name)
         else:
-            image_defined_bdms = list(map(block_device.BlockDeviceDict,
-                                          image_defined_bdms))
+            image_defined_bdms = map(block_device.BlockDeviceDict,
+                                     image_defined_bdms)
 
         if image_mapping:
-            image_mapping = self._prepare_image_mapping(instance_type,
-                                                        image_mapping)
-            image_defined_bdms = self._merge_bdms_lists(
-                image_mapping, image_defined_bdms)
+            image_defined_bdms += self._prepare_image_mapping(
+                instance_type, image_mapping)
 
         return image_defined_bdms
 
@@ -707,18 +781,12 @@ class API(base.Base):
 
         return flavor_defined_bdms
 
-    def _merge_bdms_lists(self, overrideable_mappings, overrider_mappings):
-        """Override any block devices from the first list by device name
-
-        :param overridable_mappings: list which items are overriden
-        :param overrider_mappings: list which items override
-
-        :returns: A merged list of bdms
-        """
-        device_names = set(bdm['device_name'] for bdm in overrider_mappings
+    def _merge_with_image_bdms(self, block_device_mapping, image_mappings):
+        """Override any block devices from the image by device name"""
+        device_names = set(bdm['device_name'] for bdm in block_device_mapping
                            if bdm['device_name'])
-        return (overrider_mappings +
-                [bdm for bdm in overrideable_mappings
+        return (block_device_mapping +
+                [bdm for bdm in image_mappings
                  if bdm['device_name'] not in device_names])
 
     def _check_and_transform_bdm(self, context, base_options, instance_type,
@@ -732,7 +800,7 @@ class API(base.Base):
         # the volume cannot have the same device name as root_device_name
         if image_ref:
             for bdm in block_device_mapping:
-                if (bdm.get('destination_type') == 'volume' and
+                if (bdm.get('source_type') == 'volume' and
                     block_device.strip_dev(bdm.get(
                     'device_name')) == root_device_name):
                     msg = _('The volume cannot be assigned the same device'
@@ -762,11 +830,11 @@ class API(base.Base):
                 return not (bdm.get('boot_index') == 0 and
                             bdm.get('source_type') == 'image')
 
-            block_device_mapping = list(
+            block_device_mapping = (
                 filter(not_image_and_root_bdm, block_device_mapping))
 
-        block_device_mapping = self._merge_bdms_lists(
-            image_defined_bdms, block_device_mapping)
+        block_device_mapping = self._merge_with_image_bdms(
+            block_device_mapping, image_defined_bdms)
 
         if min_count > 1 or max_count > 1:
             if any(map(lambda bdm: bdm['source_type'] == 'volume',
@@ -801,14 +869,23 @@ class API(base.Base):
                                          kernel_id, ramdisk_id, display_name,
                                          display_description, key_name,
                                          key_data, security_groups,
-                                         availability_zone, user_data,
-                                         metadata, access_ip_v4, access_ip_v6,
+                                         availability_zone, forced_host,
+                                         user_data, metadata,
+                                         access_ip_v4, access_ip_v6,
                                          requested_networks, config_drive,
                                          auto_disk_config, reservation_id,
                                          max_count):
         """Verify all the input parameters regardless of the provisioning
         strategy being performed.
         """
+        if availability_zone:
+            available_zones = availability_zones.\
+                get_availability_zones(context.elevated(), True)
+            if forced_host is None and availability_zone not in \
+                    available_zones:
+                msg = _('The requested availability zone is not available')
+                raise exception.InvalidRequest(msg)
+
         if instance_type['disabled']:
             raise exception.FlavorNotFound(flavor_id=instance_type['id'])
 
@@ -881,7 +958,7 @@ class API(base.Base):
             'root_gb': instance_type['root_gb'],
             'ephemeral_gb': instance_type['ephemeral_gb'],
             'display_name': display_name,
-            'display_description': display_description,
+            'display_description': display_description or '',
             'user_data': user_data,
             'key_name': key_name,
             'key_data': key_data,
@@ -905,90 +982,34 @@ class API(base.Base):
         # by the network quotas
         return base_options, max_network_count
 
-    def _create_build_request(self, context, instance_uuid, base_options,
-            request_spec, security_groups, num_instances, index):
-        # Store the BuildRequest that will help populate an instance
-        # object for a list/show request
-        info_cache = objects.InstanceInfoCache()
-        info_cache.instance_uuid = instance_uuid
-        info_cache.network_info = network_model.NetworkInfo()
-        # NOTE: base_options['config_drive'] is either True or '' due
-        # to how it's represented in the instances table in the db.
-        # BuildRequest needs a boolean.
-        bool_config_drive = strutils.bool_from_string(
-                base_options['config_drive'], default=False)
-        # display_name follows a whole set of rules
-        display_name = base_options['display_name']
-        if display_name is None:
-            display_name = self._default_display_name(instance_uuid)
-        if num_instances > 1:
-            display_name = self._new_instance_name_from_template(instance_uuid,
-                    display_name, index)
-        build_request = objects.BuildRequest(context,
-                request_spec=request_spec,
-                project_id=context.project_id,
-                user_id=context.user_id,
-                display_name=display_name,
-                instance_metadata=base_options['metadata'],
-                progress=0,
-                vm_state=vm_states.BUILDING,
-                task_state=task_states.SCHEDULING,
-                image_ref=base_options['image_ref'],
-                access_ip_v4=base_options['access_ip_v4'],
-                access_ip_v6=base_options['access_ip_v6'],
-                info_cache=info_cache,
-                security_groups=security_groups,
-                config_drive=bool_config_drive,
-                key_name=base_options['key_name'],
-                locked_by=None)
-        build_request.create()
-        return build_request
+    def _build_filter_properties(self, context, scheduler_hints, forced_host,
+            forced_node, instance_type):
+        filter_properties = dict(scheduler_hints=scheduler_hints)
+        filter_properties['instance_type'] = instance_type
+        if forced_host:
+            filter_properties['force_hosts'] = [forced_host]
+        if forced_node:
+            filter_properties['force_nodes'] = [forced_node]
+        return filter_properties
 
     def _provision_instances(self, context, instance_type, min_count,
             max_count, base_options, boot_meta, security_groups,
             block_device_mapping, shutdown_terminate,
-            instance_group, check_server_group_quota, filter_properties):
+            instance_group, check_server_group_quota):
         # Reserve quotas
         num_instances, quotas = self._check_num_instances_quota(
                 context, instance_type, min_count, max_count)
-        security_groups = self.security_group_api.populate_security_groups(
-                security_groups)
-        LOG.debug("Going to run %s instances...", num_instances)
+        LOG.debug("Going to run %s instances..." % num_instances)
         instances = []
         try:
             for i in range(num_instances):
-                # Create a uuid for the instance so we can store the
-                # RequestSpec before the instance is created.
-                instance_uuid = str(uuid.uuid4())
-                # Store the RequestSpec that will be used for scheduling.
-                req_spec = objects.RequestSpec.from_components(context,
-                        instance_uuid, boot_meta, instance_type,
-                        base_options['numa_topology'],
-                        base_options['pci_requests'], filter_properties,
-                        instance_group, base_options['availability_zone'])
-                req_spec.create()
-                build_request = self._create_build_request(context,
-                        instance_uuid, base_options, req_spec, security_groups,
-                        num_instances, i)
-                # TODO(alaski): Cast to conductor here which will call the
-                # scheduler and defer instance creation until the scheduler
-                # has picked a cell/host.
                 instance = objects.Instance(context=context)
-                instance.uuid = instance_uuid
                 instance.update(base_options)
                 instance = self.create_db_entry_for_new_instance(
                         context, instance_type, boot_meta, instance,
                         security_groups, block_device_mapping,
                         num_instances, i, shutdown_terminate)
                 instances.append(instance)
-                # The BuildRequest needs to be stored until the instance is in
-                # an instance table. At that point it will never be used again
-                # and should be deleted. As instance creation is pushed back,
-                # as noted above, this will move with it.
-                # TODO(alaski): Sync API updates to the build_request to the
-                # instance before it is destroyed. Right now only locked_by can
-                # be updated before this is destroyed.
-                build_request.destroy()
 
                 if instance_group:
                     if check_server_group_quota:
@@ -1078,18 +1099,15 @@ class API(base.Base):
         return {}
 
     @staticmethod
-    def _get_requested_instance_group(context, filter_properties,
+    def _get_requested_instance_group(context, scheduler_hints,
                                       check_quota):
-        if (not filter_properties or
-                not filter_properties.get('scheduler_hints')):
+        if not scheduler_hints:
             return
 
-        group_hint = filter_properties.get('scheduler_hints').get('group')
+        group_hint = scheduler_hints.get('group')
         if not group_hint:
             return
 
-        # TODO(gibi): We need to remove the following validation code when
-        # removing legacy v2 code.
         if not uuidutils.is_uuid_like(group_hint):
             msg = _('Server group scheduler hint must be a UUID.')
             raise exception.InvalidInput(reason=msg)
@@ -1101,11 +1119,13 @@ class API(base.Base):
                min_count, max_count,
                display_name, display_description,
                key_name, key_data, security_groups,
-               availability_zone, user_data, metadata, injected_files,
-               admin_password, access_ip_v4, access_ip_v6,
+               availability_zone, user_data, metadata,
+               injected_files, admin_password,
+               access_ip_v4, access_ip_v6,
                requested_networks, config_drive,
-               block_device_mapping, auto_disk_config, filter_properties,
-               reservation_id=None, legacy_bdm=True, shutdown_terminate=False,
+               block_device_mapping, auto_disk_config,
+               reservation_id=None, scheduler_hints=None,
+               legacy_bdm=True, shutdown_terminate=False,
                check_server_group_quota=False):
         """Verify all the input parameters regardless of the provisioning
         strategy being performed and schedule the instance(s) for
@@ -1119,6 +1139,8 @@ class API(base.Base):
         min_count = min_count or 1
         max_count = max_count or min_count
         block_device_mapping = block_device_mapping or []
+        if not instance_type:
+            instance_type = flavors.get_default_flavor()
 
         if image_href:
             image_id, boot_meta = self._get_image(context, image_href)
@@ -1130,24 +1152,32 @@ class API(base.Base):
         self._check_auto_disk_config(image=boot_meta,
                                      auto_disk_config=auto_disk_config)
 
+        handle_az = self._handle_availability_zone
+        availability_zone, forced_host, forced_node = handle_az(context,
+                                                            availability_zone)
+
+        if not self.skip_policy_check and (forced_host or forced_node):
+            check_policy(context, 'create:forced_host', {})
+
         base_options, max_net_count = self._validate_and_build_base_options(
-                context, instance_type, boot_meta, image_href, image_id,
-                kernel_id, ramdisk_id, display_name, display_description,
+                context,
+                instance_type, boot_meta, image_href, image_id, kernel_id,
+                ramdisk_id, display_name, display_description,
                 key_name, key_data, security_groups, availability_zone,
-                user_data, metadata, access_ip_v4, access_ip_v6,
-                requested_networks, config_drive, auto_disk_config,
-                reservation_id, max_count)
+                forced_host, user_data, metadata, access_ip_v4,
+                access_ip_v6, requested_networks, config_drive,
+                auto_disk_config, reservation_id, max_count)
 
         # max_net_count is the maximum number of instances requested by the
         # user adjusted for any network quota constraints, including
         # consideration of connections to each requested network
-        if max_net_count < min_count:
+        if max_net_count == 0:
             raise exception.PortLimitExceeded()
         elif max_net_count < max_count:
-            LOG.info(_LI("max count reduced from %(max_count)d to "
-                         "%(max_net_count)d due to network port quota"),
-                        {'max_count': max_count,
-                         'max_net_count': max_net_count})
+            LOG.debug("max count reduced from %(max_count)d to "
+                      "%(max_net_count)d due to network port quota",
+                      {'max_count': max_count,
+                       'max_net_count': max_net_count})
             max_count = max_net_count
 
         block_device_mapping = self._check_and_transform_bdm(context,
@@ -1161,12 +1191,16 @@ class API(base.Base):
                 block_device_mapping.root_bdm())
 
         instance_group = self._get_requested_instance_group(context,
-                                   filter_properties, check_server_group_quota)
+                                   scheduler_hints, check_server_group_quota)
 
         instances = self._provision_instances(context, instance_type,
                 min_count, max_count, base_options, boot_meta, security_groups,
                 block_device_mapping, shutdown_terminate,
-                instance_group, check_server_group_quota, filter_properties)
+                instance_group, check_server_group_quota)
+
+        filter_properties = self._build_filter_properties(context,
+                scheduler_hints, forced_host,
+                forced_node, instance_type)
 
         for instance in instances:
             self._record_action_start(context, instance,
@@ -1187,7 +1221,7 @@ class API(base.Base):
     @staticmethod
     def _volume_size(instance_type, bdm):
         size = bdm.get('volume_size')
-        # NOTE (ndipanov): inherit flavor size only for swap and ephemeral
+        # NOTE (ndipanov): inherit flavour size only for swap and ephemeral
         if (size is None and bdm.get('source_type') == 'blank' and
                 bdm.get('destination_type') == 'local'):
             if bdm.get('guest_format') == 'swap':
@@ -1242,7 +1276,7 @@ class API(base.Base):
         This method makes a copy of the list in order to avoid using the same
         id field in case this is called for multiple instances.
         """
-        LOG.debug("block_device_mapping %s", list(block_device_mapping),
+        LOG.debug("block_device_mapping %s", block_device_mapping,
                   instance_uuid=instance_uuid)
         instance_block_device_mapping = copy.deepcopy(block_device_mapping)
         for bdm in instance_block_device_mapping:
@@ -1253,29 +1287,20 @@ class API(base.Base):
             bdm.instance_uuid = instance_uuid
             bdm.update_or_create()
 
-    def _validate_bdm(self, context, instance, instance_type,
-                      block_device_mappings):
+    def _validate_bdm(self, context, instance, instance_type, all_mappings):
         def _subsequent_list(l):
-            # Each device which is capable of being used as boot device should
-            # be given a unique boot index, starting from 0 in ascending order.
             return all(el + 1 == l[i + 1] for i, el in enumerate(l[:-1]))
 
-        # Make sure that the boot indexes make sense.
-        # Setting a negative value or None indicates that the device should not
-        # be used for booting.
+        # Make sure that the boot indexes make sense
         boot_indexes = sorted([bdm.boot_index
-                               for bdm in block_device_mappings
+                               for bdm in all_mappings
                                if bdm.boot_index is not None
                                and bdm.boot_index >= 0])
 
         if 0 not in boot_indexes or not _subsequent_list(boot_indexes):
-            # Convert the BlockDeviceMappingList to a list for repr details.
-            LOG.debug('Invalid block device mapping boot sequence for '
-                      'instance: %s', list(block_device_mappings),
-                      instance=instance)
             raise exception.InvalidBDMBootSequence()
 
-        for bdm in block_device_mappings:
+        for bdm in all_mappings:
             # NOTE(vish): For now, just make sure the volumes are accessible.
             # Additionally, check that the volume can be attached to this
             # instance.
@@ -1322,13 +1347,13 @@ class API(base.Base):
                     "size"))
 
         ephemeral_size = sum(bdm.volume_size or 0
-                for bdm in block_device_mappings
+                for bdm in all_mappings
                 if block_device.new_format_is_ephemeral(bdm))
         if ephemeral_size > instance_type['ephemeral_gb']:
             raise exception.InvalidBDMEphemeralSize()
 
         # There should be only one swap
-        swap_list = block_device.get_bdm_swap_list(block_device_mappings)
+        swap_list = block_device.get_bdm_swap_list(all_mappings)
         if len(swap_list) > 1:
             msg = _("More than one swap drive requested.")
             raise exception.InvalidBDMFormat(details=msg)
@@ -1340,7 +1365,7 @@ class API(base.Base):
 
         max_local = CONF.max_local_block_devices
         if max_local >= 0:
-            num_local = len([bdm for bdm in block_device_mappings
+            num_local = len([bdm for bdm in all_mappings
                              if bdm.destination_type == 'local'])
             if num_local > max_local:
                 raise exception.InvalidBDMLocalsLimit()
@@ -1366,19 +1391,19 @@ class API(base.Base):
             # Otherwise, it will be built after the template based
             # display_name.
             hostname = display_name
-            default_hostname = self._default_host_name(instance.uuid)
-            instance.hostname = utils.sanitize_hostname(hostname,
-                                                        default_hostname)
+            instance.hostname = utils.sanitize_hostname(hostname)
 
     def _default_display_name(self, instance_uuid):
         return "Server %s" % instance_uuid
 
-    def _default_host_name(self, instance_uuid):
-        return "Server-%s" % instance_uuid
-
     def _populate_instance_for_create(self, context, instance, image,
                                       index, security_groups, instance_type):
         """Build the beginning of a new instance."""
+
+        if not instance.obj_attr_is_set('uuid'):
+            # Generate the instance_uuid here so we can use it
+            # for additional setup before creating the DB entry.
+            instance.uuid = str(uuid.uuid4())
 
         instance.launch_index = index
         instance.vm_state = vm_states.BUILDING
@@ -1412,8 +1437,8 @@ class API(base.Base):
 
         instance.system_metadata.update(system_meta)
 
-        instance.security_groups = security_groups
-
+        self.security_group_api.populate_security_groups(instance,
+                                                         security_groups)
         return instance
 
     # NOTE(bcwaldon): No policy check since this is only used by scheduler and
@@ -1462,8 +1487,7 @@ class API(base.Base):
         return instance
 
     def _check_create_policies(self, context, availability_zone,
-            requested_networks, block_device_mapping, forced_host,
-            forced_node):
+            requested_networks, block_device_mapping):
         """Check policies for create()."""
         target = {'project_id': context.project_id,
                   'user_id': context.user_id,
@@ -1476,9 +1500,6 @@ class API(base.Base):
 
             if block_device_mapping:
                 check_policy(context, 'create:attach_volume', target)
-
-            if forced_host or forced_node:
-                check_policy(context, 'create:forced_host', {})
 
     def _check_multiple_instances_neutron_ports(self, requested_networks):
         """Check whether multiple instances are created from port id(s)."""
@@ -1504,40 +1525,27 @@ class API(base.Base):
                min_count=None, max_count=None,
                display_name=None, display_description=None,
                key_name=None, key_data=None, security_group=None,
-               availability_zone=None, forced_host=None, forced_node=None,
-               user_data=None, metadata=None, injected_files=None,
-               admin_password=None, block_device_mapping=None,
-               access_ip_v4=None, access_ip_v6=None, requested_networks=None,
-               config_drive=None, auto_disk_config=None, scheduler_hints=None,
-               legacy_bdm=True, shutdown_terminate=False,
-               check_server_group_quota=False):
+               availability_zone=None, user_data=None, metadata=None,
+               injected_files=None, admin_password=None,
+               block_device_mapping=None, access_ip_v4=None,
+               access_ip_v6=None, requested_networks=None, config_drive=None,
+               auto_disk_config=None, scheduler_hints=None, legacy_bdm=True,
+               shutdown_terminate=False, check_server_group_quota=False):
         """Provision instances, sending instance information to the
         scheduler.  The scheduler will determine where the instance(s)
         go and will handle creating the DB entries.
 
         Returns a tuple of (instances, reservation_id)
         """
-        # Check policies up front to fail before performing more expensive work
+
         self._check_create_policies(context, availability_zone,
-                requested_networks, block_device_mapping, forced_host,
-                forced_node)
+                requested_networks, block_device_mapping)
 
         if requested_networks and max_count > 1:
             self._check_multiple_instances_and_specified_ip(requested_networks)
             if utils.is_neutron():
                 self._check_multiple_instances_neutron_ports(
                     requested_networks)
-
-        if availability_zone:
-            available_zones = availability_zones.\
-                get_availability_zones(context.elevated(), True)
-            if forced_host is None and availability_zone not in \
-                    available_zones:
-                msg = _('The requested availability zone is not available')
-                raise exception.InvalidRequest(msg)
-
-        filter_properties = scheduler_utils.build_filter_properties(
-                scheduler_hints, forced_host, forced_node, instance_type)
 
         return self._create_instance(
                        context, instance_type,
@@ -1550,7 +1558,7 @@ class API(base.Base):
                        access_ip_v4, access_ip_v6,
                        requested_networks, config_drive,
                        block_device_mapping, auto_disk_config,
-                       filter_properties=filter_properties,
+                       scheduler_hints=scheduler_hints,
                        legacy_bdm=legacy_bdm,
                        shutdown_terminate=shutdown_terminate,
                        check_server_group_quota=check_server_group_quota)
@@ -1751,19 +1759,25 @@ class API(base.Base):
 
     def _create_reservations(self, context, instance, original_task_state,
                              project_id, user_id):
+        instance_vcpus = instance.vcpus
+        instance_memory_mb = instance.memory_mb
         # NOTE(wangpan): if the instance is resizing, and the resources
         #                are updated to new instance type, we should use
         #                the old instance type to create reservation.
         # see https://bugs.launchpad.net/nova/+bug/1099729 for more details
         if original_task_state in (task_states.RESIZE_MIGRATED,
                                    task_states.RESIZE_FINISH):
-            old_flavor = instance.old_flavor
-            instance_vcpus = old_flavor.vcpus
-            vram_mb = old_flavor.extra_specs.get('hw_video:ram_max_mb', 0)
-            instance_memory_mb = old_flavor.memory_mb + vram_mb
-        else:
-            instance_vcpus = instance.vcpus
-            instance_memory_mb = instance.memory_mb
+            try:
+                migration = objects.Migration.get_by_instance_and_status(
+                    context.elevated(), instance.uuid, 'post-migrating')
+            except exception.MigrationNotFoundByStatus:
+                migration = None
+            if (migration and
+                    instance.instance_type_id ==
+                        migration.new_instance_type_id):
+                get_inst_attrs = compute_utils.get_inst_attrs_from_migration
+                instance_vcpus, instance_memory_mb = get_inst_attrs(migration,
+                                                                    instance)
 
         quotas = objects.Quotas(context=context)
         quotas.reserve(project_id=project_id,
@@ -1773,33 +1787,6 @@ class API(base.Base):
                        ram=-instance_memory_mb)
         return quotas
 
-    def _local_cleanup_bdm_volumes(self, bdms, instance, context):
-        """The method deletes the bdm records and, if a bdm is a volume, call
-        the terminate connection and the detach volume via the Volume API.
-        Note that at this point we do not have the information about the
-        correct connector so we pass a fake one.
-        """
-        elevated = context.elevated()
-        for bdm in bdms:
-            if bdm.is_volume:
-                # NOTE(vish): We don't have access to correct volume
-                #             connector info, so just pass a fake
-                #             connector. This can be improved when we
-                #             expose get_volume_connector to rpc.
-                connector = {'ip': '127.0.0.1', 'initiator': 'iqn.fake'}
-                try:
-                    self.volume_api.terminate_connection(context,
-                                                         bdm.volume_id,
-                                                         connector)
-                    self.volume_api.detach(elevated, bdm.volume_id,
-                                           instance.uuid)
-                    if bdm.delete_on_termination:
-                        self.volume_api.delete(context, bdm.volume_id)
-                except Exception as exc:
-                    err_str = _LW("Ignoring volume cleanup failure due to %s")
-                    LOG.warn(err_str % exc, instance=instance)
-            bdm.destroy()
-
     def _local_delete(self, context, instance, bdms, delete_type, cb):
         if instance.vm_state == vm_states.SHELVED_OFFLOADED:
             LOG.info(_LI("instance is in SHELVED_OFFLOADED state, cleanup"
@@ -1808,6 +1795,14 @@ class API(base.Base):
         else:
             LOG.warning(_LW("instance's host %s is down, deleting from "
                             "database"), instance.host, instance=instance)
+        if instance.info_cache is not None:
+            instance.info_cache.delete()
+        else:
+            # NOTE(yoshimatsu): Avoid AttributeError if instance.info_cache
+            # is None. When the root cause that instance.info_cache becomes
+            # None is fixed, the log level should be reconsidered.
+            LOG.warning(_LW("Info cache for instance could not be found. "
+                            "Ignore."), instance=instance)
         compute_utils.notify_about_instance_usage(
             self.notifier, context, instance, "%s.start" % delete_type)
 
@@ -1833,7 +1828,24 @@ class API(base.Base):
                 instance.host = orig_host
 
         # cleanup volumes
-        self._local_cleanup_bdm_volumes(bdms, instance, context)
+        for bdm in bdms:
+            if bdm.is_volume:
+                # NOTE(vish): We don't have access to correct volume
+                #             connector info, so just pass a fake
+                #             connector. This can be improved when we
+                #             expose get_volume_connector to rpc.
+                connector = {'ip': '127.0.0.1', 'initiator': 'iqn.fake'}
+                try:
+                    self.volume_api.terminate_connection(context,
+                                                         bdm.volume_id,
+                                                         connector)
+                    self.volume_api.detach(elevated, bdm.volume_id)
+                    if bdm.delete_on_termination:
+                        self.volume_api.delete(context, bdm.volume_id)
+                except Exception as exc:
+                    err_str = _LW("Ignoring volume cleanup failure due to %s")
+                    LOG.warn(err_str % exc, instance=instance)
+            bdm.destroy()
         cb(context, instance, bdms, local=True)
         sys_meta = instance.system_metadata
         instance.destroy()
@@ -1981,19 +1993,6 @@ class API(base.Base):
         #                 availability_zone isn't used by run_instance.
         self.compute_rpcapi.start_instance(context, instance)
 
-    @check_instance_lock
-    @check_instance_host
-    @check_instance_cell
-    @check_instance_state(vm_state=vm_states.ALLOW_TRIGGER_CRASH_DUMP)
-    def trigger_crash_dump(self, context, instance):
-        """Trigger crash dump in an instance."""
-        LOG.debug("Try to trigger crash dump", instance=instance)
-
-        self._record_action_start(context, instance,
-                                  instance_actions.TRIGGER_CRASH_DUMP)
-
-        self.compute_rpcapi.trigger_crash_dump(context, instance)
-
     def get(self, context, instance_id, want_objects=False,
             expected_attrs=None):
         """Get a single instance with the given instance_id."""
@@ -2007,6 +2006,10 @@ class API(base.Base):
                 LOG.debug("Fetching instance by UUID",
                            instance_uuid=instance_id)
                 instance = objects.Instance.get_by_uuid(
+                    context, instance_id, expected_attrs=expected_attrs)
+            elif strutils.is_int_like(instance_id):
+                LOG.debug("Fetching instance by numeric id %s", instance_id)
+                instance = objects.Instance.get_by_id(
                     context, instance_id, expected_attrs=expected_attrs)
             else:
                 LOG.debug("Failed to fetch instance by id %s", instance_id)
@@ -2052,7 +2055,7 @@ class API(base.Base):
         if search_opts is None:
             search_opts = {}
 
-        LOG.debug("Searching by: %s", str(search_opts))
+        LOG.debug("Searching by: %s" % str(search_opts))
 
         # Fixups for the DB call
         filters = {}
@@ -2104,10 +2107,7 @@ class API(base.Base):
                     # We already know we can't match the filter, so
                     # return an empty list
                     except ValueError:
-                        if want_objects:
-                            return objects.InstanceList()
-                        else:
-                            return []
+                        return []
 
         # IP address filtering cannot be applied at the DB layer, remove any DB
         # limit so that it can be applied after the IP filter.
@@ -2327,8 +2327,8 @@ class API(base.Base):
             except (exception.InstanceQuiesceNotSupported,
                     exception.QemuGuestAgentNotEnabled,
                     exception.NovaException, NotImplementedError) as err:
-                if strutils.bool_from_string(instance.system_metadata.get(
-                        'image_os_require_quiesce')):
+                if strutils.bool_from_string(properties.get(
+                        'os_require_quiesce')):
                     raise
                 else:
                     LOG.info(_LI('Skipping quiescing instance: '
@@ -2350,8 +2350,6 @@ class API(base.Base):
                 #                 Linux LVM snapshot creation completes in
                 #                 short time, it doesn't matter for now.
                 name = _('snapshot for %s') % image_meta['name']
-                LOG.debug('Creating snapshot from volume %s.', volume['id'],
-                          instance=instance)
                 snapshot = self.volume_api.create_snapshot_force(
                     context, volume['id'], name, volume['display_description'])
                 mapping_dict = block_device.snapshot_from_bdm(snapshot['id'],
@@ -2373,45 +2371,50 @@ class API(base.Base):
 
     @wrap_check_policy
     @check_instance_lock
+    @check_instance_state(vm_state=set(
+                    vm_states.ALLOW_SOFT_REBOOT + vm_states.ALLOW_HARD_REBOOT),
+                          task_state=[None, task_states.REBOOTING,
+                                      task_states.REBOOT_PENDING,
+                                      task_states.REBOOT_STARTED,
+                                      task_states.REBOOTING_HARD,
+                                      task_states.RESUMING,
+                                      task_states.UNPAUSING,
+                                      task_states.PAUSING,
+                                      task_states.SUSPENDING])
     def reboot(self, context, instance, reboot_type):
         """Reboot the given instance."""
-        if reboot_type == 'SOFT':
-            self._soft_reboot(context, instance)
-        else:
-            self._hard_reboot(context, instance)
-
-    @check_instance_state(vm_state=set(vm_states.ALLOW_SOFT_REBOOT),
-                          task_state=[None])
-    def _soft_reboot(self, context, instance):
+        if (reboot_type == 'SOFT' and
+            (instance.vm_state not in vm_states.ALLOW_SOFT_REBOOT)):
+            raise exception.InstanceInvalidState(
+                attr='vm_state',
+                instance_uuid=instance.uuid,
+                state=instance.vm_state,
+                method='soft reboot')
+        if reboot_type == 'SOFT' and instance.task_state is not None:
+            raise exception.InstanceInvalidState(
+                attr='task_state',
+                instance_uuid=instance.uuid,
+                state=instance.task_state,
+                method='reboot')
         expected_task_state = [None]
-        instance.task_state = task_states.REBOOTING
+        if reboot_type == 'HARD':
+            expected_task_state.extend([task_states.REBOOTING,
+                                        task_states.REBOOT_PENDING,
+                                        task_states.REBOOT_STARTED,
+                                        task_states.REBOOTING_HARD,
+                                        task_states.RESUMING,
+                                        task_states.UNPAUSING,
+                                        task_states.SUSPENDING])
+        state = {'SOFT': task_states.REBOOTING,
+                 'HARD': task_states.REBOOTING_HARD}[reboot_type]
+        instance.task_state = state
         instance.save(expected_task_state=expected_task_state)
 
         self._record_action_start(context, instance, instance_actions.REBOOT)
 
         self.compute_rpcapi.reboot_instance(context, instance=instance,
                                             block_device_info=None,
-                                            reboot_type='SOFT')
-
-    @check_instance_state(vm_state=set(vm_states.ALLOW_HARD_REBOOT),
-                          task_state=task_states.ALLOW_REBOOT)
-    def _hard_reboot(self, context, instance):
-        instance.task_state = task_states.REBOOTING_HARD
-        expected_task_state = [None,
-                               task_states.REBOOTING,
-                               task_states.REBOOT_PENDING,
-                               task_states.REBOOT_STARTED,
-                               task_states.REBOOTING_HARD,
-                               task_states.RESUMING,
-                               task_states.UNPAUSING,
-                               task_states.SUSPENDING]
-        instance.save(expected_task_state = expected_task_state)
-
-        self._record_action_start(context, instance, instance_actions.REBOOT)
-
-        self.compute_rpcapi.reboot_instance(context, instance=instance,
-                                            block_device_info=None,
-                                            reboot_type='HARD')
+                                            reboot_type=reboot_type)
 
     @wrap_check_policy
     @check_instance_lock
@@ -2452,7 +2455,7 @@ class API(base.Base):
 
             orig_sys_metadata = dict(instance.system_metadata)
             # Remove the old keys
-            for key in list(instance.system_metadata.keys()):
+            for key in instance.system_metadata.keys():
                 if key.startswith(utils.SM_IMAGE_PROP_PREFIX):
                     del instance.system_metadata[key]
 
@@ -2621,7 +2624,7 @@ class API(base.Base):
         current_instance_type_name = current_instance_type['name']
         new_instance_type_name = new_instance_type['name']
         LOG.debug("Old instance type %(current_instance_type_name)s, "
-                  "new instance type %(new_instance_type_name)s",
+                  " new instance type %(new_instance_type_name)s",
                   {'current_instance_type_name': current_instance_type_name,
                    'new_instance_type_name': new_instance_type_name},
                   instance=instance)
@@ -2741,15 +2744,7 @@ class API(base.Base):
 
         self._record_action_start(context, instance, instance_actions.UNSHELVE)
 
-        try:
-            request_spec = objects.RequestSpec.get_by_instance_uuid(
-                context, instance.uuid)
-        except exception.RequestSpecNotFound:
-            # Some old instances can still have no RequestSpec object attached
-            # to them, we need to support the old way
-            request_spec = None
-        self.compute_task_api.unshelve_instance(context, instance,
-                                                request_spec)
+        self.compute_task_api.unshelve_instance(context, instance)
 
     @wrap_check_policy
     @check_instance_lock
@@ -3024,6 +3019,11 @@ class API(base.Base):
         instance.save()
 
     @wrap_check_policy
+    def get_lock(self, context, instance):
+        """Return the boolean state of given instance's lock."""
+        return self.get(context, instance.uuid)['locked']
+
+    @wrap_check_policy
     @check_instance_lock
     @check_instance_cell
     def reset_network(self, context, instance):
@@ -3037,38 +3037,6 @@ class API(base.Base):
         """Inject network info for the instance."""
         self.compute_rpcapi.inject_network_info(context, instance=instance)
 
-    def _create_volume_bdm(self, context, instance, device, volume_id,
-                           disk_bus, device_type, is_local_creation=False):
-        if is_local_creation:
-            # when the creation is done locally we can't specify the device
-            # name as we do not have a way to check that the name specified is
-            # a valid one.
-            # We leave the setting of that value when the actual attach
-            # happens on the compute manager
-            volume_bdm = objects.BlockDeviceMapping(
-                context=context,
-                source_type='volume', destination_type='volume',
-                instance_uuid=instance.uuid, boot_index=None,
-                volume_id=volume_id or 'reserved',
-                device_name=None, guest_format=None,
-                disk_bus=disk_bus, device_type=device_type)
-            volume_bdm.create()
-        else:
-            # NOTE(vish): This is done on the compute host because we want
-            #             to avoid a race where two devices are requested at
-            #             the same time. When db access is removed from
-            #             compute, the bdm will be created here and we will
-            #             have to make sure that they are assigned atomically.
-            volume_bdm = self.compute_rpcapi.reserve_block_device_name(
-                context, instance, device, volume_id, disk_bus=disk_bus,
-                device_type=device_type)
-        return volume_bdm
-
-    def _check_attach_and_reserve_volume(self, context, volume_id, instance):
-        volume = self.volume_api.get(context, volume_id)
-        self.volume_api.check_attach(context, volume, instance=instance)
-        self.volume_api.reserve_volume(context, volume_id)
-
     def _attach_volume(self, context, instance, volume_id, device,
                        disk_bus, device_type):
         """Attach an existing volume to an existing instance.
@@ -3076,40 +3044,19 @@ class API(base.Base):
         This method is separated to make it possible for cells version
         to override it.
         """
-        volume_bdm = self._create_volume_bdm(
+        # NOTE(vish): This is done on the compute host because we want
+        #             to avoid a race where two devices are requested at
+        #             the same time. When db access is removed from
+        #             compute, the bdm will be created here and we will
+        #             have to make sure that they are assigned atomically.
+        volume_bdm = self.compute_rpcapi.reserve_block_device_name(
             context, instance, device, volume_id, disk_bus=disk_bus,
             device_type=device_type)
         try:
-            self._check_attach_and_reserve_volume(context, volume_id, instance)
+            volume = self.volume_api.get(context, volume_id)
+            self.volume_api.check_attach(context, volume, instance=instance)
+            self.volume_api.reserve_volume(context, volume_id)
             self.compute_rpcapi.attach_volume(context, instance, volume_bdm)
-        except Exception:
-            with excutils.save_and_reraise_exception():
-                volume_bdm.destroy()
-
-        return volume_bdm.device_name
-
-    def _attach_volume_shelved_offloaded(self, context, instance, volume_id,
-                                         device, disk_bus, device_type):
-        """Attach an existing volume to an instance in shelved offloaded state.
-
-        Attaching a volume for an instance in shelved offloaded state requires
-        to perform the regular check to see if we can attach and reserve the
-        volume then we need to call the attach method on the volume API
-        to mark the volume as 'in-use'.
-        The instance at this stage is not managed by a compute manager
-        therefore the actual attachment will be performed once the
-        instance will be unshelved.
-        """
-
-        volume_bdm = self._create_volume_bdm(
-            context, instance, device, volume_id, disk_bus=disk_bus,
-            device_type=device_type, is_local_creation=True)
-        try:
-            self._check_attach_and_reserve_volume(context, volume_id, instance)
-            self.volume_api.attach(context,
-                                   volume_id,
-                                   instance.uuid,
-                                   device)
         except Exception:
             with excutils.save_and_reraise_exception():
                 volume_bdm.destroy()
@@ -3120,8 +3067,7 @@ class API(base.Base):
     @check_instance_lock
     @check_instance_state(vm_state=[vm_states.ACTIVE, vm_states.PAUSED,
                                     vm_states.STOPPED, vm_states.RESIZED,
-                                    vm_states.SOFT_DELETED, vm_states.SHELVED,
-                                    vm_states.SHELVED_OFFLOADED])
+                                    vm_states.SOFT_DELETED])
     def attach_volume(self, context, instance, volume_id, device=None,
                        disk_bus=None, device_type=None):
         """Attach an existing volume to an existing instance."""
@@ -3131,22 +3077,8 @@ class API(base.Base):
         #             a valid device.
         if device and not block_device.match_device(device):
             raise exception.InvalidDevicePath(path=device)
-
-        is_shelved_offloaded = instance.vm_state == vm_states.SHELVED_OFFLOADED
-        if is_shelved_offloaded:
-            return self._attach_volume_shelved_offloaded(context,
-                                                         instance,
-                                                         volume_id,
-                                                         device,
-                                                         disk_bus,
-                                                         device_type)
-
         return self._attach_volume(context, instance, volume_id, device,
                                    disk_bus, device_type)
-
-    def _check_and_begin_detach(self, context, volume, instance):
-        self.volume_api.check_detach(context, volume, instance=instance)
-        self.volume_api.begin_detaching(context, volume['id'])
 
     def _detach_volume(self, context, instance, volume):
         """Detach volume from instance.
@@ -3154,40 +3086,26 @@ class API(base.Base):
         This method is separated to make it easier for cells version
         to override.
         """
-        self._check_and_begin_detach(context, volume, instance)
-        attachments = volume.get('attachments', {})
-        attachment_id = None
-        if attachments and instance.uuid in attachments:
-            attachment_id = attachments[instance.uuid]['attachment_id']
+        self.volume_api.check_detach(context, volume)
+        self.volume_api.begin_detaching(context, volume['id'])
         self.compute_rpcapi.detach_volume(context, instance=instance,
-                volume_id=volume['id'], attachment_id=attachment_id)
-
-    def _detach_volume_shelved_offloaded(self, context, instance, volume):
-        """Detach a volume from an instance in shelved offloaded state.
-
-        If the instance is shelved offloaded we just need to cleanup volume
-        calling the volume api detach, the volume api terminte_connection
-        and delete the bdm record.
-        If the volume has delete_on_termination option set then we call the
-        volume api delete as well.
-        """
-        self._check_and_begin_detach(context, volume, instance)
-        bdms = [objects.BlockDeviceMapping.get_by_volume_id(
-                context, volume['id'], instance.uuid)]
-        self._local_cleanup_bdm_volumes(bdms, instance, context)
+                volume_id=volume['id'])
 
     @wrap_check_policy
     @check_instance_lock
     @check_instance_state(vm_state=[vm_states.ACTIVE, vm_states.PAUSED,
                                     vm_states.STOPPED, vm_states.RESIZED,
-                                    vm_states.SOFT_DELETED, vm_states.SHELVED,
-                                    vm_states.SHELVED_OFFLOADED])
+                                    vm_states.SOFT_DELETED])
     def detach_volume(self, context, instance, volume):
         """Detach a volume from an instance."""
-        if instance.vm_state == vm_states.SHELVED_OFFLOADED:
-            self._detach_volume_shelved_offloaded(context, instance, volume)
-        else:
-            self._detach_volume(context, instance, volume)
+        if volume['attach_status'] == 'detached':
+            msg = _("Volume must be attached in order to detach.")
+            raise exception.InvalidVolume(reason=msg)
+        # The caller likely got the instance from volume['instance_uuid']
+        # in the first place, but let's sanity check.
+        if volume['instance_uuid'] != instance.uuid:
+            raise exception.VolumeUnattached(volume_id=volume['id'])
+        self._detach_volume(context, instance, volume)
 
     @wrap_check_policy
     @check_instance_lock
@@ -3198,9 +3116,9 @@ class API(base.Base):
         """Swap volume attached to an instance."""
         if old_volume['attach_status'] == 'detached':
             raise exception.VolumeUnattached(volume_id=old_volume['id'])
-        # The caller likely got the instance from volume['attachments']
+        # The caller likely got the instance from volume['instance_uuid']
         # in the first place, but let's sanity check.
-        if not old_volume.get('attachments', {}).get(instance.uuid):
+        if old_volume['instance_uuid'] != instance.uuid:
             msg = _("Old volume is attached to a different instance.")
             raise exception.InvalidVolume(reason=msg)
         if new_volume['attach_status'] == 'attached':
@@ -3316,6 +3234,18 @@ class API(base.Base):
                                                      diff=diff)
         return _metadata
 
+    def get_instance_faults(self, context, instances):
+        """Get all faults for a list of instance uuids."""
+
+        if not instances:
+            return {}
+
+        for instance in instances:
+            check_policy(context, 'get_instance_faults', instance)
+
+        uuids = [instance.uuid for instance in instances]
+        return self.db.instance_fault_get_by_instance_uuids(context, uuids)
+
     def _get_root_bdm(self, context, instance, bdms=None):
         if bdms is None:
             bdms = objects.BlockDeviceMappingList.get_by_instance_uuid(
@@ -3324,12 +3254,13 @@ class API(base.Base):
         return bdms.root_bdm()
 
     def is_volume_backed_instance(self, context, instance, bdms=None):
+        if not instance.image_ref:
+            return True
+
         root_bdm = self._get_root_bdm(context, instance, bdms)
-        if root_bdm is not None:
-            return root_bdm.is_volume
-        # in case we hit a very old instance without root bdm, we _assume_ that
-        # instance is backed by a volume, if and only if image_ref is not set
-        return not instance.image_ref
+        if not root_bdm:
+            return False
+        return root_bdm.is_volume
 
     @check_instance_lock
     @check_instance_cell
@@ -3345,76 +3276,10 @@ class API(base.Base):
 
         self._record_action_start(context, instance,
                                   instance_actions.LIVE_MIGRATION)
-        try:
-            request_spec = objects.RequestSpec.get_by_instance_uuid(
-                context, instance.uuid)
-        except exception.RequestSpecNotFound:
-            # Some old instances can still have no RequestSpec object attached
-            # to them, we need to support the old way
-            request_spec = None
+
         self.compute_task_api.live_migrate_instance(context, instance,
                 host_name, block_migration=block_migration,
-                disk_over_commit=disk_over_commit,
-                request_spec=request_spec)
-
-    @check_instance_lock
-    @check_instance_cell
-    @check_instance_state(vm_state=[vm_states.ACTIVE],
-                          task_state=[task_states.MIGRATING])
-    def live_migrate_force_complete(self, context, instance, migration_id):
-        """Force live migration to complete.
-
-        :param context: Security context
-        :param instance: The instance that is being migrated
-        :param migration_id: ID of ongoing migration
-
-        """
-        LOG.debug("Going to try to force live migration to complete",
-                  instance=instance)
-
-        # NOTE(pkoniszewski): Get migration object to check if there is ongoing
-        # live migration for particular instance. Also pass migration id to
-        # compute to double check and avoid possible race condition.
-        migration = objects.Migration.get_by_id_and_instance(
-            context, migration_id, instance.uuid)
-        if migration.status != 'running':
-            raise exception.InvalidMigrationState(migration_id=migration_id,
-                                                  instance_uuid=instance.uuid,
-                                                  state=migration.status,
-                                                  method='force complete')
-
-        self._record_action_start(
-            context, instance, instance_actions.LIVE_MIGRATION_FORCE_COMPLETE)
-
-        self.compute_rpcapi.live_migration_force_complete(
-            context, instance, migration.id)
-
-    @check_instance_lock
-    @check_instance_cell
-    @check_instance_state(task_state=[task_states.MIGRATING])
-    def live_migrate_abort(self, context, instance, migration_id):
-        """Abort an in-progress live migration.
-
-        :param context: Security context
-        :param instance: The instance that is being migrated
-        :param migration_id: ID of in-progress live migration
-
-        """
-        migration = objects.Migration.get_by_id_and_instance(context,
-                    migration_id, instance.uuid)
-        LOG.debug("Going to cancel live migration %s",
-                  migration.id, instance=instance)
-
-        if migration.status != 'running':
-            raise exception.InvalidMigrationState(migration_id=migration_id,
-                    instance_uuid=instance.uuid,
-                    state=migration.status,
-                    method='abort live migration')
-        self._record_action_start(context, instance,
-                                  instance_actions.LIVE_MIGRATION_CANCEL)
-
-        self.compute_rpcapi.live_migration_abort(context,
-                instance, migration.id)
+                disk_over_commit=disk_over_commit)
 
     @check_instance_state(vm_state=[vm_states.ACTIVE, vm_states.STOPPED,
                                     vm_states.ERROR])
@@ -3458,13 +3323,6 @@ class API(base.Base):
         compute_utils.notify_about_instance_usage(
             self.notifier, context, instance, "evacuate")
 
-        try:
-            request_spec = objects.RequestSpec.get_by_instance_uuid(
-                context, instance.uuid)
-        except exception.RequestSpecNotFound:
-            # Some old instances can still have no RequestSpec object attached
-            # to them, we need to support the old way
-            request_spec = None
         return self.compute_task_api.rebuild_instance(context,
                        instance=instance,
                        new_pass=admin_password,
@@ -3475,29 +3333,15 @@ class API(base.Base):
                        bdms=None,
                        recreate=True,
                        on_shared_storage=on_shared_storage,
-                       host=host,
-                       request_spec=request_spec,
-                       )
+                       host=host)
 
     def get_migrations(self, context, filters):
         """Get all migrations for the given filters."""
         return objects.MigrationList.get_by_filters(context, filters)
 
-    def get_migrations_in_progress_by_instance(self, context, instance_uuid,
-                                               migration_type=None):
-        """Get all migrations of an instance in progress."""
-        return objects.MigrationList.get_in_progress_by_instance(
-                context, instance_uuid, migration_type)
-
-    def get_migration_by_id_and_instance(self, context,
-                                         migration_id, instance_uuid):
-        """Get the migration of an instance by id."""
-        return objects.Migration.get_by_id_and_instance(
-                context, migration_id, instance_uuid)
-
     @wrap_check_policy
     def volume_snapshot_create(self, context, volume_id, create_info):
-        bdm = objects.BlockDeviceMapping.get_by_volume(
+        bdm = objects.BlockDeviceMapping.get_by_volume_id(
                 context, volume_id, expected_attrs=['instance'])
         self.compute_rpcapi.volume_snapshot_create(context, bdm.instance,
                 volume_id, create_info)
@@ -3512,7 +3356,7 @@ class API(base.Base):
     @wrap_check_policy
     def volume_snapshot_delete(self, context, volume_id, snapshot_id,
                                delete_info):
-        bdm = objects.BlockDeviceMapping.get_by_volume(
+        bdm = objects.BlockDeviceMapping.get_by_volume_id(
                 context, volume_id, expected_attrs=['instance'])
         self.compute_rpcapi.volume_snapshot_delete(context, bdm.instance,
                 volume_id, snapshot_id, delete_info)
@@ -3543,40 +3387,6 @@ class API(base.Base):
             # will not prevent processing events on other hosts
             self.compute_rpcapi.external_instance_event(
                 context, instances_by_host[host], events_by_host[host])
-
-    def get_instance_host_status(self, instance):
-        if instance.host:
-            try:
-                service = [service for service in instance.services if
-                           service.binary == 'nova-compute'][0]
-                if service.forced_down:
-                    host_status = fields_obj.HostStatus.DOWN
-                elif service.disabled:
-                    host_status = fields_obj.HostStatus.MAINTENANCE
-                else:
-                    alive = self.servicegroup_api.service_is_up(service)
-                    host_status = ((alive and fields_obj.HostStatus.UP) or
-                                   fields_obj.HostStatus.UNKNOWN)
-            except IndexError:
-                host_status = fields_obj.HostStatus.NONE
-        else:
-            host_status = fields_obj.HostStatus.NONE
-        return host_status
-
-    def get_instances_host_statuses(self, instance_list):
-        host_status_dict = dict()
-        host_statuses = dict()
-        for instance in instance_list:
-            if instance.host:
-                if instance.host not in host_status_dict:
-                    host_status = self.get_instance_host_status(instance)
-                    host_status_dict[instance.host] = host_status
-                else:
-                    host_status = host_status_dict[instance.host]
-            else:
-                host_status = fields_obj.HostStatus.NONE
-            host_statuses[instance.uuid] = host_status
-        return host_statuses
 
 
 class HostAPI(base.Base):
@@ -3785,7 +3595,6 @@ class AggregateAPI(base.Base):
                                   action_name=AGGREGATE_ACTION_UPDATE)
         if values:
             aggregate.update_metadata(values)
-            aggregate.updated_at = timeutils.utcnow()
         self.scheduler_client.update_aggregates(context, [aggregate])
         # If updated values include availability_zones, then the cache
         # which stored availability_zones and host need to be reset
@@ -3805,7 +3614,6 @@ class AggregateAPI(base.Base):
         # which stored availability_zones and host need to be reset
         if metadata and metadata.get('availability_zone'):
             availability_zones.reset_cache()
-        aggregate.updated_at = timeutils.utcnow()
         return aggregate
 
     @wrap_exception()
@@ -3840,11 +3648,6 @@ class AggregateAPI(base.Base):
 
         """
         if 'availability_zone' in metadata:
-            if not metadata['availability_zone']:
-                msg = _("Aggregate %s does not support empty named "
-                        "availability zone") % aggregate.name
-                self._raise_invalid_aggregate_exc(action_name, aggregate.id,
-                                                  msg)
             _hosts = hosts or aggregate.hosts
             host_aggregates = objects.AggregateList.get_by_metadata_key(
                 context, 'availability_zone', hosts=_hosts)
@@ -3904,7 +3707,7 @@ class AggregateAPI(base.Base):
         # NOTE(jogo): Send message to host to support resource pools
         self.compute_rpcapi.add_aggregate_host(context,
                 aggregate=aggregate, host_param=host_name, host=host_name)
-        aggregate_payload.update({'name': aggregate.name})
+        aggregate_payload.update({'name': aggregate['name']})
         compute_utils.notify_about_aggregate_update(context,
                                                     "addhost.end",
                                                     aggregate_payload)
@@ -4248,9 +4051,10 @@ class SecurityGroupAPI(base.Base, security_group_base.SecurityGroupBase):
         self.db.instance_add_security_group(context.elevated(),
                                             instance_uuid,
                                             security_group['id'])
-        if instance.host:
-            self.compute_rpcapi.refresh_instance_security_rules(
-                    context, instance.host, instance)
+        # NOTE(comstud): No instance_uuid argument to this compute manager
+        # call
+        self.compute_rpcapi.refresh_security_group_rules(context,
+                security_group['id'], host=instance.host)
 
     @wrap_check_security_groups_policy
     def remove_from_instance(self, context, instance, security_group_name):
@@ -4270,9 +4074,10 @@ class SecurityGroupAPI(base.Base, security_group_base.SecurityGroupBase):
         self.db.instance_remove_security_group(context.elevated(),
                                                instance_uuid,
                                                security_group['id'])
-        if instance.host:
-            self.compute_rpcapi.refresh_instance_security_rules(
-                    context, instance.host, instance)
+        # NOTE(comstud): No instance_uuid argument to this compute manager
+        # call
+        self.compute_rpcapi.refresh_security_group_rules(context,
+                security_group['id'], host=instance.host)
 
     def get_rule(self, context, id):
         self.ensure_default(context)
@@ -4389,14 +4194,18 @@ class SecurityGroupAPI(base.Base, security_group_base.SecurityGroupBase):
             context, group_ids)
         self._refresh_instance_security_rules(context, instances)
 
-    def get_instance_security_groups(self, context, instance, detailed=False):
+    def get_instance_security_groups(self, context, instance_uuid,
+                                     detailed=False):
         if detailed:
             return self.db.security_group_get_by_instance(context,
-                                                          instance.uuid)
-        return [{'name': group.name} for group in instance.security_groups]
+                                                          instance_uuid)
+        instance = objects.Instance(uuid=instance_uuid)
+        groups = objects.SecurityGroupList.get_by_instance(context, instance)
+        return [{'name': group.name} for group in groups]
 
-    def populate_security_groups(self, security_groups):
+    def populate_security_groups(self, instance, security_groups):
         if not security_groups:
-            # Make sure it's an empty SecurityGroupList and not None
-            return objects.SecurityGroupList()
-        return security_group_obj.make_secgroup_list(security_groups)
+            # Make sure it's an empty list and not None
+            security_groups = []
+        instance.security_groups = security_group_obj.make_secgroup_list(
+            security_groups)

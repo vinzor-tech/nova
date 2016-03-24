@@ -14,6 +14,7 @@
 #    under the License.
 
 import datetime
+import uuid
 
 from oslo_config import cfg
 import webob
@@ -27,6 +28,7 @@ from nova.api.openstack.compute import servers as servers_v21
 from nova.api.openstack import extensions as extensions_v20
 from nova.compute import api as compute_api
 from nova.compute import flavors
+from nova import db
 from nova import exception
 from nova.network import manager
 from nova import test
@@ -35,6 +37,11 @@ from nova.tests.unit import fake_instance
 from nova.tests.unit.image import fake
 
 CONF = cfg.CONF
+FAKE_UUID = fakes.FAKE_UUID
+
+
+def fake_gen_uuid():
+    return FAKE_UUID
 
 
 def return_security_group(context, instance_id, security_group_id):
@@ -70,7 +77,7 @@ class MultiCreateExtensionTestV21(test.TestCase):
             instance = fake_instance.fake_db_instance(**{
                 'id': self.instance_cache_num,
                 'display_name': inst['display_name'] or 'test',
-                'uuid': inst['uuid'],
+                'uuid': FAKE_UUID,
                 'instance_type': inst_type,
                 'access_ip_v4': '1.2.3.4',
                 'access_ip_v6': 'fead::1234',
@@ -116,17 +123,20 @@ class MultiCreateExtensionTestV21(test.TestCase):
 
         fakes.stub_out_rate_limiting(self.stubs)
         fakes.stub_out_key_pair_funcs(self.stubs)
-        fake.stub_out_image_service(self)
-        fakes.stub_out_nw_api(self)
-        self.stub_out('nova.db.instance_add_security_group',
-                      return_security_group)
-        self.stub_out('nova.db.project_get_networks', project_get_networks)
-        self.stub_out('nova.db.instance_create', instance_create)
-        self.stub_out('nova.db.instance_system_metadata_update', fake_method)
-        self.stub_out('nova.db.instance_get', instance_get)
-        self.stub_out('nova.db.instance_update', instance_update)
-        self.stub_out('nova.db.instance_update_and_get_original',
-                      server_update)
+        fake.stub_out_image_service(self.stubs)
+        fakes.stub_out_nw_api(self.stubs)
+        self.stubs.Set(uuid, 'uuid4', fake_gen_uuid)
+        self.stubs.Set(db, 'instance_add_security_group',
+                       return_security_group)
+        self.stubs.Set(db, 'project_get_networks',
+                       project_get_networks)
+        self.stubs.Set(db, 'instance_create', instance_create)
+        self.stubs.Set(db, 'instance_system_metadata_update',
+                       fake_method)
+        self.stubs.Set(db, 'instance_get', instance_get)
+        self.stubs.Set(db, 'instance_update', instance_update)
+        self.stubs.Set(db, 'instance_update_and_get_original',
+                       server_update)
         self.stubs.Set(manager.VlanManager, 'allocate_fixed_ip',
                        fake_method)
         self.req = fakes.HTTPRequest.blank('')
@@ -347,8 +357,7 @@ class MultiCreateExtensionTestV21(test.TestCase):
 
         res = self.controller.create(self.req, body=body).obj
 
-        instance_uuids = self.instance_cache_by_uuid.keys()
-        self.assertIn(res["server"]["id"], instance_uuids)
+        self.assertEqual(FAKE_UUID, res["server"]["id"])
         self._check_admin_password_len(res["server"])
 
     def test_create_multiple_instances_pass_disabled(self):
@@ -371,8 +380,7 @@ class MultiCreateExtensionTestV21(test.TestCase):
 
         res = self.controller.create(self.req, body=body).obj
 
-        instance_uuids = self.instance_cache_by_uuid.keys()
-        self.assertIn(res["server"]["id"], instance_uuids)
+        self.assertEqual(FAKE_UUID, res["server"]["id"])
         self._check_admin_password_missing(res["server"])
 
     def _check_admin_password_len(self, server_dict):
@@ -511,7 +519,7 @@ class MultiCreateExtensionTestV2(MultiCreateExtensionTestV21):
         self.instance_cache_by_id = {}
         self.instance_cache_by_uuid = {}
 
-        fakes.stub_out_nw_api(self)
+        fakes.stub_out_nw_api(self.stubs)
 
         self.ext_mgr = extensions_v20.ExtensionManager()
         self.ext_mgr.extensions = {
@@ -537,7 +545,7 @@ class MultiCreateExtensionTestV2(MultiCreateExtensionTestV21):
             instance = fake_instance.fake_db_instance(**{
                 'id': self.instance_cache_num,
                 'display_name': inst['display_name'] or 'test',
-                'uuid': inst['uuid'],
+                'uuid': FAKE_UUID,
                 'instance_type': inst_type,
                 'access_ip_v4': '1.2.3.4',
                 'access_ip_v6': 'fead::1234',
@@ -568,9 +576,10 @@ class MultiCreateExtensionTestV2(MultiCreateExtensionTestV21):
 
         fakes.stub_out_rate_limiting(self.stubs)
         fakes.stub_out_key_pair_funcs(self.stubs)
-        fake.stub_out_image_service(self)
-        self.stub_out('nova.db.instance_create', instance_create)
-        self.stub_out('nova.db.instance_get', instance_get)
+        fake.stub_out_image_service(self.stubs)
+        self.stubs.Set(uuid, 'uuid4', fake_gen_uuid)
+        self.stubs.Set(db, 'instance_create', instance_create)
+        self.stubs.Set(db, 'instance_get', instance_get)
 
     def _check_multiple_create_extension_disabled(self, **kwargs):
         self.assertEqual(kwargs['min_count'], 1)
