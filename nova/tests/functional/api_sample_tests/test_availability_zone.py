@@ -12,12 +12,10 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from oslo_config import cfg
-
+import nova.conf
 from nova.tests.functional.api_sample_tests import test_servers
 
-CONF = cfg.CONF
-CONF.import_opt('manager', 'nova.cells.opts', group='cells')
+CONF = nova.conf.CONF
 CONF.import_opt('osapi_compute_extension',
                 'nova.api.openstack.compute.legacy_v2.extensions')
 
@@ -34,26 +32,13 @@ class AvailabilityZoneJsonTest(test_servers.ServersSampleBase):
             'Availability_zone')
         return f
 
-    def _setup_services(self):
-        self.conductor = self.start_service('conductor',
-            host='conductor', manager=CONF.conductor.manager)
-        self.compute = self.start_service('compute', host='compute')
-        self.cert = self.start_service('cert', host='cert')
-        self.consoleauth = self.start_service('consoleauth',
-                                              host='consoleauth')
-        self.network = self.start_service('network', host='network')
-        self.scheduler = self.start_service('scheduler', host='scheduler')
-        self.cells = self.start_service('cells', host='cells',
-                                        manager=CONF.cells.manager)
-
     def test_availability_zone_list(self):
         response = self._do_get('os-availability-zone')
         self._verify_response('availability-zone-list-resp', {}, response, 200)
 
     def test_availability_zone_detail(self):
         response = self._do_get('os-availability-zone/detail')
-        subs = self._get_regexes()
-        self._verify_response('availability-zone-detail-resp', subs, response,
+        self._verify_response('availability-zone-detail-resp', {}, response,
                               200)
 
     def test_availability_zone_post(self):

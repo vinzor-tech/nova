@@ -16,7 +16,6 @@
 
 """The cells extension."""
 
-from oslo_config import cfg
 import oslo_messaging as messaging
 from oslo_utils import strutils
 import six
@@ -28,14 +27,13 @@ from nova.api.openstack import extensions
 from nova.api.openstack import wsgi
 from nova.api import validation
 from nova.cells import rpcapi as cells_rpcapi
+import nova.conf
 from nova import exception
 from nova.i18n import _
 from nova import rpc
 
 
-CONF = cfg.CONF
-CONF.import_opt('name', 'nova.cells.opts', group='cells')
-CONF.import_opt('capabilities', 'nova.cells.opts', group='cells')
+CONF = nova.conf.CONF
 
 ALIAS = "os-cells"
 authorize = extensions.os_compute_authorizer(ALIAS)
@@ -194,6 +192,9 @@ class CellsController(wsgi.Controller):
         * Merging existing transport URL with transport information.
         """
 
+        if 'name' in cell:
+            cell['name'] = common.normalize_name(cell['name'])
+
         # Start with the cell type conversion
         if 'type' in cell:
             cell['is_parent'] = cell['type'] == 'parent'
@@ -236,7 +237,8 @@ class CellsController(wsgi.Controller):
     # returning a response.
     @extensions.expected_errors((400, 403, 501))
     @common.check_cells_enabled
-    @validation.schema(cells.create)
+    @validation.schema(cells.create_v20, '2.0', '2.0')
+    @validation.schema(cells.create, '2.1')
     def create(self, req, body):
         """Create a child cell entry."""
         context = req.environ['nova.context']
@@ -253,7 +255,8 @@ class CellsController(wsgi.Controller):
 
     @extensions.expected_errors((400, 403, 404, 501))
     @common.check_cells_enabled
-    @validation.schema(cells.update)
+    @validation.schema(cells.update_v20, '2.0', '2.0')
+    @validation.schema(cells.update, '2.1')
     def update(self, req, id, body):
         """Update a child cell entry.  'id' is the cell name to update."""
         context = req.environ['nova.context']

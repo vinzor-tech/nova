@@ -16,18 +16,18 @@
 import copy
 import uuid
 
+from oslo_policy import policy as oslo_policy
 import six
 from webob import exc
 
 from nova.api.openstack.compute import instance_actions as instance_actions_v21
 from nova.api.openstack.compute.legacy_v2.contrib import instance_actions \
         as instance_actions_v2
+from nova.api.openstack import wsgi as os_wsgi
 from nova.compute import api as compute_api
-from nova import db
 from nova.db.sqlalchemy import models
 from nova import exception
 from nova import objects
-from nova.openstack.common import policy as common_policy
 from nova import policy
 from nova import test
 from nova.tests.unit.api.openstack import fakes
@@ -81,10 +81,10 @@ class InstanceActionsPolicyTestV21(test.NoDBTestCase):
         return fakes.HTTPRequest.blank(fake_url)
 
     def _set_policy_rules(self):
-        rules = {'compute:get': common_policy.parse_rule(''),
+        rules = {'compute:get': '',
                  'os_compute_api:os-instance-actions':
-                     common_policy.parse_rule('project_id:%(project_id)s')}
-        policy.set_rules(rules)
+                     'project_id:%(project_id)s'}
+        policy.set_rules(oslo_policy.Rules.from_dict(rules))
 
     def test_list_actions_restricted_by_project(self):
         self._set_policy_rules()
@@ -96,7 +96,8 @@ class InstanceActionsPolicyTestV21(test.NoDBTestCase):
                 **{'name': 'fake', 'project_id': '%s_unequal' %
                        context.project_id})
 
-        self.stubs.Set(db, 'instance_get_by_uuid', fake_instance_get_by_uuid)
+        self.stub_out('nova.db.instance_get_by_uuid',
+                      fake_instance_get_by_uuid)
         req = self._get_http_req('os-instance-actions')
         self.assertRaises(exception.Forbidden, self.controller.index, req,
                           str(uuid.uuid4()))
@@ -111,7 +112,8 @@ class InstanceActionsPolicyTestV21(test.NoDBTestCase):
                 **{'name': 'fake', 'project_id': '%s_unequal' %
                        context.project_id})
 
-        self.stubs.Set(db, 'instance_get_by_uuid', fake_instance_get_by_uuid)
+        self.stub_out('nova.db.instance_get_by_uuid',
+                      fake_instance_get_by_uuid)
         req = self._get_http_req('os-instance-actions/1')
         self.assertRaises(exception.Forbidden, self.controller.show, req,
                           str(uuid.uuid4()), '1')
@@ -121,14 +123,19 @@ class InstanceActionsPolicyTestV2(InstanceActionsPolicyTestV21):
     instance_actions = instance_actions_v2
 
     def _set_policy_rules(self):
-        rules = {'compute:get': common_policy.parse_rule(''),
+        rules = {'compute:get': '',
                  'compute_extension:instance_actions':
-                     common_policy.parse_rule('project_id:%(project_id)s')}
-        policy.set_rules(rules)
+                     'project_id:%(project_id)s'}
+        policy.set_rules(oslo_policy.Rules.from_dict(rules))
 
 
 class InstanceActionsTestV21(test.NoDBTestCase):
     instance_actions = instance_actions_v21
+    wsgi_api_version = os_wsgi.DEFAULT_API_VERSION
+
+    def fake_get(self, context, instance_uuid, expected_attrs=None,
+                     want_objects=False):
+        return objects.Instance(uuid=instance_uuid)
 
     def setUp(self):
         super(InstanceActionsTestV21, self).setUp()
@@ -136,29 +143,25 @@ class InstanceActionsTestV21(test.NoDBTestCase):
         self.fake_actions = copy.deepcopy(fake_server_actions.FAKE_ACTIONS)
         self.fake_events = copy.deepcopy(fake_server_actions.FAKE_EVENTS)
 
-        def fake_get(self, context, instance_uuid, expected_attrs=None,
-                     want_objects=False):
-            return objects.Instance(uuid=instance_uuid)
-
         def fake_instance_get_by_uuid(context, instance_id, use_slave=False):
             return fake_instance.fake_instance_obj(None,
                 **{'name': 'fake', 'project_id': context.project_id})
 
-        self.stubs.Set(compute_api.API, 'get', fake_get)
-        self.stubs.Set(db, 'instance_get_by_uuid', fake_instance_get_by_uuid)
+        self.stubs.Set(compute_api.API, 'get', self.fake_get)
+        self.stub_out('nova.db.instance_get_by_uuid',
+                      fake_instance_get_by_uuid)
 
     def _get_http_req(self, action, use_admin_context=False):
         fake_url = '/123/servers/12/%s' % action
         return fakes.HTTPRequest.blank(fake_url,
-                                        use_admin_context=use_admin_context)
+                                       use_admin_context=use_admin_context,
+                                       version=self.wsgi_api_version)
 
     def _set_policy_rules(self):
-        rules = {'compute:get': common_policy.parse_rule(''),
-                 'os_compute_api:os-instance-actions':
-                     common_policy.parse_rule(''),
-                 'os_compute_api:os-instance-actions:events':
-                     common_policy.parse_rule('is_admin:True')}
-        policy.set_rules(rules)
+        rules = {'compute:get': '',
+                 'os_compute_api:os-instance-actions': '',
+                 'os_compute_api:os-instance-actions:events': 'is_admin:True'}
+        policy.set_rules(oslo_policy.Rules.from_dict(rules))
 
     def test_list_actions(self):
         def fake_get_actions(context, uuid):
@@ -169,7 +172,7 @@ class InstanceActionsTestV21(test.NoDBTestCase):
                 actions.append(action)
             return actions
 
-        self.stubs.Set(db, 'actions_get', fake_get_actions)
+        self.stub_out('nova.db.actions_get', fake_get_actions)
         req = self._get_http_req('os-instance-actions')
         res_dict = self.controller.index(req, FAKE_UUID)
         for res in res_dict['instanceActions']:
@@ -190,8 +193,8 @@ class InstanceActionsTestV21(test.NoDBTestCase):
                 events.append(event)
             return events
 
-        self.stubs.Set(db, 'action_get_by_request_id', fake_get_action)
-        self.stubs.Set(db, 'action_events_get', fake_get_events)
+        self.stub_out('nova.db.action_get_by_request_id', fake_get_action)
+        self.stub_out('nova.db.action_events_get', fake_get_events)
         req = self._get_http_req('os-instance-actions/1',
                                 use_admin_context=True)
         res_dict = self.controller.show(req, FAKE_UUID, FAKE_REQUEST_ID)
@@ -208,8 +211,8 @@ class InstanceActionsTestV21(test.NoDBTestCase):
         def fake_get_events(context, action_id):
             return self.fake_events[action_id]
 
-        self.stubs.Set(db, 'action_get_by_request_id', fake_get_action)
-        self.stubs.Set(db, 'action_events_get', fake_get_events)
+        self.stub_out('nova.db.action_get_by_request_id', fake_get_action)
+        self.stub_out('nova.db.action_events_get', fake_get_events)
 
         self._set_policy_rules()
         req = self._get_http_req('os-instance-actions/1')
@@ -222,7 +225,7 @@ class InstanceActionsTestV21(test.NoDBTestCase):
         def fake_no_action(context, uuid, action_id):
             return None
 
-        self.stubs.Set(db, 'action_get_by_request_id', fake_no_action)
+        self.stub_out('nova.db.action_get_by_request_id', fake_no_action)
         req = self._get_http_req('os-instance-actions/1')
         self.assertRaises(exc.HTTPNotFound, self.controller.show, req,
                           FAKE_UUID, FAKE_REQUEST_ID)
@@ -246,13 +249,20 @@ class InstanceActionsTestV21(test.NoDBTestCase):
                           FAKE_UUID, 'fake')
 
 
+class InstanceActionsTestV221(InstanceActionsTestV21):
+    wsgi_api_version = "2.21"
+
+    def fake_get(self, context, instance_uuid, expected_attrs=None,
+                 want_objects=False):
+        self.assertEqual('yes', context.read_deleted)
+        return objects.Instance(uuid=instance_uuid)
+
+
 class InstanceActionsTestV2(InstanceActionsTestV21):
     instance_actions = instance_actions_v2
 
     def _set_policy_rules(self):
-        rules = {'compute:get': common_policy.parse_rule(''),
-                 'compute_extension:instance_actions':
-                     common_policy.parse_rule(''),
-                 'compute_extension:instance_actions:events':
-                     common_policy.parse_rule('is_admin:True')}
-        policy.set_rules(rules)
+        rules = {'compute:get': '',
+                 'compute_extension:instance_actions': '',
+                 'compute_extension:instance_actions:events': 'is_admin:True'}
+        policy.set_rules(oslo_policy.Rules.from_dict(rules))

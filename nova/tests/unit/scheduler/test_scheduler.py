@@ -20,27 +20,88 @@ Tests For Scheduler
 import mock
 
 from nova import context
-from nova import db
+from nova import objects
+from nova.scheduler import caching_scheduler
+from nova.scheduler import chance
 from nova.scheduler import driver
+from nova.scheduler import filter_scheduler
 from nova.scheduler import host_manager
+from nova.scheduler import ironic_host_manager
 from nova.scheduler import manager
 from nova import servicegroup
 from nova import test
 from nova.tests.unit import fake_server_actions
+from nova.tests.unit.scheduler import fakes
+
+
+class SchedulerManagerInitTestCase(test.NoDBTestCase):
+    """Test case for scheduler manager initiation."""
+    manager_cls = manager.SchedulerManager
+
+    @mock.patch.object(host_manager.HostManager, '_init_instance_info')
+    @mock.patch.object(host_manager.HostManager, '_init_aggregates')
+    def test_init_using_default_schedulerdriver(self,
+                                                mock_init_agg,
+                                                mock_init_inst):
+        driver = self.manager_cls().driver
+        self.assertIsInstance(driver, filter_scheduler.FilterScheduler)
+
+    @mock.patch.object(host_manager.HostManager, '_init_instance_info')
+    @mock.patch.object(host_manager.HostManager, '_init_aggregates')
+    def test_init_using_chance_schedulerdriver(self,
+                                               mock_init_agg,
+                                               mock_init_inst):
+        self.flags(scheduler_driver='chance_scheduler')
+        driver = self.manager_cls().driver
+        self.assertIsInstance(driver, chance.ChanceScheduler)
+
+    @mock.patch.object(host_manager.HostManager, '_init_instance_info')
+    @mock.patch.object(host_manager.HostManager, '_init_aggregates')
+    def test_init_using_caching_schedulerdriver(self,
+                                                mock_init_agg,
+                                                mock_init_inst):
+        self.flags(scheduler_driver='caching_scheduler')
+        driver = self.manager_cls().driver
+        self.assertIsInstance(driver, caching_scheduler.CachingScheduler)
+
+    @mock.patch.object(host_manager.HostManager, '_init_instance_info')
+    @mock.patch.object(host_manager.HostManager, '_init_aggregates')
+    def test_init_nonexist_schedulerdriver(self,
+                                           mock_init_agg,
+                                           mock_init_inst):
+        self.flags(scheduler_driver='nonexist_scheduler')
+        self.assertRaises(RuntimeError, self.manager_cls)
+
+    # NOTE(Yingxin): Loading full class path is deprecated and should be
+    # removed in the N release.
+    @mock.patch.object(manager.LOG, 'warning')
+    @mock.patch.object(host_manager.HostManager, '_init_instance_info')
+    @mock.patch.object(host_manager.HostManager, '_init_aggregates')
+    def test_init_using_classpath_to_schedulerdriver(self,
+                                                     mock_init_agg,
+                                                     mock_init_inst,
+                                                     mock_warning):
+        self.flags(
+            scheduler_driver=
+            'nova.scheduler.chance.ChanceScheduler')
+        driver = self.manager_cls().driver
+        self.assertIsInstance(driver, chance.ChanceScheduler)
+        warn_args, kwargs = mock_warning.call_args
+        self.assertIn("DEPRECATED", warn_args[0])
 
 
 class SchedulerManagerTestCase(test.NoDBTestCase):
     """Test case for scheduler manager."""
 
     manager_cls = manager.SchedulerManager
-    driver_cls = driver.Scheduler
-    driver_cls_name = 'nova.scheduler.driver.Scheduler'
+    driver_cls = fakes.FakeScheduler
+    driver_plugin_name = 'fake_scheduler'
 
     @mock.patch.object(host_manager.HostManager, '_init_instance_info')
     @mock.patch.object(host_manager.HostManager, '_init_aggregates')
     def setUp(self, mock_init_agg, mock_init_inst):
         super(SchedulerManagerTestCase, self).setUp()
-        self.flags(scheduler_driver=self.driver_cls_name)
+        self.flags(scheduler_driver=self.driver_plugin_name)
         with mock.patch.object(host_manager.HostManager, '_init_aggregates'):
             self.manager = self.manager_cls()
         self.context = context.RequestContext('fake_user', 'fake_project')
@@ -55,10 +116,22 @@ class SchedulerManagerTestCase(test.NoDBTestCase):
         self.assertIsInstance(manager.driver, self.driver_cls)
 
     def test_select_destination(self):
+        fake_spec = objects.RequestSpec()
         with mock.patch.object(self.manager.driver, 'select_destinations'
                 ) as select_destinations:
-            self.manager.select_destinations(None, None, {})
-            select_destinations.assert_called_once_with(None, None, {})
+            self.manager.select_destinations(None, spec_obj=fake_spec)
+            select_destinations.assert_called_once_with(None, fake_spec)
+
+    # TODO(sbauza): Remove that test once the API v4 is removed
+    @mock.patch.object(objects.RequestSpec, 'from_primitives')
+    def test_select_destination_with_old_client(self, from_primitives):
+        fake_spec = objects.RequestSpec()
+        from_primitives.return_value = fake_spec
+        with mock.patch.object(self.manager.driver, 'select_destinations'
+                ) as select_destinations:
+            self.manager.select_destinations(None, request_spec='fake_spec',
+                                             filter_properties='fake_props')
+            select_destinations.assert_called_once_with(None, fake_spec)
 
     def test_update_aggregates(self):
         with mock.patch.object(self.manager.driver.host_manager,
@@ -105,27 +178,59 @@ class SchedulerManagerTestCase(test.NoDBTestCase):
                                               mock.sentinel.instance_uuids)
 
 
-class SchedulerV21PassthroughTestCase(test.NoDBTestCase):
+class SchedulerInitTestCase(test.NoDBTestCase):
+    """Test case for base scheduler driver initiation."""
+
+    driver_cls = fakes.FakeScheduler
 
     @mock.patch.object(host_manager.HostManager, '_init_instance_info')
     @mock.patch.object(host_manager.HostManager, '_init_aggregates')
-    def setUp(self, mock_init_agg, mock_init_inst):
-        super(SchedulerV21PassthroughTestCase, self).setUp()
-        self.manager = manager.SchedulerManager()
-        self.proxy = manager._SchedulerManagerV3Proxy(self.manager)
+    def test_init_using_default_hostmanager(self,
+                                            mock_init_agg,
+                                            mock_init_inst):
+        manager = self.driver_cls().host_manager
+        self.assertIsInstance(manager, host_manager.HostManager)
 
-    def test_select_destination(self):
-        with mock.patch.object(self.manager, 'select_destinations'
-                ) as select_destinations:
-            self.proxy.select_destinations(None, None, {})
-            select_destinations.assert_called_once_with(None, None, {})
+    @mock.patch.object(host_manager.HostManager, '_init_instance_info')
+    @mock.patch.object(host_manager.HostManager, '_init_aggregates')
+    def test_init_using_ironic_hostmanager(self,
+                                           mock_init_agg,
+                                           mock_init_inst):
+        self.flags(scheduler_host_manager='ironic_host_manager')
+        manager = self.driver_cls().host_manager
+        self.assertIsInstance(manager, ironic_host_manager.IronicHostManager)
+
+    @mock.patch.object(host_manager.HostManager, '_init_instance_info')
+    @mock.patch.object(host_manager.HostManager, '_init_aggregates')
+    def test_init_nonexist_hostmanager(self,
+                                       mock_init_agg,
+                                       mock_init_inst):
+        self.flags(scheduler_host_manager='nonexist_host_manager')
+        self.assertRaises(RuntimeError, self.driver_cls)
+
+    # NOTE(Yingxin): Loading full class path is deprecated and should be
+    # removed in the N release.
+    @mock.patch.object(driver.LOG, 'warning')
+    @mock.patch.object(host_manager.HostManager, '_init_instance_info')
+    @mock.patch.object(host_manager.HostManager, '_init_aggregates')
+    def test_init_using_classpath_to_hostmanager(self,
+                                                 mock_init_agg,
+                                                 mock_init_inst,
+                                                 mock_warning):
+        self.flags(
+            scheduler_host_manager=
+            'nova.scheduler.ironic_host_manager.IronicHostManager')
+        manager = self.driver_cls().host_manager
+        self.assertIsInstance(manager, ironic_host_manager.IronicHostManager)
+        warn_args, kwargs = mock_warning.call_args
+        self.assertIn("DEPRECATED", warn_args[0])
 
 
 class SchedulerTestCase(test.NoDBTestCase):
     """Test case for base scheduler driver class."""
 
     # So we can subclass this test and re-use tests if we need.
-    driver_cls = driver.Scheduler
+    driver_cls = fakes.FakeScheduler
 
     @mock.patch.object(host_manager.HostManager, '_init_instance_info')
     @mock.patch.object(host_manager.HostManager, '_init_aggregates')
@@ -136,51 +241,19 @@ class SchedulerTestCase(test.NoDBTestCase):
         self.topic = 'fake_topic'
         self.servicegroup_api = servicegroup.API()
 
-    def test_hosts_up(self):
-        service1 = {'host': 'host1'}
-        service2 = {'host': 'host2'}
-        services = [service1, service2]
+    @mock.patch('nova.objects.ServiceList.get_by_topic')
+    @mock.patch('nova.servicegroup.API.service_is_up')
+    def test_hosts_up(self, mock_service_is_up, mock_get_by_topic):
+        service1 = objects.Service(host='host1')
+        service2 = objects.Service(host='host2')
+        services = objects.ServiceList(objects=[service1, service2])
 
-        self.mox.StubOutWithMock(db, 'service_get_all_by_topic')
-        self.mox.StubOutWithMock(servicegroup.API, 'service_is_up')
+        mock_get_by_topic.return_value = services
+        mock_service_is_up.side_effect = [False, True]
 
-        db.service_get_all_by_topic(self.context,
-                self.topic).AndReturn(services)
-        self.servicegroup_api.service_is_up(service1).AndReturn(False)
-        self.servicegroup_api.service_is_up(service2).AndReturn(True)
-
-        self.mox.ReplayAll()
         result = self.driver.hosts_up(self.context, self.topic)
         self.assertEqual(result, ['host2'])
 
-
-class SchedulerDriverBaseTestCase(SchedulerTestCase):
-    """Test cases for base scheduler driver class methods
-       that will fail if the driver is changed.
-    """
-
-    def test_unimplemented_select_destinations(self):
-        self.assertRaises(NotImplementedError,
-                self.driver.select_destinations, self.context, {}, {})
-
-
-class SchedulerInstanceGroupData(test.NoDBTestCase):
-
-    driver_cls = driver.Scheduler
-
-    def setUp(self):
-        super(SchedulerInstanceGroupData, self).setUp()
-        self.user_id = 'fake_user'
-        self.project_id = 'fake_project'
-        self.context = context.RequestContext(self.user_id, self.project_id)
-        self.driver = self.driver_cls()
-
-    def _get_default_values(self):
-        return {'name': 'fake_name',
-                'user_id': self.user_id,
-                'project_id': self.project_id}
-
-    def _create_instance_group(self, context, values, policies=None,
-                               metadata=None, members=None):
-        return db.instance_group_create(context, values, policies=policies,
-                                        metadata=metadata, members=members)
+        mock_get_by_topic.assert_called_once_with(self.context, self.topic)
+        calls = [mock.call(service1), mock.call(service2)]
+        self.assertEqual(calls, mock_service_is_up.call_args_list)

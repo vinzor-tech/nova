@@ -45,7 +45,7 @@ class IronicClientWrapperTestCase(test.NoDBTestCase):
     def test_call_good_no_args(self, mock_get_client, mock_multi_getattr):
         mock_get_client.return_value = FAKE_CLIENT
         self.ironicclient.call("node.list")
-        mock_get_client.assert_called_once_with()
+        mock_get_client.assert_called_once_with(retry_on_conflict=True)
         mock_multi_getattr.assert_called_once_with(FAKE_CLIENT, "node.list")
         mock_multi_getattr.return_value.assert_called_once_with()
 
@@ -54,7 +54,7 @@ class IronicClientWrapperTestCase(test.NoDBTestCase):
     def test_call_good_with_args(self, mock_get_client, mock_multi_getattr):
         mock_get_client.return_value = FAKE_CLIENT
         self.ironicclient.call("node.list", 'test', associated=True)
-        mock_get_client.assert_called_once_with()
+        mock_get_client.assert_called_once_with(retry_on_conflict=True)
         mock_multi_getattr.assert_called_once_with(FAKE_CLIENT, "node.list")
         mock_multi_getattr.return_value.assert_called_once_with(
             'test', associated=True)
@@ -73,7 +73,8 @@ class IronicClientWrapperTestCase(test.NoDBTestCase):
                     'os_endpoint_type': 'public',
                     'ironic_url': CONF.ironic.api_endpoint,
                     'max_retries': CONF.ironic.api_max_retries,
-                    'retry_interval': CONF.ironic.api_retry_interval}
+                    'retry_interval': CONF.ironic.api_retry_interval,
+                    'os_ironic_api_version': '1.8'}
         mock_ir_cli.assert_called_once_with(CONF.ironic.api_version,
                                             **expected)
 
@@ -86,7 +87,8 @@ class IronicClientWrapperTestCase(test.NoDBTestCase):
         expected = {'os_auth_token': 'fake-token',
                     'ironic_url': CONF.ironic.api_endpoint,
                     'max_retries': CONF.ironic.api_max_retries,
-                    'retry_interval': CONF.ironic.api_retry_interval}
+                    'retry_interval': CONF.ironic.api_retry_interval,
+                    'os_ironic_api_version': '1.8'}
         mock_ir_cli.assert_called_once_with(CONF.ironic.api_version,
                                             **expected)
 

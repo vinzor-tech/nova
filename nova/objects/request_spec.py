@@ -12,11 +12,17 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+from oslo_serialization import jsonutils
 import six
 
+from nova.db.sqlalchemy import api as db
+from nova.db.sqlalchemy import api_models
+from nova import exception
 from nova import objects
 from nova.objects import base
 from nova.objects import fields
+from nova.objects import instance as obj_instance
+from nova.virt import hardware
 
 
 @base.NovaObjectRegistry.register
@@ -26,7 +32,8 @@ class RequestSpec(base.NovaObject):
     # Version 1.2: SchedulerRetries version 1.1
     # Version 1.3: InstanceGroup version 1.10
     # Version 1.4: ImageMeta version 1.7
-    VERSION = '1.4'
+    # Version 1.5: Added get_by_instance_uuid(), create(), save()
+    VERSION = '1.5'
 
     fields = {
         'id': fields.IntegerField(),
@@ -50,17 +57,6 @@ class RequestSpec(base.NovaObject):
         # just provide to the RequestSpec object a free-form dictionary
         'scheduler_hints': fields.DictOfListOfStringsField(nullable=True),
         'instance_uuid': fields.UUIDField(),
-    }
-
-    obj_relationships = {
-        'image': [('1.0', '1.5'), ('1.1', '1.6'),
-                  ('1.4', '1.7')],
-        'numa_topology': [('1.0', '1.2')],
-        'flavor': [('1.0', '1.1')],
-        'pci_requests': [('1.0', '1.1')],
-        'retry': [('1.0', '1.0'), ('1.2', '1.1')],
-        'limits': [('1.0', '1.0')],
-        'instance_group': [('1.0', '1.9'), ('1.3', '1.10')],
     }
 
     @property
@@ -96,7 +92,7 @@ class RequestSpec(base.NovaObject):
             self.image = None
 
     def _from_instance(self, instance):
-        if isinstance(instance, objects.Instance):
+        if isinstance(instance, obj_instance.Instance):
             # NOTE(sbauza): Instance should normally be a NovaObject...
             getter = getattr
         elif isinstance(instance, dict):
@@ -116,8 +112,27 @@ class RequestSpec(base.NovaObject):
         for field in instance_fields:
             if field == 'uuid':
                 setattr(self, 'instance_uuid', getter(instance, field))
+            elif field == 'pci_requests':
+                self._from_instance_pci_requests(getter(instance, field))
+            elif field == 'numa_topology':
+                self._from_instance_numa_topology(getter(instance, field))
             else:
                 setattr(self, field, getter(instance, field))
+
+    def _from_instance_pci_requests(self, pci_requests):
+        if isinstance(pci_requests, dict):
+            pci_req_cls = objects.InstancePCIRequests
+            self.pci_requests = pci_req_cls.from_request_spec_instance_props(
+                pci_requests)
+        else:
+            self.pci_requests = pci_requests
+
+    def _from_instance_numa_topology(self, numa_topology):
+        if isinstance(numa_topology, dict):
+            self.numa_topology = hardware.instance_topology_from_instance(
+                dict(numa_topology=numa_topology))
+        else:
+            self.numa_topology = numa_topology
 
     def _from_flavor(self, flavor):
         if isinstance(flavor, objects.Flavor):
@@ -144,8 +159,10 @@ class RequestSpec(base.NovaObject):
             # NOTE(sbauza): Can be dropped once select_destinations is removed
             policies = list(filter_properties.get('group_policies'))
             hosts = list(filter_properties.get('group_hosts'))
+            members = list(filter_properties.get('group_members'))
             self.instance_group = objects.InstanceGroup(policies=policies,
-                                                        hosts=hosts)
+                                                        hosts=hosts,
+                                                        members=members)
             # hosts has to be not part of the updates for saving the object
             self.instance_group.obj_reset_changes(['hosts'])
         else:
@@ -166,6 +183,13 @@ class RequestSpec(base.NovaObject):
     @classmethod
     def from_primitives(cls, context, request_spec, filter_properties):
         """Returns a new RequestSpec object by hydrating it from legacy dicts.
+
+        Deprecated.  A RequestSpec object is created early in the boot process
+        using the from_components method.  That object will either be passed to
+        places that require it, or it can be looked up with
+        get_by_instance_uuid.  This method can be removed when there are no
+        longer any callers.  Because the method is not remotable it is not tied
+        to object versioning.
 
         That helper is not intended to leave the legacy dicts kept in the nova
         codebase, but is rather just for giving a temporary solution for
@@ -301,6 +325,131 @@ class RequestSpec(base.NovaObject):
                 hint) for hint in self.scheduler_hints}
         return filt_props
 
+    @classmethod
+    def from_components(cls, context, instance_uuid, image, flavor,
+            numa_topology, pci_requests, filter_properties, instance_group,
+            availability_zone):
+        """Returns a new RequestSpec object hydrated by various components.
+
+        This helper is useful in creating the RequestSpec from the various
+        objects that are assembled early in the boot process.  This method
+        creates a complete RequestSpec object with all properties set or
+        intentionally left blank.
+
+        :param context: a context object
+        :param instance_uuid: the uuid of the instance to schedule
+        :param image: a dict of properties for an image or volume
+        :param flavor: a flavor NovaObject
+        :param numa_topology: InstanceNUMATopology or None
+        :param pci_requests: InstancePCIRequests
+        :param filter_properties: a dict of properties for scheduling
+        :param instance_group: None or an instance group NovaObject
+        :param availability_zone: an availability_zone string
+        """
+        spec_obj = cls(context)
+        spec_obj.num_instances = 1
+        spec_obj.instance_uuid = instance_uuid
+        spec_obj.instance_group = instance_group
+        if spec_obj.instance_group is None and filter_properties:
+            spec_obj._populate_group_info(filter_properties)
+        spec_obj.project_id = context.project_id
+        spec_obj._image_meta_from_image(image)
+        spec_obj._from_flavor(flavor)
+        spec_obj._from_instance_pci_requests(pci_requests)
+        spec_obj._from_instance_numa_topology(numa_topology)
+        spec_obj.ignore_hosts = filter_properties.get('ignore_hosts')
+        spec_obj.force_hosts = filter_properties.get('force_hosts')
+        spec_obj.force_nodes = filter_properties.get('force_nodes')
+        spec_obj._from_retry(filter_properties.get('retry', {}))
+        spec_obj._from_limits(filter_properties.get('limits', {}))
+        spec_obj._from_hints(filter_properties.get('scheduler_hints', {}))
+        spec_obj.availability_zone = availability_zone
+        return spec_obj
+
+    @staticmethod
+    def _from_db_object(context, spec, db_spec):
+        spec_obj = spec.obj_from_primitive(jsonutils.loads(db_spec['spec']))
+        for key in spec.fields:
+            # Load these from the db model not the serialized object within,
+            # though they should match.
+            if key in ['id', 'instance_uuid']:
+                setattr(spec, key, db_spec[key])
+            else:
+                setattr(spec, key, getattr(spec_obj, key))
+        spec._context = context
+        spec.obj_reset_changes()
+        return spec
+
+    @staticmethod
+    @db.api_context_manager.reader
+    def _get_by_instance_uuid_from_db(context, instance_uuid):
+        db_spec = context.session.query(api_models.RequestSpec).filter_by(
+            instance_uuid=instance_uuid).first()
+        if not db_spec:
+            raise exception.RequestSpecNotFound(
+                    instance_uuid=instance_uuid)
+        return db_spec
+
+    @base.remotable_classmethod
+    def get_by_instance_uuid(cls, context, instance_uuid):
+        db_spec = cls._get_by_instance_uuid_from_db(context, instance_uuid)
+        return cls._from_db_object(context, cls(), db_spec)
+
+    @staticmethod
+    @db.api_context_manager.writer
+    def _create_in_db(context, updates):
+        db_spec = api_models.RequestSpec()
+        db_spec.update(updates)
+        db_spec.save(context.session)
+        return db_spec
+
+    def _get_update_primitives(self):
+        """Serialize object to match the db model.
+
+        We store copies of embedded objects rather than
+        references to these objects because we want a snapshot of the request
+        at this point.  If the references changed or were deleted we would
+        not be able to reschedule this instance under the same conditions as
+        it was originally scheduled with.
+        """
+        updates = self.obj_get_changes()
+        # NOTE(alaski): The db schema is the full serialized object in a
+        # 'spec' column.  If anything has changed we rewrite the full thing.
+        if updates:
+            db_updates = {'spec': jsonutils.dumps(self.obj_to_primitive())}
+            if 'instance_uuid' in updates:
+                db_updates['instance_uuid'] = updates['instance_uuid']
+        return db_updates
+
+    @base.remotable
+    def create(self):
+        if self.obj_attr_is_set('id'):
+            raise exception.ObjectActionError(action='create',
+                                              reason='already created')
+
+        updates = self._get_update_primitives()
+
+        db_spec = self._create_in_db(self._context, updates)
+        self._from_db_object(self._context, self, db_spec)
+
+    @staticmethod
+    @db.api_context_manager.writer
+    def _save_in_db(context, instance_uuid, updates):
+        # FIXME(sbauza): Provide a classmethod when oslo.db bug #1520195 is
+        # fixed and released
+        db_spec = RequestSpec._get_by_instance_uuid_from_db(context,
+                                                            instance_uuid)
+        db_spec.update(updates)
+        db_spec.save(context.session)
+        return db_spec
+
+    @base.remotable
+    def save(self):
+        updates = self._get_update_primitives()
+        db_spec = self._save_in_db(self._context, self.instance_uuid, updates)
+        self._from_db_object(self._context, self, db_spec)
+        self.obj_reset_changes()
+
 
 @base.NovaObjectRegistry.register
 class SchedulerRetries(base.NovaObject):
@@ -313,10 +462,6 @@ class SchedulerRetries(base.NovaObject):
         # NOTE(sbauza): Even if we are only using host/node strings, we need to
         # know which compute nodes were tried
         'hosts': fields.ObjectField('ComputeNodeList'),
-    }
-
-    obj_relationships = {
-        'hosts': [('1.0', '1.13'), ('1.1', '1.14')],
     }
 
     @classmethod
@@ -354,10 +499,6 @@ class SchedulerLimits(base.NovaObject):
         'vcpu': fields.IntegerField(nullable=True, default=None),
         'disk_gb': fields.IntegerField(nullable=True, default=None),
         'memory_mb': fields.IntegerField(nullable=True, default=None),
-    }
-
-    obj_relationships = {
-        'numa_topology': [('1.0', '1.0')],
     }
 
     @classmethod

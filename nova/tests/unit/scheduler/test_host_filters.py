@@ -14,7 +14,6 @@
 """
 Tests For Scheduler Host Filters.
 """
-
 from nova.scheduler import filters
 from nova.scheduler.filters import all_hosts_filter
 from nova.scheduler.filters import compute_filter

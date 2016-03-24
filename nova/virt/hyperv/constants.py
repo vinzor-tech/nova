@@ -17,57 +17,29 @@
 Constants used in ops classes
 """
 
+from os_win import constants
+
 from nova.compute import arch
 from nova.compute import power_state
 
-HYPERV_VM_STATE_OTHER = 1
-HYPERV_VM_STATE_ENABLED = 2
-HYPERV_VM_STATE_DISABLED = 3
-HYPERV_VM_STATE_SHUTTING_DOWN = 4
-HYPERV_VM_STATE_REBOOT = 10
-HYPERV_VM_STATE_PAUSED = 32768
-HYPERV_VM_STATE_SUSPENDED = 32769
-
 HYPERV_POWER_STATE = {
-    HYPERV_VM_STATE_DISABLED: power_state.SHUTDOWN,
-    HYPERV_VM_STATE_SHUTTING_DOWN: power_state.SHUTDOWN,
-    HYPERV_VM_STATE_ENABLED: power_state.RUNNING,
-    HYPERV_VM_STATE_PAUSED: power_state.PAUSED,
-    HYPERV_VM_STATE_SUSPENDED: power_state.SUSPENDED
+    constants.HYPERV_VM_STATE_DISABLED: power_state.SHUTDOWN,
+    constants.HYPERV_VM_STATE_SHUTTING_DOWN: power_state.SHUTDOWN,
+    constants.HYPERV_VM_STATE_ENABLED: power_state.RUNNING,
+    constants.HYPERV_VM_STATE_PAUSED: power_state.PAUSED,
+    constants.HYPERV_VM_STATE_SUSPENDED: power_state.SUSPENDED
 }
 
 WMI_WIN32_PROCESSOR_ARCHITECTURE = {
-    0: arch.I686,
-    1: arch.MIPS,
-    2: arch.ALPHA,
-    3: arch.PPC,
-    5: arch.ARMV7,
-    6: arch.IA64,
-    9: arch.X86_64,
+    constants.ARCH_I686: arch.I686,
+    constants.ARCH_MIPS: arch.MIPS,
+    constants.ARCH_ALPHA: arch.ALPHA,
+    constants.ARCH_PPC: arch.PPC,
+    constants.ARCH_ARMV7: arch.ARMV7,
+    constants.ARCH_IA64: arch.IA64,
+    constants.ARCH_X86_64: arch.X86_64,
 }
 
-PROCESSOR_FEATURE = {
-    7: '3dnow',
-    3: 'mmx',
-    12: 'nx',
-    9: 'pae',
-    8: 'rdtsc',
-    20: 'slat',
-    13: 'sse3',
-    21: 'vmx',
-    6: 'sse',
-    10: 'sse2',
-    17: 'xsave',
-}
-
-WMI_JOB_STATUS_STARTED = 4096
-WMI_JOB_STATE_RUNNING = 4
-WMI_JOB_STATE_COMPLETED = 7
-
-VM_SUMMARY_NUM_PROCS = 4
-VM_SUMMARY_ENABLED_STATE = 100
-VM_SUMMARY_MEMORY_USAGE = 103
-VM_SUMMARY_UPTIME = 105
 
 CTRL_TYPE_IDE = "IDE"
 CTRL_TYPE_SCSI = "SCSI"
@@ -85,11 +57,6 @@ DISK_FORMAT_MAP = {
 DISK_FORMAT_VHD = "VHD"
 DISK_FORMAT_VHDX = "VHDX"
 
-VHD_TYPE_FIXED = 2
-VHD_TYPE_DYNAMIC = 3
-
-SCSI_CONTROLLER_SLOTS_NUMBER = 64
-
 HOST_POWER_ACTION_SHUTDOWN = "shutdown"
 HOST_POWER_ACTION_REBOOT = "reboot"
 HOST_POWER_ACTION_STARTUP = "startup"
@@ -99,8 +66,3 @@ IMAGE_PROP_VM_GEN_2 = "hyperv-gen2"
 
 VM_GEN_1 = 1
 VM_GEN_2 = 2
-
-JOB_STATE_COMPLETED = 7
-JOB_STATE_TERMINATED = 8
-JOB_STATE_KILLED = 9
-JOB_STATE_COMPLETED_WITH_WARNINGS = 32768

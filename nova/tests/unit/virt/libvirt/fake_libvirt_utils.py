@@ -13,6 +13,7 @@
 #    under the License.
 
 import os
+
 from six.moves import StringIO
 
 from nova.virt.libvirt import utils as libvirt_utils
@@ -23,6 +24,8 @@ disk_sizes = {}
 disk_backing_files = {}
 disk_type = "qcow2"
 
+RESIZE_SNAPSHOT_NAME = libvirt_utils.RESIZE_SNAPSHOT_NAME
+
 
 def create_image(disk_format, path, size):
     pass
@@ -32,15 +35,17 @@ def create_cow_image(backing_file, path):
     pass
 
 
-def get_disk_size(path):
+def get_disk_size(path, format=None):
     return 0
 
 
-def get_disk_backing_file(path):
+def get_disk_backing_file(path, format=None):
     return disk_backing_files.get(path, None)
 
 
-def get_disk_type(path):
+def get_disk_type_from_path(path):
+    if disk_type in ('raw', 'qcow2'):
+        return None
     return disk_type
 
 
@@ -72,6 +77,10 @@ def chown(path, owner):
     pass
 
 
+def update_mtime(path):
+    pass
+
+
 def extract_snapshot(disk_path, source_fmt, out_path, dest_fmt):
     files[out_path] = ''
 
@@ -99,11 +108,11 @@ def file_open(path, mode=None):
 
 def find_disk(virt_dom):
     if disk_type == 'lvm':
-        return "/dev/nova-vg/lv"
+        return ("/dev/nova-vg/lv", "raw")
     elif disk_type in ['raw', 'qcow2']:
-        return "filename"
+        return ("filename", disk_type)
     else:
-        return "unknown_type_disk"
+        return ("unknown_type_disk", None)
 
 
 def load_file(path):
@@ -129,6 +138,11 @@ def get_fs_info(path):
 
 
 def fetch_image(context, target, image_id, user_id, project_id, max_size=0):
+    pass
+
+
+def fetch_raw_image(context, target, image_id, user_id, project_id,
+                    max_size=0):
     pass
 
 

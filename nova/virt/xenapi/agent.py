@@ -143,7 +143,7 @@ def _call_agent(session, instance, vm_ref, method, addl_args=None,
             raise exception.AgentError(method=method)
 
     if ret['returncode'] not in success_codes:
-        LOG.error(_LE('The agent call to %(method)s returned an '
+        LOG.error(_LE('The agent call to %(method)s returned '
                       'an error: %(ret)r. args=%(args)r'),
                   {'method': method, 'ret': ret, 'args': args},
                   instance=instance)
@@ -165,11 +165,11 @@ def _wait_for_new_dom_id(session, vm_ref, old_dom_id, method):
         dom_id = session.VM.get_domid(vm_ref)
 
         if dom_id and dom_id != -1 and dom_id != old_dom_id:
-            LOG.debug("Found new dom_id %s" % dom_id)
+            LOG.debug("Found new dom_id %s", dom_id)
             return
 
         if time.time() > expiration:
-            LOG.debug("Timed out waiting for new dom_id %s" % dom_id)
+            LOG.debug("Timed out waiting for new dom_id %s", dom_id)
             raise exception.AgentTimeout(method=method)
 
         time.sleep(1)

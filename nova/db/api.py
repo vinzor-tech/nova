@@ -86,6 +86,23 @@ def not_equal(*values):
     return IMPL.not_equal(*values)
 
 
+def create_context_manager(connection):
+    """Return a context manager for a cell database connection."""
+    return IMPL.create_context_manager(connection=connection)
+
+
+###################
+
+
+def select_db_reader_mode(f):
+    """Decorator to select synchronous or asynchronous reader mode.
+
+    The kwarg argument 'use_slave' defines reader mode. Asynchronous reader
+    will be used if 'use_slave' is True and synchronous reader otherwise.
+    """
+    return IMPL.select_db_reader_mode(f)
+
+
 ###################
 
 
@@ -94,10 +111,14 @@ def service_destroy(context, service_id):
     return IMPL.service_destroy(context, service_id)
 
 
-def service_get(context, service_id, use_slave=False):
+def service_get(context, service_id):
     """Get a service or raise if it does not exist."""
-    return IMPL.service_get(context, service_id,
-                            use_slave=use_slave)
+    return IMPL.service_get(context, service_id)
+
+
+def service_get_minimum_version(context, binary):
+    """Get the minimum service version in the database."""
+    return IMPL.service_get_minimum_version(context, binary)
 
 
 def service_get_by_host_and_topic(context, host, topic):
@@ -120,9 +141,13 @@ def service_get_all_by_topic(context, topic):
     return IMPL.service_get_all_by_topic(context, topic)
 
 
-def service_get_all_by_binary(context, binary):
-    """Get all services for a given binary."""
-    return IMPL.service_get_all_by_binary(context, binary)
+def service_get_all_by_binary(context, binary, include_disabled=False):
+    """Get services for a given binary.
+
+    Includes disabled services if 'include_disabled' parameter is True
+    """
+    return IMPL.service_get_all_by_binary(context, binary,
+                                          include_disabled=include_disabled)
 
 
 def service_get_all_by_host(context, host):
@@ -130,13 +155,12 @@ def service_get_all_by_host(context, host):
     return IMPL.service_get_all_by_host(context, host)
 
 
-def service_get_by_compute_host(context, host, use_slave=False):
+def service_get_by_compute_host(context, host):
     """Get the service entry for a given compute host.
 
     Returns the service entry joined with the compute_node entry.
     """
-    return IMPL.service_get_by_compute_host(context, host,
-                                            use_slave=use_slave)
+    return IMPL.service_get_by_compute_host(context, host)
 
 
 def service_create(context, values):
@@ -167,6 +191,21 @@ def compute_node_get(context, compute_id):
     Raises ComputeHostNotFound if compute node with the given ID doesn't exist.
     """
     return IMPL.compute_node_get(context, compute_id)
+
+
+# TODO(edleafe): remove once the compute node resource provider migration is
+# complete, and this distinction is no longer necessary.
+def compute_node_get_model(context, compute_id):
+    """Get a compute node sqlalchemy model object by its id.
+
+    :param context: The security context
+    :param compute_id: ID of the compute node
+
+    :returns: Sqlalchemy model object containing properties of the compute node
+
+    Raises ComputeHostNotFound if compute node with the given ID doesn't exist.
+    """
+    return IMPL.compute_node_get_model(context, compute_id)
 
 
 def compute_nodes_get_by_service_id(context, service_id):
@@ -209,7 +248,7 @@ def compute_node_get_all(context):
     return IMPL.compute_node_get_all(context)
 
 
-def compute_node_get_all_by_host(context, host, use_slave=False):
+def compute_node_get_all_by_host(context, host):
     """Get compute nodes by host name
 
     :param context: The security context (admin)
@@ -217,7 +256,7 @@ def compute_node_get_all_by_host(context, host, use_slave=False):
 
     :returns: List of dictionaries each containing compute node properties
     """
-    return IMPL.compute_node_get_all_by_host(context, host, use_slave)
+    return IMPL.compute_node_get_all_by_host(context, host)
 
 
 def compute_node_search_by_hypervisor(context, hypervisor_match):
@@ -313,13 +352,13 @@ def floating_ip_get(context, id):
 
 
 def floating_ip_get_pools(context):
-    """Returns a list of floating ip pools."""
+    """Returns a list of floating IP pools."""
     return IMPL.floating_ip_get_pools(context)
 
 
 def floating_ip_allocate_address(context, project_id, pool,
                                  auto_assigned=False):
-    """Allocate free floating ip from specified pool and return the address.
+    """Allocate free floating IP from specified pool and return the address.
 
     Raises if one is not available.
 
@@ -329,24 +368,24 @@ def floating_ip_allocate_address(context, project_id, pool,
 
 
 def floating_ip_bulk_create(context, ips, want_result=True):
-    """Create a lot of floating ips from the values dictionary.
-        :param want_result: If set to True, return floating ips inserted
+    """Create a lot of floating IPs from the values dictionary.
+        :param want_result: If set to True, return floating IPs inserted
     """
     return IMPL.floating_ip_bulk_create(context, ips, want_result=want_result)
 
 
 def floating_ip_bulk_destroy(context, ips):
-    """Destroy a lot of floating ips from the values dictionary."""
+    """Destroy a lot of floating IPs from the values dictionary."""
     return IMPL.floating_ip_bulk_destroy(context, ips)
 
 
 def floating_ip_create(context, values):
-    """Create a floating ip from the values dictionary."""
+    """Create a floating IP from the values dictionary."""
     return IMPL.floating_ip_create(context, values)
 
 
 def floating_ip_deallocate(context, address):
-    """Deallocate a floating ip by address."""
+    """Deallocate a floating IP by address."""
     return IMPL.floating_ip_deallocate(context, address)
 
 
@@ -356,10 +395,10 @@ def floating_ip_destroy(context, address):
 
 
 def floating_ip_disassociate(context, address):
-    """Disassociate a floating ip from a fixed ip by address.
+    """Disassociate a floating IP from a fixed IP by address.
 
-    :returns: the fixed ip record joined to network record or None
-              if the ip was not associated to an ip.
+    :returns: the fixed IP record joined to network record or None
+              if the IP was not associated to an IP.
 
     """
     return IMPL.floating_ip_disassociate(context, address)
@@ -367,10 +406,10 @@ def floating_ip_disassociate(context, address):
 
 def floating_ip_fixed_ip_associate(context, floating_address,
                                    fixed_address, host):
-    """Associate a floating ip to a fixed_ip by address.
+    """Associate a floating IP to a fixed_ip by address.
 
-    :returns: the fixed ip record joined to network record or None
-              if the ip was already associated to the fixed ip.
+    :returns: the fixed IP record joined to network record or None
+              if the IP was already associated to the fixed IP.
     """
 
     return IMPL.floating_ip_fixed_ip_associate(context,
@@ -380,37 +419,37 @@ def floating_ip_fixed_ip_associate(context, floating_address,
 
 
 def floating_ip_get_all(context):
-    """Get all floating ips."""
+    """Get all floating IPs."""
     return IMPL.floating_ip_get_all(context)
 
 
 def floating_ip_get_all_by_host(context, host):
-    """Get all floating ips by host."""
+    """Get all floating IPs by host."""
     return IMPL.floating_ip_get_all_by_host(context, host)
 
 
 def floating_ip_get_all_by_project(context, project_id):
-    """Get all floating ips by project."""
+    """Get all floating IPs by project."""
     return IMPL.floating_ip_get_all_by_project(context, project_id)
 
 
 def floating_ip_get_by_address(context, address):
-    """Get a floating ip by address or raise if it doesn't exist."""
+    """Get a floating IP by address or raise if it doesn't exist."""
     return IMPL.floating_ip_get_by_address(context, address)
 
 
 def floating_ip_get_by_fixed_address(context, fixed_address):
-    """Get a floating ips by fixed address."""
+    """Get a floating IPs by fixed address."""
     return IMPL.floating_ip_get_by_fixed_address(context, fixed_address)
 
 
 def floating_ip_get_by_fixed_ip_id(context, fixed_ip_id):
-    """Get a floating ips by fixed address."""
+    """Get a floating IPs by fixed address."""
     return IMPL.floating_ip_get_by_fixed_ip_id(context, fixed_ip_id)
 
 
 def floating_ip_update(context, address, values):
-    """Update a floating ip by address or raise if it doesn't exist."""
+    """Update a floating IP by address or raise if it doesn't exist."""
     return IMPL.floating_ip_update(context, address, values)
 
 
@@ -457,6 +496,13 @@ def migration_get(context, migration_id):
     return IMPL.migration_get(context, migration_id)
 
 
+def migration_get_by_id_and_instance(context, migration_id, instance_uuid):
+    """Finds a migration by the migration id and the instance uuid."""
+    return IMPL.migration_get_by_id_and_instance(context,
+                                                 migration_id,
+                                                 instance_uuid)
+
+
 def migration_get_by_instance_and_status(context, instance_uuid, status):
     """Finds a migration by the instance uuid its migrating."""
     return IMPL.migration_get_by_instance_and_status(context, instance_uuid,
@@ -464,12 +510,12 @@ def migration_get_by_instance_and_status(context, instance_uuid, status):
 
 
 def migration_get_unconfirmed_by_dest_compute(context, confirm_window,
-        dest_compute, use_slave=False):
+        dest_compute):
     """Finds all unconfirmed migrations within the confirmation window for
     a specific destination compute host.
     """
     return IMPL.migration_get_unconfirmed_by_dest_compute(context,
-            confirm_window, dest_compute, use_slave=use_slave)
+            confirm_window, dest_compute)
 
 
 def migration_get_in_progress_by_host_and_node(context, host, node):
@@ -484,14 +530,21 @@ def migration_get_all_by_filters(context, filters):
     return IMPL.migration_get_all_by_filters(context, filters)
 
 
+def migration_get_in_progress_by_instance(context, instance_uuid,
+                                          migration_type=None):
+    """Finds all migrations of an instance in progress."""
+    return IMPL.migration_get_in_progress_by_instance(context, instance_uuid,
+                                                      migration_type)
+
+
 ####################
 
 
 def fixed_ip_associate(context, address, instance_uuid, network_id=None,
                        reserved=False, virtual_interface_id=None):
-    """Associate fixed ip to instance.
+    """Associate fixed IP to instance.
 
-    Raises if fixed ip is not available.
+    Raises if fixed IP is not available.
 
     """
     return IMPL.fixed_ip_associate(context, address, instance_uuid, network_id,
@@ -500,7 +553,7 @@ def fixed_ip_associate(context, address, instance_uuid, network_id=None,
 
 def fixed_ip_associate_pool(context, network_id, instance_uuid=None,
                             host=None, virtual_interface_id=None):
-    """Find free ip in network and associate it to instance or host.
+    """Find free IP in network and associate it to instance or host.
 
     Raises if one is not available.
 
@@ -511,27 +564,27 @@ def fixed_ip_associate_pool(context, network_id, instance_uuid=None,
 
 
 def fixed_ip_create(context, values):
-    """Create a fixed ip from the values dictionary."""
+    """Create a fixed IP from the values dictionary."""
     return IMPL.fixed_ip_create(context, values)
 
 
 def fixed_ip_bulk_create(context, ips):
-    """Create a lot of fixed ips from the values dictionary."""
+    """Create a lot of fixed IPs from the values dictionary."""
     return IMPL.fixed_ip_bulk_create(context, ips)
 
 
 def fixed_ip_disassociate(context, address):
-    """Disassociate a fixed ip from an instance by address."""
+    """Disassociate a fixed IP from an instance by address."""
     return IMPL.fixed_ip_disassociate(context, address)
 
 
 def fixed_ip_disassociate_all_by_timeout(context, host, time):
-    """Disassociate old fixed ips from host."""
+    """Disassociate old fixed IPs from host."""
     return IMPL.fixed_ip_disassociate_all_by_timeout(context, host, time)
 
 
 def fixed_ip_get(context, id, get_network=False):
-    """Get fixed ip by id or raise if it does not exist.
+    """Get fixed IP by id or raise if it does not exist.
 
     If get_network is true, also return the associated network.
     """
@@ -539,43 +592,43 @@ def fixed_ip_get(context, id, get_network=False):
 
 
 def fixed_ip_get_all(context):
-    """Get all defined fixed ips."""
+    """Get all defined fixed IPs."""
     return IMPL.fixed_ip_get_all(context)
 
 
 def fixed_ip_get_by_address(context, address, columns_to_join=None):
-    """Get a fixed ip by address or raise if it does not exist."""
+    """Get a fixed IP by address or raise if it does not exist."""
     return IMPL.fixed_ip_get_by_address(context, address,
                                         columns_to_join=columns_to_join)
 
 
 def fixed_ip_get_by_floating_address(context, floating_address):
-    """Get a fixed ip by a floating address."""
+    """Get a fixed IP by a floating address."""
     return IMPL.fixed_ip_get_by_floating_address(context, floating_address)
 
 
 def fixed_ip_get_by_instance(context, instance_uuid):
-    """Get fixed ips by instance or raise if none exist."""
+    """Get fixed IPs by instance or raise if none exist."""
     return IMPL.fixed_ip_get_by_instance(context, instance_uuid)
 
 
 def fixed_ip_get_by_host(context, host):
-    """Get fixed ips by compute host."""
+    """Get fixed IPs by compute host."""
     return IMPL.fixed_ip_get_by_host(context, host)
 
 
 def fixed_ip_get_by_network_host(context, network_uuid, host):
-    """Get fixed ip for a host in a network."""
+    """Get fixed IP for a host in a network."""
     return IMPL.fixed_ip_get_by_network_host(context, network_uuid, host)
 
 
 def fixed_ips_by_virtual_interface(context, vif_id):
-    """Get fixed ips by virtual interface or raise if none exist."""
+    """Get fixed IPs by virtual interface or raise if none exist."""
     return IMPL.fixed_ips_by_virtual_interface(context, vif_id)
 
 
 def fixed_ip_update(context, address, values):
-    """Create a fixed ip from the values dictionary."""
+    """Create a fixed IP from the values dictionary."""
     return IMPL.fixed_ip_update(context, address, values)
 
 
@@ -602,10 +655,9 @@ def virtual_interface_get_by_uuid(context, vif_uuid):
     return IMPL.virtual_interface_get_by_uuid(context, vif_uuid)
 
 
-def virtual_interface_get_by_instance(context, instance_id, use_slave=False):
+def virtual_interface_get_by_instance(context, instance_id):
     """Gets all virtual_interfaces for instance."""
-    return IMPL.virtual_interface_get_by_instance(context, instance_id,
-                                                  use_slave=use_slave)
+    return IMPL.virtual_interface_get_by_instance(context, instance_id)
 
 
 def virtual_interface_get_by_instance_and_network(context, instance_id,
@@ -639,10 +691,9 @@ def instance_destroy(context, instance_uuid, constraint=None):
     return IMPL.instance_destroy(context, instance_uuid, constraint)
 
 
-def instance_get_by_uuid(context, uuid, columns_to_join=None, use_slave=False):
+def instance_get_by_uuid(context, uuid, columns_to_join=None):
     """Get an instance or raise if it does not exist."""
-    return IMPL.instance_get_by_uuid(context, uuid,
-                                     columns_to_join, use_slave=use_slave)
+    return IMPL.instance_get_by_uuid(context, uuid, columns_to_join)
 
 
 def instance_get(context, instance_id, columns_to_join=None):
@@ -658,7 +709,7 @@ def instance_get_all(context, columns_to_join=None):
 
 def instance_get_all_by_filters(context, filters, sort_key='created_at',
                                 sort_dir='desc', limit=None, marker=None,
-                                columns_to_join=None, use_slave=False):
+                                columns_to_join=None):
     """Get all instances that match all filters."""
     # Note: This function exists for backwards compatibility since calls to
     # the instance layer coming in over RPC may specify the single sort
@@ -667,27 +718,24 @@ def instance_get_all_by_filters(context, filters, sort_key='created_at',
     return IMPL.instance_get_all_by_filters(context, filters, sort_key,
                                             sort_dir, limit=limit,
                                             marker=marker,
-                                            columns_to_join=columns_to_join,
-                                            use_slave=use_slave)
+                                            columns_to_join=columns_to_join)
 
 
 def instance_get_all_by_filters_sort(context, filters, limit=None,
                                      marker=None, columns_to_join=None,
-                                     use_slave=False, sort_keys=None,
-                                     sort_dirs=None):
+                                     sort_keys=None, sort_dirs=None):
     """Get all instances that match all filters sorted by multiple keys.
 
     sort_keys and sort_dirs must be a list of strings.
     """
     return IMPL.instance_get_all_by_filters_sort(
         context, filters, limit=limit, marker=marker,
-        columns_to_join=columns_to_join, use_slave=use_slave,
-        sort_keys=sort_keys, sort_dirs=sort_dirs)
+        columns_to_join=columns_to_join, sort_keys=sort_keys,
+        sort_dirs=sort_dirs)
 
 
 def instance_get_active_by_window_joined(context, begin, end=None,
                                          project_id=None, host=None,
-                                         use_slave=False,
                                          columns_to_join=None):
     """Get instances and joins active during a certain time window.
 
@@ -696,16 +744,12 @@ def instance_get_active_by_window_joined(context, begin, end=None,
     """
     return IMPL.instance_get_active_by_window_joined(context, begin, end,
                                               project_id, host,
-                                              use_slave=use_slave,
                                               columns_to_join=columns_to_join)
 
 
-def instance_get_all_by_host(context, host,
-                             columns_to_join=None, use_slave=False):
+def instance_get_all_by_host(context, host, columns_to_join=None):
     """Get all instances belonging to a host."""
-    return IMPL.instance_get_all_by_host(context, host,
-                                         columns_to_join,
-                                         use_slave=use_slave)
+    return IMPL.instance_get_all_by_host(context, host, columns_to_join)
 
 
 def instance_get_all_by_host_and_node(context, host, node,
@@ -726,7 +770,7 @@ def instance_get_all_by_grantee_security_groups(context, group_ids):
 
 
 def instance_floating_address_get_all(context, instance_uuid):
-    """Get all floating ip addresses of an instance."""
+    """Get all floating IP addresses of an instance."""
     return IMPL.instance_floating_address_get_all(context, instance_uuid)
 
 
@@ -925,7 +969,7 @@ def network_associate(context, project_id, network_id=None, force=False):
 
 
 def network_count_reserved_ips(context, network_id):
-    """Return the number of reserved ips in the network."""
+    """Return the number of reserved IPs in the network."""
     return IMPL.network_count_reserved_ips(context, network_id)
 
 
@@ -981,7 +1025,7 @@ def network_in_use_on_host(context, network_id, host=None):
 
 
 def network_get_associated_fixed_ips(context, network_id, host=None):
-    """Get all network's ips that have been associated."""
+    """Get all network's IPs that have been associated."""
     return IMPL.network_get_associated_fixed_ips(context, network_id, host)
 
 
@@ -1191,19 +1235,31 @@ def block_device_mapping_update_or_create(context, values, legacy=True):
     return IMPL.block_device_mapping_update_or_create(context, values, legacy)
 
 
-def block_device_mapping_get_all_by_instance(context, instance_uuid,
-                                             use_slave=False):
+def block_device_mapping_get_all_by_instance_uuids(context, instance_uuids):
+    """Get all block device mapping belonging to a list of instances."""
+    return IMPL.block_device_mapping_get_all_by_instance_uuids(context,
+                                                               instance_uuids)
+
+
+def block_device_mapping_get_all_by_instance(context, instance_uuid):
     """Get all block device mapping belonging to an instance."""
     return IMPL.block_device_mapping_get_all_by_instance(context,
-                                                         instance_uuid,
-                                                         use_slave)
+                                                         instance_uuid)
 
 
-def block_device_mapping_get_by_volume_id(context, volume_id,
+def block_device_mapping_get_all_by_volume_id(context, volume_id,
         columns_to_join=None):
     """Get block device mapping for a given volume."""
-    return IMPL.block_device_mapping_get_by_volume_id(context, volume_id,
+    return IMPL.block_device_mapping_get_all_by_volume_id(context, volume_id,
             columns_to_join)
+
+
+def block_device_mapping_get_by_instance_and_volume_id(context, volume_id,
+                                                       instance_uuid,
+                                                       columns_to_join=None):
+    """Get block device mapping for a given volume ID and instance UUID."""
+    return IMPL.block_device_mapping_get_by_instance_and_volume_id(
+        context, volume_id, instance_uuid, columns_to_join)
 
 
 def block_device_mapping_destroy(context, bdm_id):
@@ -1301,6 +1357,11 @@ def security_group_rule_get_by_security_group(context, security_group_id,
     """Get all rules for a given security group."""
     return IMPL.security_group_rule_get_by_security_group(
         context, security_group_id, columns_to_join=columns_to_join)
+
+
+def security_group_rule_get_by_instance(context, instance_uuid):
+    """Get all rules for a given instance."""
+    return IMPL.security_group_rule_get_by_instance(context, instance_uuid)
 
 
 def security_group_rule_destroy(context, security_group_rule_id):
@@ -1514,6 +1575,12 @@ def pci_device_get_all_by_instance_uuid(context, instance_uuid):
     return IMPL.pci_device_get_all_by_instance_uuid(context, instance_uuid)
 
 
+def pci_device_get_all_by_parent_addr(context, node_id, parent_addr):
+    """Get all PCI devices by parent address."""
+    return IMPL.pci_device_get_all_by_parent_addr(context, node_id,
+                                                  parent_addr)
+
+
 def pci_device_destroy(context, node_id, address):
     """Delete a PCI device record."""
     return IMPL.pci_device_destroy(context, node_id, address)
@@ -1616,16 +1683,14 @@ def agent_build_update(context, agent_build_id, values):
 ####################
 
 
-def bw_usage_get(context, uuid, start_period, mac, use_slave=False):
+def bw_usage_get(context, uuid, start_period, mac):
     """Return bw usage for instance and mac in a given audit period."""
-    return IMPL.bw_usage_get(context, uuid, start_period, mac,
-                             use_slave=use_slave)
+    return IMPL.bw_usage_get(context, uuid, start_period, mac)
 
 
-def bw_usage_get_by_uuids(context, uuids, start_period, use_slave=False):
+def bw_usage_get_by_uuids(context, uuids, start_period):
     """Return bw usages for instance(s) in a given audit period."""
-    return IMPL.bw_usage_get_by_uuids(context, uuids, start_period,
-                                      use_slave=use_slave)
+    return IMPL.bw_usage_get_by_uuids(context, uuids, start_period)
 
 
 def bw_usage_update(context, uuid, mac, start_period, bw_in, bw_out,
@@ -1889,23 +1954,35 @@ def task_log_get(context, task_name, period_beginning,
 ####################
 
 
-def archive_deleted_rows(context, max_rows=None):
+def archive_deleted_rows(max_rows=None):
     """Move up to max_rows rows from production tables to corresponding shadow
     tables.
 
-    :returns: number of rows archived.
+    :returns: dict that maps table name to number of rows archived from that
+              table, for example:
+
+    ::
+
+        {
+            'instances': 5,
+            'block_device_mapping': 5,
+            'pci_devices': 2,
+        }
+
     """
-    return IMPL.archive_deleted_rows(context, max_rows=max_rows)
+    return IMPL.archive_deleted_rows(max_rows=max_rows)
 
 
-def archive_deleted_rows_for_table(context, tablename, max_rows=None):
-    """Move up to max_rows rows from tablename to corresponding shadow
-    table.
+def pcidevice_online_data_migration(context, max_count):
+    return IMPL.pcidevice_online_data_migration(context, max_count)
 
-    :returns: number of rows archived.
-    """
-    return IMPL.archive_deleted_rows_for_table(context, tablename,
-                                               max_rows=max_rows)
+
+def aggregate_uuids_online_data_migration(context, max_count):
+    return IMPL.aggregate_uuids_online_data_migration(context, max_count)
+
+
+def computenode_uuids_online_data_migration(context, max_count):
+    return IMPL.computenode_uuids_online_data_migration(context, max_count)
 
 
 ####################

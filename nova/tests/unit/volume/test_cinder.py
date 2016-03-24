@@ -14,11 +14,14 @@
 #    under the License.
 
 from cinderclient import exceptions as cinder_exception
+from keystoneclient import exceptions as keystone_exception
 import mock
 
 from nova import context
 from nova import exception
 from nova import test
+from nova.tests.unit.fake_instance import fake_instance_obj
+from nova.tests import uuidsentinel as uuids
 from nova.volume import cinder
 
 
@@ -42,22 +45,6 @@ class FakeCinderClient(object):
     def __init__(self):
         self.volumes = self.Volumes()
         self.volume_snapshots = self.volumes
-
-
-class FakeVolume(object):
-    def __init__(self, dict=dict()):
-        self.id = dict.get('id') or '1234'
-        self.status = dict.get('status') or 'available'
-        self.size = dict.get('size') or 1
-        self.availability_zone = dict.get('availability_zone') or 'cinder'
-        self.created_at = dict.get('created_at')
-        self.attach_time = dict.get('attach_time')
-        self.mountpoint = dict.get('mountpoint')
-        self.display_name = dict.get('display_name') or 'volume-' + self.id
-        self.display_description = dict.get('display_description') or 'fake'
-        self.volume_type_id = dict.get('volume_type_id')
-        self.snapshot_id = dict.get('snapshot_id')
-        self.metadata = dict.get('volume_metadata') or {}
 
 
 class CinderApiTestCase(test.NoDBTestCase):
@@ -187,6 +174,7 @@ class CinderApiTestCase(test.NoDBTestCase):
         volume = {'status': 'available'}
         volume['attach_status'] = "detached"
         volume['availability_zone'] = 'zone1'
+        volume['multiattach'] = False
         instance = {'availability_zone': 'zone1', 'host': 'fakehost'}
         cinder.CONF.set_override('cross_az_attach', False, group='cinder')
 
@@ -198,11 +186,27 @@ class CinderApiTestCase(test.NoDBTestCase):
         cinder.CONF.reset()
 
     def test_check_detach(self):
-        volume = {'id': 'fake', 'status': 'available'}
+        volume = {'id': 'fake', 'status': 'in-use',
+                  'attach_status': 'attached',
+                  'attachments': {uuids.instance: {
+                                    'attachment_id': uuids.attachment}}
+                  }
+        self.assertIsNone(self.api.check_detach(self.ctx, volume))
+        instance = fake_instance_obj(self.ctx)
+        instance.uuid = uuids.instance
+        self.assertIsNone(self.api.check_detach(self.ctx, volume, instance))
+        instance.uuid = uuids.instance2
+        self.assertRaises(exception.VolumeUnattached,
+                          self.api.check_detach, self.ctx, volume, instance)
+        volume['attachments'] = {}
+        self.assertRaises(exception.VolumeUnattached,
+                          self.api.check_detach, self.ctx, volume, instance)
+        volume['status'] = 'available'
         self.assertRaises(exception.InvalidVolume,
                           self.api.check_detach, self.ctx, volume)
-        volume['status'] = 'non-available'
-        self.assertIsNone(self.api.check_detach(self.ctx, volume))
+        volume['attach_status'] = 'detached'
+        self.assertRaises(exception.InvalidVolume,
+                          self.api.check_detach, self.ctx, volume)
 
     def test_reserve_volume(self):
         cinder.cinderclient(self.ctx).AndReturn(self.cinderclient)
@@ -267,24 +271,71 @@ class CinderApiTestCase(test.NoDBTestCase):
                                                     mode='ro')
 
     def test_detach(self):
+        self.mox.StubOutWithMock(self.api,
+                                 'get',
+                                 use_mock_anything=True)
+        self.api.get(self.ctx, 'id1').\
+            AndReturn({'id': 'id1', 'status': 'in-use',
+                       'multiattach': True,
+                       'attach_status': 'attached',
+                       'attachments': {'fake_uuid':
+                                       {'attachment_id': 'fakeid'}}
+                       })
         cinder.cinderclient(self.ctx).AndReturn(self.cinderclient)
         self.mox.StubOutWithMock(self.cinderclient.volumes,
                                  'detach',
                                  use_mock_anything=True)
-        self.cinderclient.volumes.detach('id1')
+        self.cinderclient.volumes.detach('id1', 'fakeid')
         self.mox.ReplayAll()
 
-        self.api.detach(self.ctx, 'id1')
+        self.api.detach(self.ctx, 'id1', instance_uuid='fake_uuid')
 
-    def test_initialize_connection(self):
-        cinder.cinderclient(self.ctx).AndReturn(self.cinderclient)
-        self.mox.StubOutWithMock(self.cinderclient.volumes,
-                                 'initialize_connection',
-                                 use_mock_anything=True)
-        self.cinderclient.volumes.initialize_connection('id1', 'connector')
-        self.mox.ReplayAll()
+    @mock.patch('nova.volume.cinder.cinderclient')
+    def test_initialize_connection(self, mock_cinderclient):
+        connection_info = {'foo': 'bar'}
+        mock_cinderclient.return_value.volumes. \
+            initialize_connection.return_value = connection_info
 
-        self.api.initialize_connection(self.ctx, 'id1', 'connector')
+        volume_id = 'fake_vid'
+        connector = {'host': 'fakehost1'}
+        actual = self.api.initialize_connection(self.ctx, volume_id, connector)
+
+        expected = connection_info
+        expected['connector'] = connector
+        self.assertEqual(expected, actual)
+
+        mock_cinderclient.return_value.volumes. \
+            initialize_connection.assert_called_once_with(volume_id, connector)
+
+    @mock.patch('nova.volume.cinder.cinderclient')
+    def test_initialize_connection_rollback(self, mock_cinderclient):
+        mock_cinderclient.return_value.volumes.\
+            initialize_connection.side_effect = (
+                cinder_exception.ClientException(500, "500"))
+
+        connector = {'host': 'host1'}
+        ex = self.assertRaises(cinder_exception.ClientException,
+                               self.api.initialize_connection,
+                               self.ctx,
+                               'id1',
+                               connector)
+        self.assertEqual(500, ex.code)
+        mock_cinderclient.return_value.volumes.\
+            terminate_connection.assert_called_once_with('id1', connector)
+
+    @mock.patch('nova.volume.cinder.cinderclient')
+    def test_initialize_connection_no_rollback(self, mock_cinderclient):
+        mock_cinderclient.return_value.volumes.\
+            initialize_connection.side_effect = test.TestingException
+
+        connector = {'host': 'host1'}
+        self.assertRaises(test.TestingException,
+                          self.api.initialize_connection,
+                          self.ctx,
+                          'id1',
+                          connector)
+        self.assertFalse(mock_cinderclient.return_value.volumes.
+            terminate_connection.called)
 
     def test_terminate_connection(self):
         cinder.cinderclient(self.ctx).AndReturn(self.cinderclient)
@@ -389,3 +440,53 @@ class CinderApiTestCase(test.NoDBTestCase):
         self.api.get_volume_encryption_metadata(self.ctx,
                                                 {'encryption_key_id':
                                                  'fake_key'})
+
+    def test_translate_cinder_exception_no_error(self):
+        my_func = mock.Mock()
+        my_func.__name__ = 'my_func'
+        my_func.return_value = 'foo'
+
+        res = cinder.translate_cinder_exception(my_func)('fizzbuzz',
+                                                         'bar', 'baz')
+
+        self.assertEqual('foo', res)
+        my_func.assert_called_once_with('fizzbuzz', 'bar', 'baz')
+
+    def test_translate_cinder_exception_cinder_connection_error(self):
+        self._do_translate_cinder_exception_test(
+            cinder_exception.ConnectionError,
+            exception.CinderConnectionFailed)
+
+    def test_translate_cinder_exception_keystone_connection_error(self):
+        self._do_translate_cinder_exception_test(
+            keystone_exception.ConnectionError,
+            exception.CinderConnectionFailed)
+
+    def test_translate_cinder_exception_cinder_bad_request(self):
+        self._do_translate_cinder_exception_test(
+            cinder_exception.BadRequest(''),
+            exception.InvalidInput)
+
+    def test_translate_cinder_exception_keystone_bad_request(self):
+        self._do_translate_cinder_exception_test(
+            keystone_exception.BadRequest,
+            exception.InvalidInput)
+
+    def test_translate_cinder_exception_cinder_forbidden(self):
+        self._do_translate_cinder_exception_test(
+            cinder_exception.Forbidden(''),
+            exception.Forbidden)
+
+    def test_translate_cinder_exception_keystone_forbidden(self):
+        self._do_translate_cinder_exception_test(
+            keystone_exception.Forbidden,
+            exception.Forbidden)
+
+    def _do_translate_cinder_exception_test(self, raised_exc, expected_exc):
+        my_func = mock.Mock()
+        my_func.__name__ = 'my_func'
+        my_func.side_effect = raised_exc
+
+        self.assertRaises(expected_exc,
+                          cinder.translate_cinder_exception(my_func),
+                          'foo', 'bar', 'baz')

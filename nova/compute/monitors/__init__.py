@@ -26,7 +26,6 @@ from nova.i18n import _LW
 compute_monitors_opts = [
     cfg.MultiStrOpt('compute_available_monitors',
                     deprecated_for_removal=True,
-                    default=None,
                     help='Monitor classes available to the compute which may '
                          'be specified more than once. This option is '
                          'DEPRECATED and no longer used. Use setuptools entry '
@@ -81,14 +80,13 @@ class MonitorHandler(object):
         namespace_parts = ept_parts[0].split('.')
         namespace = '.'.join(namespace_parts[0:-1])
         if self.type_monitor_loaded[namespace] is not False:
-            msg = _LW("Excluding %(namespace)s monitor %(monitor_name)s. "
-                      "Already loaded %(loaded_monitor)s.")
-            msg = msg % {
-                'namespace': namespace,
-                'monitor_name': ext.name,
-                'loaded_monitor': self.type_monitor_loaded[namespace]
-            }
-            LOG.warn(msg)
+            LOG.warning(_LW("Excluding %(namespace)s monitor "
+                            "%(monitor_name)s. Already loaded "
+                            "%(loaded_monitor)s."),
+                        {'namespace': namespace,
+                         'monitor_name': ext.name,
+                         'loaded_monitor': self.type_monitor_loaded[namespace]
+                        })
             return False
 
         # NOTE(jaypipes): We used to only have CPU monitors, so
@@ -108,12 +106,8 @@ class MonitorHandler(object):
         if namespace + '.' + ext.name in cfg_monitors:
             self.type_monitor_loaded[namespace] = ext.name
             return True
-        msg = _LW("Excluding %(namespace)s monitor %(monitor_name)s. "
-                  "Not in the list of enabled monitors "
-                  "(CONF.compute_monitors).")
-        msg = msg % {
-            'namespace': namespace,
-            'monitor_name': ext.name,
-        }
-        LOG.warn(msg)
+        LOG.warning(_LW("Excluding %(namespace)s monitor %(monitor_name)s. "
+                        "Not in the list of enabled monitors "
+                        "(CONF.compute_monitors)."),
+                    {'namespace': namespace, 'monitor_name': ext.name})
         return False

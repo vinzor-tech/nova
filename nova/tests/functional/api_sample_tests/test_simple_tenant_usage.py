@@ -19,6 +19,7 @@ from oslo_config import cfg
 from oslo_utils import timeutils
 
 from nova.tests.functional.api_sample_tests import test_servers
+import nova.tests.functional.api_samples_test_base as astb
 
 CONF = cfg.CONF
 CONF.import_opt('osapi_compute_extension',
@@ -61,14 +62,12 @@ class SimpleTenantUsageSampleJsonTest(test_servers.ServersSampleBase):
         # Get api sample to get all tenants usage request.
         response = self._do_get('os-simple-tenant-usage?%s' % (
                                                 urllib.urlencode(self.query)))
-        subs = self._get_regexes()
-        self._verify_response('simple-tenant-usage-get', subs, response, 200)
+        self._verify_response('simple-tenant-usage-get', {}, response, 200)
 
     def test_get_tenant_usage_details(self):
         # Get api sample to get specific tenant usage request.
-        tenant_id = 'openstack'
+        tenant_id = astb.PROJECT_ID
         response = self._do_get('os-simple-tenant-usage/%s?%s' % (tenant_id,
                                                 urllib.urlencode(self.query)))
-        subs = self._get_regexes()
-        self._verify_response('simple-tenant-usage-get-specific', subs,
+        self._verify_response('simple-tenant-usage-get-specific', {},
                               response, 200)

@@ -14,6 +14,7 @@
 
 import netaddr
 from oslo_config import cfg
+from oslo_utils import versionutils
 
 from nova import db
 from nova import exception
@@ -21,7 +22,6 @@ from nova.i18n import _
 from nova import objects
 from nova.objects import base as obj_base
 from nova.objects import fields
-from nova import utils
 
 network_opts = [
     cfg.BoolOpt('share_dhcp_address',
@@ -31,7 +31,9 @@ network_opts = [
                      'share the same dhcp address. The same IP address used '
                      'for DHCP will be added on each nova-network node which '
                      'is only visible to the vms on the same host.'),
+    # NOTE(mriedem): Remove network_device_mtu in Newton.
     cfg.IntOpt('network_device_mtu',
+               deprecated_for_removal=True,
                help='DEPRECATED: THIS VALUE SHOULD BE SET WHEN CREATING THE '
                     'NETWORK. MTU setting for network interface.'),
 ]
@@ -102,7 +104,7 @@ class Network(obj_base.NovaPersistentObject, obj_base.NovaObject,
                                'or integral prefix') % netmask)
 
     def obj_make_compatible(self, primitive, target_version):
-        target_version = utils.convert_version_to_tuple(target_version)
+        target_version = versionutils.convert_version_to_tuple(target_version)
         if target_version < (1, 2):
             if 'mtu' in primitive:
                 del primitive['mtu']
@@ -216,9 +218,6 @@ class NetworkList(obj_base.ObjectListBase, obj_base.NovaObject):
 
     fields = {
         'objects': fields.ListOfObjectsField('Network'),
-        }
-    obj_relationships = {
-        'objects': [('1.0', '1.0'), ('1.1', '1.1'), ('1.2', '1.2')],
         }
 
     @obj_base.remotable_classmethod

@@ -36,6 +36,8 @@ UNDERSCORE_IMPORT_FILES = []
 
 session_check = re.compile(r"\w*def [a-zA-Z0-9].*[(].*session.*[)]")
 cfg_re = re.compile(r".*\scfg\.")
+# Excludes oslo.config OptGroup objects
+cfg_opt_re = re.compile(r".*[\s\[]cfg\.[a-zA-Z]*Opt\(")
 vi_header_re = re.compile(r"^#\s+vim?:.+")
 virt_file_re = re.compile(r"\./nova/(?:tests/)?virt/(\w+)/")
 virt_import_re = re.compile(
@@ -96,8 +98,13 @@ api_version_re = re.compile(r"@.*api_version")
 dict_constructor_with_list_copy_re = re.compile(r".*\bdict\((\[)?(\(|\[)")
 decorator_re = re.compile(r"@.*")
 http_not_implemented_re = re.compile(r"raise .*HTTPNotImplemented\(")
-greenthread_spawn_re = re.compile(r".*greenthread.spawn\(.*\)")
-greenthread_spawn_n_re = re.compile(r".*greenthread.spawn_n\(.*\)")
+spawn_re = re.compile(
+    r".*(eventlet|greenthread)\.(?P<spawn_part>spawn(_n)?)\(.*\)")
+contextlib_nested = re.compile(r"^with (contextlib\.)?nested\(")
+doubled_words_re = re.compile(
+    r"\b(then?|[iao]n|i[fst]|but|f?or|at|and|[dt]o)\s+\1\b")
+
+opt_help_text_min_char_count = 10
 
 
 class BaseASTChecker(ast.NodeVisitor):
@@ -523,16 +530,171 @@ def check_http_not_implemented(logical_line, physical_line, filename):
 
 
 def check_greenthread_spawns(logical_line, physical_line, filename):
-    """Check for use of greenthread.spawn() and greenthread.spawn_n()
+    """Check for use of greenthread.spawn(), greenthread.spawn_n(),
+    eventlet.spawn(), and eventlet.spawn_n()
 
     N340
     """
     msg = ("N340: Use nova.utils.%(spawn)s() rather than "
-           "greenthread.%(spawn)s()")
-    if re.match(greenthread_spawn_re, logical_line):
-        yield (0, msg % {'spawn': 'spawn'})
-    if re.match(greenthread_spawn_n_re, logical_line):
-        yield (0, msg % {'spawn': 'spawn_n'})
+           "greenthread.%(spawn)s() and eventlet.%(spawn)s()")
+    if "nova/utils.py" in filename or "nova/tests/" in filename:
+        return
+
+    match = re.match(spawn_re, logical_line)
+
+    if match:
+        yield (0, msg % {'spawn': match.group('spawn_part')})
+
+
+def check_no_contextlib_nested(logical_line, filename):
+    msg = ("N341: contextlib.nested is deprecated. With Python 2.7 and later "
+           "the with-statement supports multiple nested objects. See https://"
+           "docs.python.org/2/library/contextlib.html#contextlib.nested for "
+           "more information. nova.test.nested() is an alternative as well.")
+
+    if contextlib_nested.match(logical_line):
+        yield(0, msg)
+
+
+def check_config_option_in_central_place(logical_line, filename):
+    msg = ("N342: Config options should be in the central location "
+           "'/nova/conf/*'. Do not declare new config options outside "
+           "of that folder.")
+    # That's the correct location
+    if "nova/conf/" in filename:
+        return
+    # TODO(markus_z) This is just temporary until all config options are
+    # moved to the central place. To avoid that a once cleaned up place
+    # introduces new config options, we do a check here. This array will
+    # get quite huge over the time, but will be removed at the end of the
+    # reorganization.
+    # You can add the full path to a module or folder. It's just a substring
+    # check, which makes it flexible enough.
+    cleaned_up = ["nova/console/serial.py",
+                  "nova/cmd/serialproxy.py",
+                  ]
+    if not any(c in filename for c in cleaned_up):
+        return
+
+    if cfg_opt_re.match(logical_line):
+        yield(0, msg)
+
+
+def check_doubled_words(physical_line, filename):
+    """Check for the common doubled-word typos
+
+    N343
+    """
+    msg = ("N343: Doubled word '%(word)s' typo found")
+
+    match = re.search(doubled_words_re, physical_line)
+
+    if match:
+        return (0, msg % {'word': match.group(1)})
+
+
+def check_python3_no_iteritems(logical_line):
+    msg = ("N344: Use six.iteritems() instead of dict.iteritems().")
+
+    if re.search(r".*\.iteritems\(\)", logical_line):
+        yield(0, msg)
+
+
+def check_python3_no_iterkeys(logical_line):
+    msg = ("N345: Use six.iterkeys() instead of dict.iterkeys().")
+
+    if re.search(r".*\.iterkeys\(\)", logical_line):
+        yield(0, msg)
+
+
+def check_python3_no_itervalues(logical_line):
+    msg = ("N346: Use six.itervalues() instead of dict.itervalues().")
+
+    if re.search(r".*\.itervalues\(\)", logical_line):
+        yield(0, msg)
+
+
+def cfg_help_with_enough_text(logical_line, tokens):
+    # TODO(markus_z): The count of 10 chars is the *highest* number I could
+    # use to introduce this new check without breaking the gate. IOW, if I
+    # use a value of 15 for example, the gate checks will fail because we have
+    # a few config options which use fewer chars than 15 to explain their
+    # usage (for example the options "ca_file" and "cert").
+    # As soon as the implementation of bp centralize-config-options is
+    # finished, I wanted to increase that magic number to a higher (to be
+    # defined) value.
+    # This check is an attempt to programmatically check a part of the review
+    #  guidelines http://docs.openstack.org/developer/nova/code-review.html
+
+    msg = ("N347: A config option is a public interface to the cloud admins "
+           "and should be properly documented. A part of that is to provide "
+           "enough help text to describe this option. Use at least %s chars "
+           "for that description. Is is likely that this minimum will be "
+           "increased in the future." % opt_help_text_min_char_count)
+
+    if not cfg_opt_re.match(logical_line):
+        return
+
+    # ignore DeprecatedOpt objects. They get mentioned in the release notes
+    # and don't need a lengthy help text anymore
+    if "DeprecatedOpt" in logical_line:
+        return
+
+    def get_token_value(idx):
+        return tokens[idx][1]
+
+    def get_token_values(start_index, length):
+        values = ""
+        for offset in range(length):
+            values += get_token_value(start_index + offset)
+        return values
+
+    def get_help_token_index():
+        for idx in range(len(tokens)):
+            if get_token_value(idx) == "help":
+                return idx
+        return -1
+
+    def has_help():
+        return get_help_token_index() >= 0
+
+    def get_trimmed_help_text(t):
+        txt = ""
+        # len(["help", "=", "_", "("]) ==> 4
+        if get_token_values(t, 4) == "help=_(":
+            txt = get_token_value(t + 4)
+        # len(["help", "=", "("]) ==> 3
+        elif get_token_values(t, 3) == "help=(":
+            txt = get_token_value(t + 3)
+        # len(["help", "="]) ==> 2
+        else:
+            txt = get_token_value(t + 2)
+        return " ".join(txt.strip('\"\'').split())
+
+    def has_enough_help_text(txt):
+        return len(txt) >= opt_help_text_min_char_count
+
+    if has_help():
+        t = get_help_token_index()
+        txt = get_trimmed_help_text(t)
+        if not has_enough_help_text(txt):
+            yield(0, msg)
+    else:
+        yield(0, msg)
+
+
+def no_os_popen(logical_line):
+    """Disallow 'os.popen('
+
+    Deprecated library function os.popen() Replace it using subprocess
+    https://bugs.launchpad.net/tempest/+bug/1529836
+
+    N348
+    """
+
+    if 'os.popen(' in logical_line:
+        yield(0, 'N348 Deprecated library function os.popen(). '
+                 'Replace it using subprocess module. ')
 
 
 def factory(register):
@@ -561,4 +723,12 @@ def factory(register):
     register(dict_constructor_with_list_copy)
     register(assert_equal_in)
     register(check_http_not_implemented)
+    register(check_no_contextlib_nested)
     register(check_greenthread_spawns)
+    register(check_config_option_in_central_place)
+    register(check_doubled_words)
+    register(check_python3_no_iteritems)
+    register(check_python3_no_iterkeys)
+    register(check_python3_no_itervalues)
+    register(cfg_help_with_enough_text)
+    register(no_os_popen)

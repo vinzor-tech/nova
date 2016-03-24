@@ -21,12 +21,10 @@ from oslo_serialization import jsonutils
 import nova
 from nova.compute import vm_states
 from nova import context
-from nova import db
 from nova import objects
 from nova.objects import fields
 from nova.pci import manager
 from nova import test
-from nova.tests.unit.api.openstack import fakes
 from nova.tests.unit.pci import fakes as pci_fakes
 
 
@@ -37,6 +35,8 @@ fake_pci = {
     'vendor_id': 'v',
     'request_id': None,
     'status': fields.PciDeviceStatus.AVAILABLE,
+    'dev_type': fields.PciDeviceType.STANDARD,
+    'parent_addr': None,
     'numa_node': 0}
 fake_pci_1 = dict(fake_pci, address='0000:00:00.2',
                   product_id='p1', vendor_id='v1')
@@ -61,13 +61,14 @@ fake_db_dev = {
     'instance_uuid': None,
     'extra_info': '{}',
     'request_id': None,
+    'parent_addr': None,
     }
 fake_db_dev_1 = dict(fake_db_dev, vendor_id='v1',
                      product_id='p1', id=2,
                      address='0000:00:00.2',
                      numa_node=0)
 fake_db_dev_2 = dict(fake_db_dev, id=3, address='0000:00:00.3',
-                     numa_node=None)
+                     numa_node=None, parent_addr='0000:00:00.1')
 fake_db_devs = [fake_db_dev, fake_db_dev_1, fake_db_dev_2]
 
 
@@ -110,7 +111,7 @@ class PciDevTrackerTestCase(test.NoDBTestCase):
     def setUp(self):
         super(PciDevTrackerTestCase, self).setUp()
         self.fake_context = context.get_admin_context()
-        self.stubs.Set(db, 'pci_device_get_all_by_node',
+        self.stub_out('nova.db.pci_device_get_all_by_node',
             self._fake_get_pci_devices)
         # The fake_pci_whitelist must be called before creating the fake
         # devices
@@ -273,8 +274,12 @@ class PciDevTrackerTestCase(test.NoDBTestCase):
                               dev in self.tracker.pci_devs]),
                          set(['v', 'v1']))
 
-    def test_save(self):
-        self.stubs.Set(db, "pci_device_update", self._fake_pci_device_update)
+    @mock.patch.object(objects.PciDevice, 'should_migrate_data',
+                       return_value=False)
+    def test_save(self, migrate_mock):
+        self.stub_out(
+                'nova.db.pci_device_update',
+                self._fake_pci_device_update)
         fake_pci_v3 = dict(fake_pci, address='0000:00:00.2', vendor_id='v3')
         fake_pci_devs = [copy.deepcopy(fake_pci), copy.deepcopy(fake_pci_2),
                          copy.deepcopy(fake_pci_v3)]
@@ -284,8 +289,12 @@ class PciDevTrackerTestCase(test.NoDBTestCase):
         self.assertEqual(self.update_called, 3)
 
     def test_save_removed(self):
-        self.stubs.Set(db, "pci_device_update", self._fake_pci_device_update)
-        self.stubs.Set(db, "pci_device_destroy", self._fake_pci_device_destroy)
+        self.stub_out(
+                'nova.db.pci_device_update',
+                self._fake_pci_device_update)
+        self.stub_out(
+                'nova.db.pci_device_destroy',
+                self._fake_pci_device_destroy)
         self.destroy_called = 0
         self.assertEqual(len(self.tracker.pci_devs), 3)
         dev = self.tracker.pci_devs[0]
@@ -360,11 +369,22 @@ class PciDevTrackerTestCase(test.NoDBTestCase):
             set([dev.address for dev in free_devs]),
             set(['0000:00:00.1', '0000:00:00.2', '0000:00:00.3']))
 
+    @mock.patch('nova.objects.InstancePCIRequests.get_by_instance')
+    def test_free_devices(self, mock_get):
+        self._create_pci_requests_object(mock_get,
+            [{'count': 1, 'spec': [{'vendor_id': 'v'}]}])
+        self.tracker.claim_instance(None, self.inst)
+        self.tracker.update_pci_for_instance(None, self.inst, sign=1)
 
-class PciGetInstanceDevs(test.TestCase):
-    def setUp(self):
-        super(PciGetInstanceDevs, self).setUp()
-        self.fake_context = context.get_admin_context()
+        free_devs = self.tracker.pci_stats.get_free_devs()
+        self.assertEqual(len(free_devs), 2)
+
+        self.tracker.free_instance(None, self.inst)
+        free_devs = self.tracker.pci_stats.get_free_devs()
+        self.assertEqual(len(free_devs), 3)
+
+
+class PciGetInstanceDevs(test.NoDBTestCase):
 
     def test_get_devs_object(self):
         def _fake_obj_load_attr(foo, attrname):
@@ -372,15 +392,10 @@ class PciGetInstanceDevs(test.TestCase):
                 self.load_attr_called = True
                 foo.pci_devices = objects.PciDeviceList()
 
-        inst = fakes.stub_instance(id='1')
-        self.mox.StubOutWithMock(db, 'instance_get')
-        db.instance_get(self.fake_context, '1', columns_to_join=[]
-                        ).AndReturn(inst)
-        self.mox.ReplayAll()
-        inst = objects.Instance.get_by_id(self.fake_context, '1',
-                                          expected_attrs=[])
-        self.stubs.Set(objects.Instance, 'obj_load_attr', _fake_obj_load_attr)
+        self.stub_out(
+                'nova.objects.Instance.obj_load_attr',
+                _fake_obj_load_attr)
 
         self.load_attr_called = False
-        manager.get_instance_pci_devs(inst)
-        self.assertEqual(self.load_attr_called, True)
+        manager.get_instance_pci_devs(objects.Instance())
+        self.assertTrue(self.load_attr_called)

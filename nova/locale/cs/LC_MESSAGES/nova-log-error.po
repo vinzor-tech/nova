@@ -4,20 +4,23 @@
 #
 # Translators:
 # Zbyněk Schwarz <zbynek.schwarz@gmail.com>, 2015
+# OpenStack Infra <zanata@openstack.org>, 2015. #zanata
+# Zbyněk Schwarz <zbynek.schwarz@gmail.com>, 2015. #zanata
 msgid ""
 msgstr ""
-"Project-Id-Version: nova\n"
+"Project-Id-Version: nova 13.0.0.0b4.dev129\n"
 "Report-Msgid-Bugs-To: EMAIL@ADDRESS\n"
-"POT-Creation-Date: 2015-09-08 06:24+0000\n"
-"PO-Revision-Date: 2015-08-30 00:41+0000\n"
-"Last-Translator: openstackjenkins <jenkins@openstack.org>\n"
-"Language-Team: Czech (http://www.transifex.com/openstack/nova/language/cs/)\n"
-"Language: cs\n"
+"POT-Creation-Date: 2016-03-10 03:26+0000\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
-"Generated-By: Babel 2.0\n"
+"PO-Revision-Date: 2015-12-21 12:12+0000\n"
+"Last-Translator: Zbyněk Schwarz <zbynek.schwarz@gmail.com>\n"
+"Language: cs\n"
 "Plural-Forms: nplurals=3; plural=(n==1) ? 0 : (n>=2 && n<=4) ? 1 : 2;\n"
+"Generated-By: Babel 2.0\n"
+"X-Generator: Zanata 3.7.3\n"
+"Language-Team: Czech\n"
 
 msgid "\"Look for the VDIs failed"
 msgstr "\"Hledání VBD selhalo"
@@ -53,27 +56,34 @@ msgstr ""
 "Agregát %(aggregate_id)s: neobnovitelný stav během provádění operace na "
 "%(host)s"
 
+msgid "An error occurred while deallocating network."
+msgstr "Při rušení přidělení sítě nastala chyba."
+
 msgid "An error occurred while refreshing the network cache."
 msgstr "Při obnově mezipaměti sítě došlo k chybě."
 
 #, python-format
-msgid "Attach volume failed: %s"
-msgstr "Připojení svazku selhalo: %s"
+msgid "Attach volume failed to %(instance_name)s: %(exn)s"
+msgstr "Připojení svazku k %(instance_name)s selhalo: %(exn)s"
 
 #, python-format
 msgid "Attaching PCI devices %(dev)s to %(dom)s failed."
 msgstr "Připojování zařízení PCI %(dev)s do %(dom)s selhalo."
 
 #, python-format
-msgid "Attaching network adapter failed. Exception:  %s"
+msgid "Attaching network adapter failed. Exception: %s"
 msgstr "Připojování síťového adaptéru selhalo. Výjimka: %s"
-
-#, python-format
-msgid "Cannot block migrate instance %s with mapped volumes"
-msgstr "Nelze blokově přesunout instanci %s s namapovanými svazky"
 
 msgid "Cannot cleanup migration files"
 msgstr "Nelze vyčistit soubory přesunu"
+
+#, python-format
+msgid ""
+"Cannot log in target %(target_iqn)s. Unsupported iSCSI authentication "
+"method: %(auth_method)s."
+msgstr ""
+"Nelze se přihlásit v cíli %(target_iqn)s. Nepodporovaný způsob věření ISCSI: "
+"%(auth_method)s."
 
 #, python-format
 msgid "Cannot reboot instance: %s"
@@ -113,6 +123,16 @@ msgstr "Compute.api::odemčení %s"
 #, python-format
 msgid "Compute.api::unpause %s"
 msgstr "Compute.api::zrušení pozastaevní %s"
+
+#, python-format
+msgid ""
+"Connection between volume %(vol)s and host %(host)s might have succeeded, "
+"but attempt to terminate connection has failed. Validate the connection and "
+"determine if manual cleanup is needed. Error: %(msg)s Code: %(code)s."
+msgstr ""
+"Připojení mezi svazkem %(vol)s a hostitelem %(host)s bylo možná navázáno, "
+"ale pokus o jeho ukončení selhalo. Ověřte připojení a zjistěte, zdali je "
+"třeba zakročit ručně. Chyba: %(msg)s, kóde: %(code)s."
 
 #, python-format
 msgid "Connection to libvirt failed: %s"
@@ -209,15 +229,10 @@ msgid "Environment variable 'NETWORK_ID' must be set."
 msgstr "Proměnná prostředí 'NETWORK_ID' musí být nastavena."
 
 #, python-format
-msgid "Environment: %s"
-msgstr "Prostředí: %s"
-
-#, python-format
 msgid ""
-"Error contacting glance server '%(host)s:%(port)s' for '%(method)s', "
-"%(extra)s."
+"Error contacting glance server '%(server)s' for '%(method)s', %(extra)s."
 msgstr ""
-"Chyba při kontaktování serveru glance '%(host)s:%(port)s' pro '%(method)s', "
+"Chyba při kontaktování serveru glance '%(server)s' pro '%(method)s', "
 "%(extra)s."
 
 #, python-format
@@ -274,6 +289,14 @@ msgstr "Chyba od libvirt během rušení určení. Kód=%(errcode)s Chyba=%(e)s"
 #, python-format
 msgid "Error from libvirt during unfilter. Code=%(errcode)s Error=%(e)s"
 msgstr "Chyba od libvirt během rušení filtru. Kód=%(errcode)s Chyba=%(e)s"
+
+#, python-format
+msgid ""
+"Error from libvirt while injecting an NMI to %(instance_uuid)s: [Error Code "
+"%(error_code)s] %(ex)s"
+msgstr ""
+"Chyba od libvirt při vkládání NMI do %(instance_uuid)s: [Kód chyby "
+"%(error_code)s] %(ex)s"
 
 #, python-format
 msgid "Error getting key: %s"
@@ -362,10 +385,6 @@ msgstr "Chyba při pokusu o záchranu instance"
 msgid "Error trying to reschedule"
 msgstr "Chyba při pokusu o znovu naplánování"
 
-#, python-format
-msgid "Error updating resources for node %(node)s: %(e)s"
-msgstr "Chyba při aktualizaci zdrojů pro uzel %(node)s: %(e)s"
-
 msgid "Error waiting for responses from neighbor cells"
 msgstr "Chyba při čekání na odpověď od sousedních buněk"
 
@@ -376,10 +395,6 @@ msgstr "Chyba při pokusu o vyčištění obrazu %s"
 #, python-format
 msgid "Error writing to %(path)s: %(exception)s"
 msgstr "Chyba při zápisu do %(path)s: %(exception)s"
-
-#, python-format
-msgid "Error writing vm console log file from serial console pipe. Error: %s"
-msgstr "Chyba při zápisu záznamu konzole vm z roury sériové konzole. Chyba: %s"
 
 #, python-format
 msgid "Error: %s"
@@ -457,14 +472,6 @@ msgid "Failed to check if instance shared"
 msgstr "Nelze zkontrolovat sdílení instance"
 
 #, python-format
-msgid ""
-"Failed to clean up the parameters on node %(node)s when unprovisioning the "
-"instance %(instance)s"
-msgstr ""
-"Nelze vyčistit parametry na uzlu %(node)s při rušení poskytování instance "
-"%(instance)s"
-
-#, python-format
 msgid "Failed to cleanup directory %(target)s: %(e)s"
 msgstr "Nelze vyčistit adresář %(target)s: %(e)s"
 
@@ -516,6 +523,21 @@ msgstr "Nelze odpojit svazek %(volume_id)s z %(mp)s"
 msgid "Failed to download %(image_location)s to %(image_path)s"
 msgstr "Nelze stáhnout %(image_location)s do %(image_path)s"
 
+#, python-format
+msgid ""
+"Failed to extract compute RPC version from service history because I am too "
+"old (minimum version is now %(version)i)"
+msgstr ""
+"Nelze extrahovat verzi výpočetní RPC z historii služeb, protože je příliš "
+"stará. (Minimální verze je nyní %(version)i)"
+
+#, python-format
+msgid ""
+"Failed to extract compute RPC version from service history for version "
+"%(version)i"
+msgstr ""
+"Nelze extrahovat verzi výpočetní RPC z historii služeb, pro verzi %(version)i"
+
 msgid "Failed to fetch glance image"
 msgstr "Nelze získat obraz glance"
 
@@ -547,12 +569,12 @@ msgstr ""
 "%(provider)s, sítě %(networks)s, žadatel %(requester)s. Chyba: %(error)s"
 
 #, python-format
-msgid "Failed to get metadata for instance id: %s"
-msgstr "Nelze získat popisná data pro id instance: %s"
+msgid "Failed to get metadata for IP: %s"
+msgstr "Nelze získat popisná data pro Ip adresu: %s"
 
 #, python-format
-msgid "Failed to get metadata for ip: %s"
-msgstr "Nelze získat popisná data pro ip: %s"
+msgid "Failed to get metadata for instance id: %s"
+msgstr "Nelze získat popisná data pro id instance: %s"
 
 msgid "Failed to get nw_info"
 msgstr "Nelze získat informace o síti"
@@ -663,10 +685,6 @@ msgstr "Nelze strhnout souborový systém kontejneru"
 msgid "Failed to umount container filesystem"
 msgstr "Nelze odpojit souborový systém kontejneru"
 
-#, python-format
-msgid "Failed to understand rule %s"
-msgstr "Nelze pochopit pravidlo %s"
-
 msgid "Failed to unpause instance"
 msgstr "Nelze zrušit pozastavení iínstance"
 
@@ -725,12 +743,6 @@ msgstr "Čištění připojených VDI selhalo"
 msgid "Fatal Exception running %(name)s %(type)s-hook: %(obj)s"
 msgstr "Závažná výjimka při spuštění %(name)s %(type)s-hák: %(obj)s"
 
-msgid "FaultWrapper error"
-msgstr "Chyba ve FaultWrapper"
-
-msgid "Get version 2 connection error"
-msgstr "Chyba připojení Get verze 2"
-
 msgid "Guest does not have a console available"
 msgstr "Host nemá konzoli k dispozici"
 
@@ -750,6 +762,18 @@ msgid "Image size %(size)d exceeded flavor allowed size %(allowed_size)d"
 msgstr ""
 "Velikost obrazu %(size)d překročila množství %(allowed_size)d povolené "
 "konfigurací"
+
+#, python-format
+msgid "Improper or unknown HTTP status code used: %d"
+msgstr "Použit nesprávný nebo špatný kód stavu HTTP: %d"
+
+#, python-format
+msgid ""
+"Initialize connection failed for volume %(vol)s on host %(host)s. Error: "
+"%(msg)s Code: %(code)s. Attempting to terminate connection."
+msgstr ""
+"Zavedení připojení selhalo u svazku %(vol)s na hostiteli %(host)s. Chyba: "
+"%(msg)s, kód: %(code)s. Probíhá pokus o přerušení připojení."
 
 #, python-format
 msgid ""
@@ -773,11 +797,6 @@ msgid "Instance type %s not found for deletion"
 msgstr "Vymazávaná Instance typu %s nebyla nalezena"
 
 #, python-format
-msgid "Instance update attempted for '%(key)s' on %(instance_uuid)s"
-msgstr ""
-"V '%(key)s' na %(instance_uuid)s se uskutečnil pokus o aktualizaci instance"
-
-#, python-format
 msgid "Interface %s not found"
 msgstr "Rozhraní %s nenalezeno"
 
@@ -786,12 +805,11 @@ msgid "Invalid server_string: %s"
 msgstr "Neplatný řetězec serveru: %s"
 
 #, python-format
-msgid "Keystone failure: %s"
-msgstr "Selhání Keystone: %s"
-
-#, python-format
 msgid "Live Migration failure: %s"
 msgstr "Selhání přesunu za běhu: %s"
+
+msgid "Live migration failed."
+msgstr "Přesun za provozu selhal."
 
 msgid "Migrate Receive failed"
 msgstr "Přijetí přesunu selhalo"
@@ -881,19 +899,11 @@ msgid "No db access allowed in nova-network: %s"
 msgstr "Nova-network nemá povolen přístup k db: %s"
 
 #, python-format
-msgid "No handler for matches of kind %s"
-msgstr "Žádná obslužná rutina pro shody druhu %s"
-
-#, python-format
 msgid "No save handler for %s"
 msgstr "Žádná obslužná rutina pro uložení %s"
 
 msgid "Not all properties needed are implemented in the compute driver"
 msgstr "Ne všechny potřebné vlastnosti jsou ovladačem výpočtu zavedeny"
-
-#, python-format
-msgid "PCI device %s not found"
-msgstr "PCI zařízení %s nenalezeno"
 
 msgid ""
 "Periodic sync_power_state task had an error while processing an instance."
@@ -927,7 +937,7 @@ msgid "Read/Write data failed"
 msgstr "Zápis/Čtení dat selhalo"
 
 #, python-format
-msgid "Requested VM Generation %s is not supported on  this OS."
+msgid "Requested VM Generation %s is not supported on this OS."
 msgstr "Požadované vytvoření VM %s není v tomto OS podporováno."
 
 #, python-format
@@ -968,8 +978,7 @@ msgid "The Quobyte volume at %s is still in use."
 msgstr "Svazek Quobyte na %s se stále používá."
 
 #, python-format
-msgid ""
-"The agent call to %(method)s returned an an error: %(ret)r. args=%(args)r"
+msgid "The agent call to %(method)s returned an error: %(ret)r. args=%(args)r"
 msgstr "Volání agenta %(method)s vrátilo chybu: %(ret)r. argumenty=%(args)r"
 
 #, python-format
@@ -992,12 +1001,12 @@ msgid "Transfer data failed"
 msgstr "Přenos dat selhal"
 
 #, python-format
-msgid "Unable to access floating IP %(fixed_ip)s for port %(port_id)s"
-msgstr "Nelze získat přístup k plovoucím IP %(fixed_ip)s na portu %(port_id)s"
-
-#, python-format
 msgid "Unable to access floating IP %s"
 msgstr "Nelze získat přístup k plovoucím IP %s"
+
+#, python-format
+msgid "Unable to access floating IP for %s"
+msgstr "Nelze získat přístup k plovoucím IP pro %s"
 
 msgid "Unable to access the rescue disk"
 msgstr "Nelze získat přístup k záchrannému disku"
@@ -1024,6 +1033,9 @@ msgstr ""
 msgid "Unable to destroy VBD"
 msgstr "Nelze zničit VBD"
 
+msgid "Unable to determine the glance API version"
+msgstr "Nelze zjistit API verzi glance"
+
 #, python-format
 msgid "Unable to execute %(cmd)s. Exception: %(exception)s"
 msgstr "Nelze spustit %(cmd)s. Výjimka: %(exception)s"
@@ -1033,6 +1045,10 @@ msgstr "Nelze najít SR z VBD"
 
 msgid "Unable to find SR from VDI"
 msgstr "Nelze najít SR z VDI"
+
+#, python-format
+msgid "Unable to find a service record to update for %(binary)s on %(host)s"
+msgstr "Nelze najít záznam služby k aktualizaci pro %(binary)s na %(host)s"
 
 #, python-format
 msgid "Unable to find address %r"
@@ -1049,15 +1065,6 @@ msgstr "Nelze zavést VDI pro SR"
 
 msgid "Unable to introduce VDI on SR"
 msgstr "Nelze zavést VDI na SR"
-
-msgid ""
-"Unable to join. It is possible that either another node exists with the same "
-"name, or this node just restarted. We will try again in a short while to "
-"make sure."
-msgstr ""
-"Nelze se připojit. Pravděpodobně existuje jiný uzel se stejným názvem,, nebo "
-"byl tento uzel právě restartován. Pro ujištění bude za chvíli proveden další "
-"pokus."
 
 msgid "Unable to load the virtualization driver"
 msgstr "Nelze načíst ovladač virtualiazce"
@@ -1078,8 +1085,8 @@ msgid "Unable to parse rrd of %s"
 msgstr "Nelze zpracovat rrd z %s"
 
 #, python-format
-msgid "Unable to preallocate image at path: %(path)s"
-msgstr "Nelze předpřidělit obraz na cestě: %(path)s"
+msgid "Unable to retrieve certificate with ID %(id)s: %(e)s"
+msgstr "Nelze získat certifikát s ID %(id)s: %(e)s"
 
 #, python-format
 msgid "Unable to retrieve storage policy with name %s"
@@ -1100,16 +1107,15 @@ msgstr "Nelze aktualizovat hostitele na portu %s"
 msgid "Unable to update instance VNIC index for port %s."
 msgstr "Nelze aktualizovat index VNIC instance pro port %s."
 
-#, python-format
-msgid "Unexpected %(ex_name)s raised: %(ex_str)s"
-msgstr "Zjištěno neočekávané %(ex_name)s: %(ex_str)s"
-
 msgid "Unexpected build failure, not rescheduling build."
 msgstr "Neočekávané selhání sestavení, nebude znovu naplánováno."
 
 #, python-format
 msgid "Unexpected error while checking process %(pid)s."
 msgstr "Neočekávaná chyba při kontrole procesu %(pid)s."
+
+msgid "Unexpected error while reporting service status"
+msgstr "Při hlášení stavu služby se objevila nečekaná chyba."
 
 msgid "Unexpected exception in API method"
 msgstr "Neočekávaná výjimka v metodě API"
@@ -1161,6 +1167,14 @@ msgstr ""
 "XenAPI nemohlo najít repozitář úložišť na které instalovat hosty. Prosím "
 "zkontrolujte své nastavení (např. nastavte výchozí SR pro zásobu) a/nebo "
 "nastavte příznak 'sr_matching_filter'."
+
+msgid ""
+"You are running nova-compute on an unsupported version of Windows (older "
+"than Windows / Hyper-V Server 2012). The support for this version of Windows "
+"has been removed in Mitaka."
+msgstr ""
+"nova-compute spouštíte na nepodporované verzi Windows (starší než Windows / "
+"Hyper-V Server 2012). Podpora pro tuto verzi byla odstraněna v Mitaka."
 
 msgid "_migrate_disk_resizing_down failed. Restoring orig vm"
 msgstr "Přesunutí a zmenšení disku selhalo. Obnovování původní vm"

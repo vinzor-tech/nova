@@ -12,11 +12,10 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from collections import OrderedDict
+import collections
 import contextlib
 import copy
 import datetime
-import hashlib
 import inspect
 import os
 import pprint
@@ -25,17 +24,18 @@ import fixtures
 import mock
 from oslo_log import log
 from oslo_utils import timeutils
+from oslo_utils import versionutils
 from oslo_versionedobjects import base as ovo_base
 from oslo_versionedobjects import exception as ovo_exc
 from oslo_versionedobjects import fixture
 import six
-from testtools import matchers
 
 from nova import context
 from nova import exception
 from nova import objects
 from nova.objects import base
 from nova.objects import fields
+from nova.objects import notification
 from nova import test
 from nova.tests import fixtures as nova_fixtures
 from nova.tests.unit import fake_notifier
@@ -113,28 +113,6 @@ class MyObj(base.NovaPersistentObject, base.NovaObject,
         # format for the 'bar' attribute
         if target_version == '1.1' and 'bar' in primitive:
             primitive['bar'] = 'old%s' % primitive['bar']
-
-
-class MyObjDiffVers(MyObj):
-    VERSION = '1.5'
-
-    @classmethod
-    def obj_name(cls):
-        return 'MyObj'
-
-
-class MyObj2(base.NovaObject):
-    fields = {
-        'bar': fields.StringField(),
-    }
-
-    @classmethod
-    def obj_name(cls):
-        return 'MyObj'
-
-    @base.remotable_classmethod
-    def query(cls, *args, **kwargs):
-        pass
 
 
 class RandomMixInWithNoFields(object):
@@ -257,7 +235,6 @@ def compare_obj(test, obj, db_obj, subs=None, allow_missing=None,
 class _BaseTestCase(test.TestCase):
     def setUp(self):
         super(_BaseTestCase, self).setUp()
-        self.remote_object_calls = list()
         self.user_id = 'fake-user'
         self.project_id = 'fake-project'
         self.context = context.RequestContext(self.user_id, self.project_id)
@@ -267,7 +244,6 @@ class _BaseTestCase(test.TestCase):
         # NOTE(danms): register these here instead of at import time
         # so that they're not always present
         base.NovaObjectRegistry.register(MyObj)
-        base.NovaObjectRegistry.register(MyObjDiffVers)
         base.NovaObjectRegistry.register(MyOwnedObject)
 
     def compare_obj(self, obj, db_obj, subs=None, allow_missing=None,
@@ -280,17 +256,6 @@ class _BaseTestCase(test.TestCase):
         a simple coercion on the object field value.
         """
         self.assertEqual(expected, str(obj_val))
-
-    def assertNotIsInstance(self, obj, cls, msg=None):
-        """Python < v2.7 compatibility.  Assert 'not isinstance(obj, cls)."""
-        try:
-            f = super(_BaseTestCase, self).assertNotIsInstance
-        except AttributeError:
-            self.assertThat(obj,
-                            matchers.Not(matchers.IsInstance(cls)),
-                            message=msg or '')
-        else:
-            f(obj, cls, msg=msg)
 
 
 class _LocalTest(_BaseTestCase):
@@ -310,6 +275,9 @@ def things_temporarily_local():
     base.NovaObject.indirection_api = _api
 
 
+# FIXME(danms): We shouldn't be overriding any of this, but need to
+# for the moment because of the mocks in the base fixture that don't
+# hit our registry subclass.
 class FakeIndirectionHack(fixture.FakeIndirectionAPI):
     def object_action(self, context, objinst, objmethod, args, kwargs):
         objinst = self._ser.deserialize_entity(
@@ -345,6 +313,23 @@ class FakeIndirectionHack(fixture.FakeIndirectionAPI):
         return (base.NovaObject.obj_from_primitive(
             result.obj_to_primitive(target_version=objver,
                                     version_manifest=manifest),
+            context=context)
+            if isinstance(result, base.NovaObject) else result)
+
+    def object_class_action_versions(self, context, objname, objmethod,
+                                     object_versions, args, kwargs):
+        objname = six.text_type(objname)
+        objmethod = six.text_type(objmethod)
+        object_versions = {six.text_type(o): six.text_type(v)
+                           for o, v in object_versions.items()}
+        args, kwargs = self._canonicalize_args(context, args, kwargs)
+        objver = object_versions[objname]
+        cls = base.NovaObject.obj_class_from_name(objname, objver)
+        with mock.patch('nova.objects.base.NovaObject.'
+                        'indirection_api', new=None):
+            result = getattr(cls, objmethod)(context, *args, **kwargs)
+        return (base.NovaObject.obj_from_primitive(
+            result.obj_to_primitive(target_version=objver),
             context=context)
             if isinstance(result, base.NovaObject) else result)
 
@@ -485,28 +470,6 @@ class _TestObject(object):
         obj2.obj_reset_changes()
         self.assertEqual(obj2.obj_what_changed(), set())
 
-    def test_obj_class_from_name(self):
-        obj = base.NovaObject.obj_class_from_name('MyObj', '1.5')
-        self.assertEqual('1.5', obj.VERSION)
-
-    def test_obj_class_from_name_latest_compatible(self):
-        obj = base.NovaObject.obj_class_from_name('MyObj', '1.1')
-        self.assertEqual('1.6', obj.VERSION)
-
-    def test_unknown_objtype(self):
-        self.assertRaises(ovo_exc.UnsupportedObjectError,
-                          base.NovaObject.obj_class_from_name, 'foo', '1.0')
-
-    def test_obj_class_from_name_supported_version(self):
-        error = None
-        try:
-            base.NovaObject.obj_class_from_name('MyObj', '1.25')
-        except ovo_exc.IncompatibleObjectVersion as ex:
-            error = ex
-
-        self.assertIsNotNone(error)
-        self.assertEqual('1.6', error.kwargs['supported'])
-
     def test_orphaned_object(self):
         obj = MyObj.query(self.context)
         obj._context = None
@@ -588,8 +551,8 @@ class _TestObject(object):
                     'nova_object.changes':
                         ['deleted', 'created_at', 'deleted_at', 'updated_at'],
                     'nova_object.data':
-                        {'created_at': timeutils.isotime(dt),
-                         'updated_at': timeutils.isotime(dt),
+                        {'created_at': utils.isotime(dt),
+                         'updated_at': utils.isotime(dt),
                          'deleted_at': None,
                          'deleted': False,
                          }
@@ -891,33 +854,6 @@ class TestObject(_LocalTest, _TestObject):
         self.assertTrue(obj.deleted)
 
 
-class TestRemoteObject(_RemoteTest, _TestObject):
-    def test_major_version_mismatch(self):
-        MyObj2.VERSION = '2.0'
-        self.assertRaises(ovo_exc.IncompatibleObjectVersion,
-                          MyObj2.query, self.context)
-
-    def test_minor_version_greater(self):
-        MyObj2.VERSION = '1.7'
-        self.assertRaises(ovo_exc.IncompatibleObjectVersion,
-                          MyObj2.query, self.context)
-
-    def test_minor_version_less(self):
-        MyObj2.VERSION = '1.2'
-        obj = MyObj2.query(self.context)
-        self.assertEqual(obj.bar, 'bar')
-
-    def test_compat(self):
-        MyObj2.VERSION = '1.1'
-        obj = MyObj2.query(self.context)
-        self.assertEqual('oldbar', obj.bar)
-
-    def test_revision_ignored(self):
-        MyObj2.VERSION = '1.1.456'
-        obj = MyObj2.query(self.context)
-        self.assertEqual('bar', obj.bar)
-
-
 class TestObjectSerializer(_BaseTestCase):
     def test_serialize_entity_primitive(self):
         ser = base.NovaObjectSerializer()
@@ -1103,7 +1039,7 @@ class TestArgsSerializer(test.NoDBTestCase):
     def setUp(self):
         super(TestArgsSerializer, self).setUp()
         self.now = timeutils.utcnow()
-        self.str_now = timeutils.strtime(at=self.now)
+        self.str_now = utils.strtime(self.now)
         self.unicode_str = u'\xF0\x9F\x92\xA9'
 
     @base.serialize_args
@@ -1163,14 +1099,15 @@ class TestRegistry(test.NoDBTestCase):
 object_data = {
     'Agent': '1.0-c0c092abaceb6f51efe5d82175f15eba',
     'AgentList': '1.0-5a7380d02c3aaf2a32fc8115ae7ca98c',
-    'Aggregate': '1.1-1ab35c4516f71de0bef7087026ab10d1',
+    'Aggregate': '1.2-fe9d8c93feb37919753e9e44fe6818a7',
     'AggregateList': '1.2-fb6e19f3c3a3186b04eceb98b5dadbfa',
     'BandwidthUsage': '1.2-c6e4c779c7f40f2407e3d70022e3cd1c',
     'BandwidthUsageList': '1.2-5fe7475ada6fe62413cbfcc06ec70746',
-    'BlockDeviceMapping': '1.15-d44d8d694619e79c172a99b3c1d6261d',
-    'BlockDeviceMappingList': '1.16-6fa262c059dad1d519b9fe05b9e4f404',
+    'BlockDeviceMapping': '1.16-f0c172e902bc62f1cac05b17d7be7688',
+    'BlockDeviceMappingList': '1.17-1e568eecb91d06d4112db9fd656de235',
+    'BuildRequest': '1.0-e4ca475cabb07f73d8176f661afe8c55',
     'CellMapping': '1.0-7f1a7e85a22bbb7559fc730ab658b9bd',
-    'ComputeNode': '1.14-a396975707b66281c5f404a68fccd395',
+    'ComputeNode': '1.16-2436e5b836fa0306a3c4e6d9e5ddacec',
     'ComputeNodeList': '1.14-3b6f4f5ade621c40e70cb116db237844',
     'DNSDomain': '1.0-7b0b2dab778454b6a7b6c66afe163a1a',
     'DNSDomainList': '1.0-4ee0d9efdfd681fed822da88376e04d2',
@@ -1178,6 +1115,7 @@ object_data = {
     'EC2InstanceMapping': '1.0-a4556eb5c5e94c045fe84f49cf71644f',
     'EC2SnapshotMapping': '1.0-47e7ddabe1af966dce0cfd0ed6cd7cd1',
     'EC2VolumeMapping': '1.0-5b713751d6f97bad620f3378a521020d',
+    'EventType': '1.0-21dc35de314fc5fc0a7965211c0c00f7',
     'FixedIP': '1.14-53e1c10b539f1a82fe83b1af4720efae',
     'FixedIPList': '1.14-87a39361c8f08f059004d6b15103cdfd',
     'Flavor': '1.1-b6bb7a730a79d720344accefafacf7ee',
@@ -1185,14 +1123,11 @@ object_data = {
     'FloatingIP': '1.10-52a67d52d85eb8b3f324a5b7935a335b',
     'FloatingIPList': '1.11-7f2ba670714e1b7bab462ab3290f7159',
     'HostMapping': '1.0-1a3390a696792a552ab7bd31a77ba9ac',
-    'HVSpec': '1.1-6b4f7c0f688cbd03e24142a44eb9010d',
-    'ImageMeta': '1.7-642d1b2eb3e880a367f37d72dd76162d',
-    'ImageMetaProps': '1.7-f12fc4cf3e25d616f69a66fb9d2a7aa6',
-    'Instance': '2.0-ff56804dce87d81d9a04834d4bd1e3d2',
-    # NOTE(danms): Reviewers: do not approve changes to the Instance1
-    # object schema. It is frozen for Liberty and will be removed in
-    # Mitaka.
-    'Instance1': '1.23-4e68422207667f4abff5fa730a5edc98',
+    'HyperVLiveMigrateData': '1.0-0b868dd6228a09c3f3e47016dddf6a1c',
+    'HVSpec': '1.2-db672e73304da86139086d003f3977e7',
+    'ImageMeta': '1.8-642d1b2eb3e880a367f37d72dd76162d',
+    'ImageMetaProps': '1.12-6a132dee47931447bf86c03c7006d96c',
+    'Instance': '2.1-416fdd0dfc33dfa12ff2cfdd8cc32e17',
     'InstanceAction': '1.1-f9f293e526b66fca0d05c3b3a2d13914',
     'InstanceActionEvent': '1.1-e56a64fa4710e43ef7af2ad9d6028b33',
     'InstanceActionEventList': '1.1-13d92fb953030cdbfee56481756e02be',
@@ -1204,23 +1139,24 @@ object_data = {
     'InstanceGroupList': '1.7-be18078220513316abd0ae1b2d916873',
     'InstanceInfoCache': '1.5-cd8b96fefe0fc8d4d337243ba0bf0e1e',
     'InstanceList': '2.0-6c8ba6147cca3082b1e4643f795068bf',
-    # NOTE(danms): Reviewers: do not approve changes to the InstanceList1
-    # object schema. It is frozen for Liberty and will be removed in
-    # Mitaka.
-    'InstanceList1': '1.22-6c8ba6147cca3082b1e4643f795068bf',
-    'InstanceMapping': '1.0-47ef26034dfcbea78427565d9177fe50',
+    'InstanceMapping': '1.0-94bff38981ef9ce37c9fccf309b94f58',
     'InstanceMappingList': '1.0-9e982e3de1613b9ada85e35f69b23d47',
-    'InstanceNUMACell': '1.2-535ef30e0de2d6a0d26a71bd58ecafc4',
+    'InstanceNUMACell': '1.3-6991a20992c5faa57fae71a45b40241b',
     'InstanceNUMATopology': '1.2-d944a7d6c21e1c773ffdf09c6d025954',
     'InstancePCIRequest': '1.1-b1d75ebc716cb12906d9d513890092bf',
     'InstancePCIRequests': '1.1-65e38083177726d806684cb1cc0136d2',
+    'Inventory': '1.0-f4160797d47a533a58700e9ddcc9c5e2',
+    'InventoryList': '1.0-de53f0fd078c27cc1d43400f4e8bcef8',
+    'LibvirtLiveMigrateBDMInfo': '1.0-252aabb723ca79d5469fa56f64b57811',
+    'LibvirtLiveMigrateData': '1.1-4ecf40aae7fee7bb37fc3b2123e760de',
     'KeyPair': '1.3-bfaa2a8b148cdf11e0c72435d9dd097a',
     'KeyPairList': '1.2-58b94f96e776bedaf1e192ddb2a24c4e',
-    'Migration': '1.2-8784125bedcea0a9227318511904e853',
+    'Migration': '1.4-17979b9f2ae7f28d97043a220b2a8350',
     'MigrationContext': '1.0-d8c2f10069e410f639c49082b5932c92',
-    'MigrationList': '1.2-02c0ec0c50b75ca86a2a74c5e8c911cc',
+    'MigrationList': '1.3-55595bfc1a299a5962614d0821a3567e',
     'MonitorMetric': '1.1-53b1db7c4ae2c531db79761e7acc52ba',
     'MonitorMetricList': '1.1-15ecf022a68ddbb8c2a6739cfc9f8f5e',
+    'NotificationPublisher': '1.0-bbbc1402fb0e443a3eb227cc52b61545',
     'NUMACell': '1.2-74fc993ac5c83005e76e34e8487f1c05',
     'NUMAPagesTopology': '1.0-c71d86317283266dc8364c149155e48e',
     'NUMATopology': '1.2-c63fad38be73b6afd04715c9c1b29220',
@@ -1229,22 +1165,25 @@ object_data = {
     'NetworkList': '1.2-69eca910d8fa035dfecd8ba10877ee59',
     'NetworkRequest': '1.1-7a3e4ca2ce1e7b62d8400488f2f2b756',
     'NetworkRequestList': '1.1-15ecf022a68ddbb8c2a6739cfc9f8f5e',
-    'PciDevice': '1.3-d92e0b17bbed61815b919af6b8d8998e',
-    'PciDeviceList': '1.2-3757458c45591cbc92c72ee99e757c98',
+    'PciDevice': '1.5-0d5abe5c91645b8469eb2a93fc53f932',
+    'PciDeviceList': '1.3-52ff14355491c8c580bdc0ba34c26210',
     'PciDevicePool': '1.1-3f5ddc3ff7bfa14da7f6c7e9904cc000',
     'PciDevicePoolList': '1.1-15ecf022a68ddbb8c2a6739cfc9f8f5e',
     'Quotas': '1.2-1fe4cd50593aaf5d36a6dc5ab3f98fb3',
     'QuotasNoOp': '1.2-e041ddeb7dc8188ca71706f78aad41c1',
-    'RequestSpec': '1.4-6922fe208b5d1186bdd825513f677921',
+    'RequestSpec': '1.5-576a249869c161e17b7cd6d55f9d85f3',
+    'ResourceProvider': '1.0-57a9a344b0faed9cf6d6811835b6deb6',
     'S3ImageMapping': '1.0-7dd7366a890d82660ed121de9092276e',
     'SchedulerLimits': '1.0-249c4bd8e62a9b327b7026b7f19cc641',
     'SchedulerRetries': '1.1-3c9c8b16143ebbb6ad7030e999d14cc0',
     'SecurityGroup': '1.1-0e1b9ba42fe85c13c1437f8b74bdb976',
     'SecurityGroupList': '1.0-dc8bbea01ba09a2edb6e5233eae85cbc',
     'SecurityGroupRule': '1.1-ae1da17b79970012e8536f88cb3c6b29',
-    'SecurityGroupRuleList': '1.1-674b323c9ccea02e93b1b40e7fd2091a',
-    'Service': '1.18-f1c6e82b5479f63e35970fe7625c3878',
-    'ServiceList': '1.16-b767102cba7cbed290e396114c3f86b3',
+    'SecurityGroupRuleList': '1.2-0005c47fcd0fb78dd6d7fd32a1409f5b',
+    'Service': '1.19-8914320cbeb4ec29f252d72ce55d07e1',
+    'ServiceList': '1.18-6c52cb616621c1af2415dcc11faf5c1a',
+    'ServiceStatusNotification': '1.0-a73147b93b520ff0061865849d3dfa56',
+    'ServiceStatusPayload': '1.0-a5e7b4fd6cc5581be45b31ff1f3a3f7f',
     'TaskLog': '1.0-78b0534366f29aa3eebb01860fbe18fe',
     'TaskLogList': '1.0-cc8cce1af8a283b9d28b55fcd682e777',
     'Tag': '1.1-8b8d7d5b48887651a0e01241672e2963',
@@ -1255,205 +1194,53 @@ object_data = {
     'VirtualInterface': '1.0-19921e38cba320f355d56ecbf8f29587',
     'VirtualInterfaceList': '1.0-9750e2074437b3077e46359102779fc6',
     'VolumeUsage': '1.0-6c8190c46ce1469bb3286a1f21c2e475',
+    'XenapiLiveMigrateData': '1.0-5f982bec68f066e194cd9ce53a24ac4c',
 }
 
 
 class TestObjectVersions(test.NoDBTestCase):
-    @staticmethod
-    def _is_method(thing):
-        # NOTE(dims): In Python3, The concept of 'unbound methods' has
-        # been removed from the language. When referencing a method
-        # as a class attribute, you now get a plain function object.
-        # so let's check for both
-        return inspect.isfunction(thing) or inspect.ismethod(thing)
-
-    def _find_remotable_method(self, cls, thing, parent_was_remotable=False):
-        """Follow a chain of remotable things down to the original function."""
-        if isinstance(thing, classmethod):
-            return self._find_remotable_method(cls, thing.__get__(None, cls))
-        elif self._is_method(thing) and hasattr(thing, 'remotable'):
-            return self._find_remotable_method(cls, thing.original_fn,
-                                               parent_was_remotable=True)
-        elif parent_was_remotable:
-            # We must be the first non-remotable thing underneath a stack of
-            # remotable things (i.e. the actual implementation method)
-            return thing
-        else:
-            # This means the top-level thing never hit a remotable layer
-            return None
-
-    def _un_unicodify_enum_valid_values(self, _fields):
-        for name, field in _fields:
-            if not isinstance(field, (fields.BaseEnumField,
-                                      fields.EnumField)):
-                continue
-            orig_type = type(field._type._valid_values)
-            field._type._valid_values = orig_type(
-                [x.encode('utf-8') for x in
-                 field._type._valid_values])
-
-    def _get_fingerprint(self, obj_class):
-        fields = list(obj_class.fields.items())
-        # NOTE(danms): We store valid_values in the enum as strings,
-        # but oslo is working to make these coerced to unicode (which
-        # is the right thing to do). The functionality will be
-        # unchanged, but the repr() result that we use for calculating
-        # the hashes will be different. This helper method coerces all
-        # Enum valid_values elements to UTF-8 string before we make the
-        # repr() call so that it is consistent before and after the
-        # unicode change, and on py2 and py3.
-        if six.PY2:
-            self._un_unicodify_enum_valid_values(fields)
-
-        fields.sort()
-        methods = []
-        for name in dir(obj_class):
-            thing = getattr(obj_class, name)
-            if self._is_method(thing) or isinstance(thing, classmethod):
-                method = self._find_remotable_method(obj_class, thing)
-                if method:
-                    methods.append((name, inspect.getargspec(method)))
-        methods.sort()
-        # NOTE(danms): Things that need a version bump are any fields
-        # and their types, or the signatures of any remotable methods.
-        # Of course, these are just the mechanical changes we can detect,
-        # but many other things may require a version bump (method behavior
-        # and return value changes, for example).
-        if hasattr(obj_class, 'child_versions'):
-            relevant_data = (fields, methods,
-                             OrderedDict(
-                                 sorted(obj_class.child_versions.items())))
-        else:
-            relevant_data = (fields, methods)
-        relevant_data = repr(relevant_data)
-        if six.PY3:
-            relevant_data = relevant_data.encode('utf-8')
-        fingerprint = '%s-%s' % (
-        obj_class.VERSION, hashlib.md5(relevant_data).hexdigest())
-        return fingerprint
-
-    def test_find_remotable_method(self):
-        class MyObject(object):
-            @base.remotable
-            def my_method(self):
-                return 'Hello World!'
-        thing = self._find_remotable_method(MyObject,
-                                            getattr(MyObject, 'my_method'))
-        self.assertIsNotNone(thing)
-
     def test_versions(self):
-        fingerprints = {}
-        obj_classes = base.NovaObjectRegistry.obj_classes()
-        for obj_name in sorted(obj_classes, key=lambda x: x[0]):
-            index = 0
-            for version_cls in obj_classes[obj_name]:
-                if len(obj_classes[obj_name]) > 1 and index != 0:
-                    name = '%s%s' % (obj_name,
-                                     version_cls.VERSION.split('.')[0])
-                else:
-                    name = obj_name
-                fingerprints[name] = self._get_fingerprint(version_cls)
-                index += 1
+        checker = fixture.ObjectVersionChecker(
+            base.NovaObjectRegistry.obj_classes())
+        fingerprints = checker.get_hashes(extra_data_func=get_extra_data)
 
         if os.getenv('GENERATE_HASHES'):
-            file('object_hashes.txt', 'w').write(
+            open('object_hashes.txt', 'w').write(
                 pprint.pformat(fingerprints))
             raise test.TestingException(
                 'Generated hashes in object_hashes.txt')
 
-        stored = set(object_data.items())
-        computed = set(fingerprints.items())
-        changed = stored.symmetric_difference(computed)
-        expected = {}
-        actual = {}
-        for name, hash in changed:
-            expected[name] = object_data.get(name)
-            actual[name] = fingerprints.get(name)
-
+        expected, actual = checker.test_hashes(object_data)
         self.assertEqual(expected, actual,
                          'Some objects have changed; please make sure the '
                          'versions have been bumped, and then update their '
                          'hashes here.')
 
-    def _get_object_field_name(self, field):
-        if isinstance(field._type, fields.Object):
-            return field._type._obj_name
-        if isinstance(field, fields.ListOfObjectsField):
-            return field._type._element_type._type._obj_name
-        return None
+    def test_notification_payload_version_depends_on_the_schema(self):
+        @base.NovaObjectRegistry.register_if(False)
+        class TestNotificationPayload(notification.NotificationPayloadBase):
+            VERSION = '1.0'
 
-    def _get_obj_cls(self, name):
-        # NOTE(danms): We're moving to using manifest-based backports,
-        # which don't depend on relationships. Given that we only had
-        # one major version of each object before that change, we can
-        # make sure to pull the older version of objects that have
-        # a 2.0 version while calculating the old-style relationship
-        # mapping. Once we drop all the 1.x versions, we can drop this
-        # relationship test altogether.
-        new_objects = ['Instance', 'InstanceList']
+            SCHEMA = {
+                'field_1': ('source_field', 'field_1'),
+                'field_2': ('source_field', 'field_2'),
+            }
 
-        versions = base.NovaObjectRegistry.obj_classes()[name]
-        if len(versions) > 1 and name in new_objects:
-            return versions[1]
-        else:
-            return versions[0]
+            fields = {
+                'extra_field': fields.StringField(),  # filled by ctor
+                'field_1': fields.StringField(),  # filled by the schema
+                'field_2': fields.IntegerField(),   # filled by the schema
+            }
 
-    def _build_tree(self, tree, obj_class, get_current_versions=True):
-        obj_name = obj_class.obj_name()
-        if obj_name in tree:
-            return
+        checker = fixture.ObjectVersionChecker(
+            {'TestNotificationPayload': (TestNotificationPayload,)})
 
-        for name, field in obj_class.fields.items():
-            sub_obj_name = self._get_object_field_name(field)
-            if sub_obj_name:
-                sub_obj_class = self._get_obj_cls(sub_obj_name)
-                tree.setdefault(obj_name, {})
-                if get_current_versions:
-                    sub_obj_ver = sub_obj_class.VERSION
-                else:
-                    # get the most recent subobject version
-                    # from obj_relationships
-                    sub_obj_ver = obj_class.obj_relationships[name][-1][1]
-                tree[obj_name][sub_obj_name] = sub_obj_ver
+        old_hash = checker.get_hashes(extra_data_func=get_extra_data)
+        TestNotificationPayload.SCHEMA['field_3'] = ('source_field',
+                                                     'field_3')
+        new_hash = checker.get_hashes(extra_data_func=get_extra_data)
 
-    def test_relationships(self):
-        # This test asserts that the obj_relationship map of all objects
-        # contain the current versions of any subobjects.
-        current_versions_tree = {}
-        obj_relationships_tree = {}
-        obj_classes = base.NovaObjectRegistry.obj_classes()
-        for obj_name in obj_classes.keys():
-            obj_cls = self._get_obj_cls(obj_name)
-            self._build_tree(current_versions_tree, obj_cls)
-            self._build_tree(obj_relationships_tree, obj_cls,
-                             get_current_versions=False)
-
-        stored = set([(x, str(y))
-                      for x, y in obj_relationships_tree.items()])
-        computed = set([(x, str(y))
-                        for x, y in current_versions_tree.items()])
-        changed = stored.symmetric_difference(computed)
-        expected = {}
-        actual = {}
-        for name, deps in changed:
-            expected[name] = current_versions_tree.get(name)
-            actual[name] = obj_relationships_tree.get(name)
-
-        # If this assertion is failing, this means an object is holding a
-        # non-current version of another object.
-        # Example: if Instance is bumped from version 1.1 to 1.2,
-        # and InstanceList is still only has obj_relationships with 1.1,
-        # this assertion will fail. InstanceList will need to also be bumped
-        # a version, with the relationship to Instance 1.2 added.
-        self.assertEqual(expected, actual,
-                         'Some objects have changed dependencies. '
-                         'Please make sure to bump the versions of '
-                         'parent objects and provide a rule in their '
-                         'obj_make_compatible() routines to backlevel '
-                         'the child object. The expected dict is the '
-                         'current versions of all objects held by other '
-                         'objects, and the actual dict is what is held '
-                         'within obj_relationships on the given objects.')
+        self.assertNotEqual(old_hash, new_hash)
 
     def test_obj_make_compatible(self):
         # Iterate all object classes and verify that we can run
@@ -1463,13 +1250,15 @@ class TestObjectVersions(test.NoDBTestCase):
         # expecting the wrong version format.
         obj_classes = base.NovaObjectRegistry.obj_classes()
         for obj_name in obj_classes:
+            versions = ovo_base.obj_tree_get_versions(obj_name)
             obj_class = obj_classes[obj_name][0]
-            version = utils.convert_version_to_tuple(obj_class.VERSION)
+            version = versionutils.convert_version_to_tuple(obj_class.VERSION)
             for n in range(version[1]):
                 test_version = '%d.%d' % (version[0], n)
                 LOG.info('testing obj: %s version: %s' %
                          (obj_name, test_version))
-                obj_class().obj_to_primitive(target_version=test_version)
+                obj_class().obj_to_primitive(target_version=test_version,
+                                             version_manifest=versions)
 
     def test_list_obj_make_compatible(self):
         @base.NovaObjectRegistry.register_if(False)
@@ -1527,190 +1316,6 @@ class TestObjectVersions(test.NoDBTestCase):
                          "List was backported to before 'objects' existed."
                          " 'objects' should not be in the primitive.")
 
-    def test_obj_bad_relationships(self):
-        # Make sure having an object with bad relationships is caught by
-        # _build_tree()
-        @base.NovaObjectRegistry.register
-        class TestObj(base.NovaObject):
-            VERSION = '1.1'
-            fields = {'foo': fields.IntegerField()}
-
-        @base.NovaObjectRegistry.register
-        class OtherTestObj(base.NovaObject):
-            VERSION = '1.2'
-            fields = {'test': fields.ObjectField('TestObj')}
-            obj_relationships = {'test': [('1.0', '1.0')]}
-
-        current_versions_tree = {}
-        obj_relationships_tree = {}
-        obj_classes = base.NovaObjectRegistry.obj_classes()
-        expected_current = {'OtherTestObj': {'TestObj': '1.1'}}
-        self._build_tree(current_versions_tree,
-                         obj_classes['OtherTestObj'][0])
-
-        expected_obj_relationships = {'OtherTestObj': {'TestObj': '1.0'}}
-        self._build_tree(obj_relationships_tree,
-                         obj_classes['OtherTestObj'][0],
-                         get_current_versions=False)
-
-        self.assertEqual(expected_current, current_versions_tree)
-        self.assertEqual(expected_obj_relationships, obj_relationships_tree)
-
-    def _get_obj_same_major(self, this_cls, obj_name):
-        this_major = this_cls.VERSION.split('.')[0]
-        obj_classes = base.NovaObjectRegistry.obj_classes()
-        for cls_version in obj_classes[obj_name]:
-            major = cls_version.VERSION.split('.')[0]
-            if major == this_major:
-                return cls_version
-
-    def _get_obj_to_test(self, obj_class):
-        obj = obj_class()
-        for fname, ftype in obj.fields.items():
-            if isinstance(ftype, fields.ObjectField):
-                fobjname = ftype.AUTO_TYPE._obj_name
-                fobjcls = self._get_obj_same_major(obj_class, fobjname)
-                setattr(obj, fname, self._get_obj_to_test(fobjcls))
-            elif isinstance(ftype, fields.ListOfObjectsField):
-                # FIXME(danms): This will result in no tests for this
-                # field type...
-                setattr(obj, fname, [])
-        return obj
-
-    def _find_version_mapping(self, my_ver, versions):
-        closest = None
-        my_ver = utils.convert_version_to_tuple(my_ver)
-        for _my, _child in versions:
-            _my = utils.convert_version_to_tuple(_my)
-            _child = utils.convert_version_to_tuple(_child)
-            if _my == my_ver:
-                return '%s.%s' % _child
-            elif _my < my_ver:
-                closest = _child
-        if closest:
-            return '%s.%s' % closest
-        else:
-            return None
-
-    def _validate_object_fields(self, obj_class, primitive):
-        for fname, ftype in obj_class.fields.items():
-            if isinstance(ftype, fields.ObjectField):
-                exp_vers = obj_class.obj_relationships[fname]
-                exp_ver = self._find_version_mapping(
-                    primitive['nova_object.version'], exp_vers)
-                if exp_ver is None:
-                    self.assertNotIn(fname, primitive['nova_object.data'])
-                else:
-                    child_p = primitive['nova_object.data'][fname]
-                    self.assertEqual(exp_ver,
-                                     child_p['nova_object.version'])
-
-    def test_obj_make_compatible_with_data(self):
-        # Iterate all object classes and verify that we can run
-        # obj_make_compatible with every older version than current.
-        # This doesn't actually test the data conversions, but it at least
-        # makes sure the method doesn't blow up on something basic like
-        # expecting the wrong version format.
-        obj_classes = base.NovaObjectRegistry.obj_classes()
-        for obj_name in obj_classes:
-            for obj_class in obj_classes[obj_name]:
-                if obj_class.VERSION.startswith('2'):
-                    # NOTE(danms): Objects with major versions >=2 will
-                    # use version_manifest for backports, which is a
-                    # different test than this one, so skip.
-                    continue
-                if 'tests.unit' in obj_class.__module__:
-                    # NOTE(danms): Skip test objects. When we move to
-                    # oslo.versionedobjects, we won't have to do this
-                    continue
-                version = utils.convert_version_to_tuple(obj_class.VERSION)
-                for n in range(version[1]):
-                    test_version = '%d.%d' % (version[0], n)
-                    LOG.info('testing obj: %s version: %s' %
-                             (obj_name, test_version))
-                    test_object = self._get_obj_to_test(obj_class)
-                    obj_p = test_object.obj_to_primitive(
-                        target_version=test_version)
-                    self._validate_object_fields(obj_class, obj_p)
-
-    def test_obj_relationships_in_order(self):
-        # Iterate all object classes and verify that we can run
-        # obj_make_compatible with every older version than current.
-        # This doesn't actually test the data conversions, but it at least
-        # makes sure the method doesn't blow up on something basic like
-        # expecting the wrong version format.
-        obj_classes = base.NovaObjectRegistry.obj_classes()
-        for obj_name in obj_classes:
-            obj_class = obj_classes[obj_name][0]
-            for field, versions in obj_class.obj_relationships.items():
-                last_my_version = (0, 0)
-                last_child_version = (0, 0)
-                for my_version, child_version in versions:
-                    _my_version = utils.convert_version_to_tuple(my_version)
-                    _ch_version = utils.convert_version_to_tuple(child_version)
-                    self.assertTrue((last_my_version < _my_version
-                                     and last_child_version <= _ch_version),
-                                    'Object %s relationship '
-                                    '%s->%s for field %s is out of order' % (
-                                        obj_name, my_version, child_version,
-                                        field))
-                    last_my_version = _my_version
-                    last_child_version = _ch_version
-
-    def test_objects_use_obj_relationships(self):
-        obj_classes = base.NovaObjectRegistry.obj_classes()
-        for obj_name in obj_classes:
-            obj_class = obj_classes[obj_name][0]
-            self.assertFalse((hasattr(obj_class, 'child_versions')
-                              and obj_class.child_versions),
-                              'Object %s should be using obj_relationships, '
-                              'not child_versions.' % obj_name)
-
-    def test_obj_relationships_not_past_current_parent_version(self):
-        # Iterate all object classes to verify that all versions of the parent
-        # held in obj_relationships are at or before the current version
-        obj_classes = base.NovaObjectRegistry.obj_classes()
-        for obj_name in obj_classes:
-            obj_class = obj_classes[obj_name][0]
-            cur_version = utils.convert_version_to_tuple(obj_class.VERSION)
-            for field, versions in obj_class.obj_relationships.items():
-                for my_version, child_version in versions:
-                    tup_version = utils.convert_version_to_tuple(my_version)
-                    self.assertTrue(tup_version <= cur_version,
-                                    "Field '%(field)s' of %(obj)s contains a "
-                                    "relationship that is past the current "
-                                    "version. Relationship version is %(ov)s."
-                                    " Current version is %(cv)s." %
-                                    {'field': field, 'obj': obj_name,
-                                     'ov': my_version,
-                                     'cv': obj_class.VERSION})
-
-    def test_obj_relationships_not_past_current_child_version(self):
-        # Iterate all object classes to verify that all versions of subobjects
-        # held in obj_relationships are at or before the current version
-        obj_classes = base.NovaObjectRegistry.obj_classes()
-        for obj_name in obj_classes:
-            obj_class = obj_classes[obj_name][0]
-            for field, versions in obj_class.obj_relationships.items():
-                obj_field = obj_class.fields[field]
-                child_name = self._get_object_field_name(obj_field)
-                child_class = obj_classes[child_name][0]
-                curr_child_ver = child_class.VERSION
-                tup_curr_child_ver = utils.convert_version_to_tuple(
-                                        curr_child_ver)
-
-                for parent_ver, child_ver in versions:
-                    tup_version = utils.convert_version_to_tuple(child_ver)
-                    self.assertTrue(tup_version <= tup_curr_child_ver,
-                                    "Field '%(field)s' of %(obj)s contains a "
-                                    "relationship that is past the current "
-                                    "version of %(child_obj)s. Relationship "
-                                    "version is %(ov)s. Current version is "
-                                    "%(cv)s." %
-                                    {'field': field, 'obj': obj_name,
-                                     'child_obj': child_name,
-                                     'ov': child_ver, 'cv': curr_child_ver})
-
 
 class TestObjEqualPrims(_BaseTestCase):
 
@@ -1752,3 +1357,17 @@ class TestObjMethodOverrides(test.NoDBTestCase):
             obj_class = obj_classes[obj_name][0]
             self.assertEqual(args,
                     inspect.getargspec(obj_class.obj_reset_changes))
+
+
+def get_extra_data(obj_class):
+    extra_data = tuple()
+
+    # Get the SCHEMA items to add to the fingerprint
+    # if we are looking at a notification
+    if issubclass(obj_class, notification.NotificationPayloadBase):
+        schema_data = collections.OrderedDict(
+            sorted(obj_class.SCHEMA.items()))
+
+        extra_data += (schema_data,)
+
+    return extra_data

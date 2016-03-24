@@ -16,15 +16,15 @@
 Unit Tests for nova.compute.rpcapi
 """
 
-import contextlib
-
 import mock
 from oslo_config import cfg
 from oslo_serialization import jsonutils
 
 from nova.compute import rpcapi as compute_rpcapi
 from nova import context
+from nova import exception
 from nova.objects import block_device as objects_block_dev
+from nova.objects import migrate_data as migrate_data_obj
 from nova import test
 from nova.tests.unit import fake_block_device
 from nova.tests.unit import fake_flavor
@@ -51,6 +51,42 @@ class ComputeRpcAPITestCase(test.NoDBTestCase):
                     {'source_type': 'volume', 'destination_type': 'volume',
                      'instance_uuid': self.fake_instance_obj.uuid,
                      'volume_id': 'fake-volume-id'}))
+
+    @mock.patch('nova.objects.Service.get_minimum_version')
+    def test_auto_pin(self, mock_get_min):
+        mock_get_min.return_value = 1
+        self.flags(compute='auto', group='upgrade_levels')
+        compute_rpcapi.LAST_VERSION = None
+        rpcapi = compute_rpcapi.ComputeAPI()
+        self.assertEqual('4.4', rpcapi.client.version_cap)
+        mock_get_min.assert_called_once_with(mock.ANY, 'nova-compute')
+
+    @mock.patch('nova.objects.Service.get_minimum_version')
+    def test_auto_pin_fails_if_too_old(self, mock_get_min):
+        mock_get_min.return_value = 1955
+        self.flags(compute='auto', group='upgrade_levels')
+        compute_rpcapi.LAST_VERSION = None
+        self.assertRaises(exception.ServiceTooOld,
+                          compute_rpcapi.ComputeAPI)
+
+    @mock.patch('nova.objects.Service.get_minimum_version')
+    def test_auto_pin_kilo(self, mock_get_min):
+        mock_get_min.return_value = 0
+        self.flags(compute='auto', group='upgrade_levels')
+        compute_rpcapi.LAST_VERSION = None
+        rpcapi = compute_rpcapi.ComputeAPI()
+        self.assertEqual('4.0', rpcapi.client.version_cap)
+        mock_get_min.assert_called_once_with(mock.ANY, 'nova-compute')
+
+    @mock.patch('nova.objects.Service.get_minimum_version')
+    def test_auto_pin_caches(self, mock_get_min):
+        mock_get_min.return_value = 1
+        self.flags(compute='auto', group='upgrade_levels')
+        compute_rpcapi.LAST_VERSION = None
+        compute_rpcapi.ComputeAPI()
+        compute_rpcapi.ComputeAPI()
+        mock_get_min.assert_called_once_with(mock.ANY, 'nova-compute')
+        self.assertEqual('4.4', compute_rpcapi.LAST_VERSION)
 
     def _test_compute_api(self, method, rpc_method,
                           expected_args=None, **kwargs):
@@ -85,7 +121,10 @@ class ComputeRpcAPITestCase(test.NoDBTestCase):
         else:
             host = kwargs['instance']['host']
 
-        with contextlib.nested(
+        if method == 'rebuild_instance' and 'node' in expected_kwargs:
+            expected_kwargs['scheduled_node'] = expected_kwargs.pop('node')
+
+        with test.nested(
             mock.patch.object(rpcapi.client, rpc_method),
             mock.patch.object(rpcapi.client, 'prepare'),
             mock.patch.object(rpcapi.client, 'can_send_version'),
@@ -96,9 +135,6 @@ class ComputeRpcAPITestCase(test.NoDBTestCase):
             if '_return_value' in kwargs:
                 rpc_mock.return_value = kwargs.pop('_return_value')
                 del expected_kwargs['_return_value']
-            elif 'return_bdm_object' in kwargs:
-                del kwargs['return_bdm_object']
-                rpc_mock.return_value = objects_block_dev.BlockDeviceMapping()
             elif rpc_method == 'call':
                 rpc_mock.return_value = 'foo'
             else:
@@ -160,7 +196,31 @@ class ComputeRpcAPITestCase(test.NoDBTestCase):
     def test_detach_volume(self):
         self._test_compute_api('detach_volume', 'cast',
                 instance=self.fake_instance_obj, volume_id='id',
-                version='4.0')
+                attachment_id='fake_id', version='4.7')
+
+    def test_detach_volume_no_attachment_id(self):
+        ctxt = context.RequestContext('fake_user', 'fake_project')
+        instance = self.fake_instance_obj
+        rpcapi = compute_rpcapi.ComputeAPI()
+        cast_mock = mock.Mock()
+        cctxt_mock = mock.Mock(cast=cast_mock)
+        with test.nested(
+            mock.patch.object(rpcapi.client, 'can_send_version',
+                              return_value=False),
+            mock.patch.object(rpcapi.client, 'prepare',
+                              return_value=cctxt_mock)
+        ) as (
+            can_send_mock, prepare_mock
+        ):
+            rpcapi.detach_volume(ctxt, instance=instance,
+                                 volume_id='id', attachment_id='fake_id')
+        # assert our mocks were called as expected
+        can_send_mock.assert_called_once_with('4.7')
+        prepare_mock.assert_called_once_with(server=instance['host'],
+                                             version='4.0')
+        cast_mock.assert_called_once_with(ctxt, 'detach_volume',
+                                          instance=instance,
+                                          volume_id='id')
 
     def test_finish_resize(self):
         self._test_compute_api('finish_resize', 'cast',
@@ -242,7 +302,17 @@ class ComputeRpcAPITestCase(test.NoDBTestCase):
                 instance=self.fake_instance_obj, dest='dest',
                 block_migration='blockity_block', host='tsoh',
                 migration='migration',
-                migrate_data={}, version='4.2')
+                migrate_data={}, version='4.8')
+
+    def test_live_migration_force_complete(self):
+        self._test_compute_api('live_migration_force_complete', 'cast',
+                instance=self.fake_instance_obj,
+                migration_id='1', version='4.9')
+
+    def test_live_migration_abort(self):
+        self._test_compute_api('live_migration_abort', 'cast',
+                instance=self.fake_instance_obj,
+                migration_id='1', version='4.10')
 
     def test_post_live_migration_at_destination(self):
         self._test_compute_api('post_live_migration_at_destination', 'cast',
@@ -271,7 +341,7 @@ class ComputeRpcAPITestCase(test.NoDBTestCase):
         self._test_compute_api('pre_live_migration', 'call',
                 instance=self.fake_instance_obj,
                 block_migration='block_migration', disk='disk', host='host',
-                migrate_data=None, version='4.0')
+                migrate_data=None, version='4.8')
 
     def test_prep_resize(self):
         self._test_compute_api('prep_resize', 'cast',
@@ -305,6 +375,15 @@ class ComputeRpcAPITestCase(test.NoDBTestCase):
                 injected_files='None', image_ref='None', orig_image_ref='None',
                 bdms=[], instance=self.fake_instance_obj, host='new_host',
                 orig_sys_metadata=None, recreate=True, on_shared_storage=True,
+                preserve_ephemeral=True, migration=None, node=None,
+                limits=None, version='4.5')
+
+    def test_rebuild_instance_downgrade(self):
+        self.flags(group='upgrade_levels', compute='4.0')
+        self._test_compute_api('rebuild_instance', 'cast', new_pass='None',
+                injected_files='None', image_ref='None', orig_image_ref='None',
+                bdms=[], instance=self.fake_instance_obj, host='new_host',
+                orig_sys_metadata=None, recreate=True, on_shared_storage=True,
                 preserve_ephemeral=True, version='4.0')
 
     def test_reserve_block_device_name(self):
@@ -313,18 +392,6 @@ class ComputeRpcAPITestCase(test.NoDBTestCase):
                 volume_id='id', disk_bus='ide', device_type='cdrom',
                 version='4.0',
                 _return_value=objects_block_dev.BlockDeviceMapping())
-
-    def refresh_provider_fw_rules(self):
-        self._test_compute_api('refresh_provider_fw_rules', 'cast',
-                host='host')
-
-    def test_refresh_security_group_rules(self):
-        self._test_compute_api('refresh_security_group_rules', 'cast',
-                security_group_id='id', host='host', version='4.0')
-
-    def test_refresh_security_group_members(self):
-        self._test_compute_api('refresh_security_group_members', 'cast',
-                security_group_id='id', host='host', version='4.0')
 
     def test_refresh_instance_security_rules(self):
         expected_args = {'instance': self.fake_instance_obj}
@@ -480,3 +547,136 @@ class ComputeRpcAPITestCase(test.NoDBTestCase):
     def test_unquiesce_instance(self):
         self._test_compute_api('unquiesce_instance', 'cast',
                 instance=self.fake_instance_obj, mapping=None, version='4.0')
+
+    def test_trigger_crash_dump(self):
+        self._test_compute_api('trigger_crash_dump', 'cast',
+                instance=self.fake_instance_obj, version='4.6')
+
+    def test_trigger_crash_dump_incompatible(self):
+        self.flags(compute='4.0', group='upgrade_levels')
+        self.assertRaises(exception.TriggerCrashDumpNotSupported,
+                          self._test_compute_api,
+                          'trigger_crash_dump', 'cast',
+                          instance=self.fake_instance_obj, version='4.6')
+
+    def _test_simple_call(self, method, inargs, callargs, callret,
+                               calltype='call', can_send=False):
+        rpc = compute_rpcapi.ComputeAPI()
+
+        @mock.patch.object(rpc, 'client')
+        @mock.patch.object(compute_rpcapi, '_compute_host')
+        def _test(mock_ch, mock_client):
+            mock_client.can_send_version.return_value = can_send
+            call = getattr(mock_client.prepare.return_value, calltype)
+            call.return_value = callret
+            ctxt = mock.MagicMock()
+            result = getattr(rpc, method)(ctxt, **inargs)
+            call.assert_called_once_with(ctxt, method, **callargs)
+            return result
+
+        return _test()
+
+    def test_check_can_live_migrate_source_converts_objects(self):
+        obj = migrate_data_obj.LiveMigrateData()
+        result = self._test_simple_call('check_can_live_migrate_source',
+                                        inargs={'instance': 'foo',
+                                                'dest_check_data': obj},
+                                        callargs={'instance': 'foo',
+                                                  'dest_check_data': {}},
+                                        callret=obj)
+        self.assertEqual(obj, result)
+        result = self._test_simple_call('check_can_live_migrate_source',
+                                        inargs={'instance': 'foo',
+                                                'dest_check_data': obj},
+                                        callargs={'instance': 'foo',
+                                                  'dest_check_data': {}},
+                                        callret={'foo': 'bar'})
+        self.assertIsInstance(result, migrate_data_obj.LiveMigrateData)
+
+    @mock.patch('nova.objects.migrate_data.LiveMigrateData.'
+                'detect_implementation')
+    def test_check_can_live_migrate_destination_converts_dict(self,
+                                                              mock_det):
+        result = self._test_simple_call('check_can_live_migrate_destination',
+                                        inargs={'instance': 'foo',
+                                                'destination': 'bar',
+                                                'block_migration': False,
+                                                'disk_over_commit': False},
+                                        callargs={'instance': 'foo',
+                                                  'block_migration': False,
+                                                  'disk_over_commit': False},
+                                        callret={'foo': 'bar'})
+        self.assertEqual(mock_det.return_value, result)
+
+    def test_live_migration_converts_objects(self):
+        obj = migrate_data_obj.LiveMigrateData()
+        self._test_simple_call('live_migration',
+                               inargs={'instance': 'foo',
+                                       'dest': 'foo',
+                                       'block_migration': False,
+                                       'host': 'foo',
+                                       'migration': None,
+                                       'migrate_data': obj},
+                               callargs={'instance': 'foo',
+                                         'dest': 'foo',
+                                         'block_migration': False,
+                                         'migration': None,
+                                         'migrate_data': {
+                                             'pre_live_migration_result': {}}},
+                               callret=None,
+                               calltype='cast')
+
+    @mock.patch('nova.objects.migrate_data.LiveMigrateData.from_legacy_dict')
+    def test_pre_live_migration_converts_objects(self, mock_fld):
+        obj = migrate_data_obj.LiveMigrateData()
+        result = self._test_simple_call('pre_live_migration',
+                                        inargs={'instance': 'foo',
+                                                'block_migration': False,
+                                                'disk': None,
+                                                'host': 'foo',
+                                                'migrate_data': obj},
+                                        callargs={'instance': 'foo',
+                                                  'block_migration': False,
+                                                  'disk': None,
+                                                  'migrate_data': {}},
+                                        callret=obj)
+        self.assertFalse(mock_fld.called)
+        self.assertEqual(obj, result)
+        result = self._test_simple_call('pre_live_migration',
+                                        inargs={'instance': 'foo',
+                                                'block_migration': False,
+                                                'disk': None,
+                                                'host': 'foo',
+                                                'migrate_data': obj},
+                                        callargs={'instance': 'foo',
+                                                  'block_migration': False,
+                                                  'disk': None,
+                                                  'migrate_data': {}},
+                                        callret={'foo': 'bar'})
+        mock_fld.assert_called_once_with(
+            {'pre_live_migration_result': {'foo': 'bar'}})
+        self.assertIsInstance(result, migrate_data_obj.LiveMigrateData)
+
+    def test_rollback_live_migration_at_destination_converts_objects(self):
+        obj = migrate_data_obj.LiveMigrateData()
+        method = 'rollback_live_migration_at_destination'
+        self._test_simple_call(method,
+                               inargs={'instance': 'foo',
+                                       'host': 'foo',
+                                       'destroy_disks': False,
+                                       'migrate_data': obj},
+                               callargs={'instance': 'foo',
+                                         'destroy_disks': False,
+                                         'migrate_data': {}},
+                               callret=None,
+                               calltype='cast')
+
+    def test_check_can_live_migrate_destination_old_compute(self):
+        self.flags(compute='4.10', group='upgrade_levels')
+        self.assertRaises(exception.LiveMigrationWithOldNovaNotSupported,
+                          self._test_compute_api,
+                          'check_can_live_migrate_destination', 'call',
+                          instance=self.fake_instance_obj,
+                          block_migration=None,
+                          destination='dest',
+                          disk_over_commit=None, version='4.11')

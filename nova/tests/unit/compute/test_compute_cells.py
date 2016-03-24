@@ -20,7 +20,6 @@ import inspect
 
 import mock
 from mox3 import mox
-from oslo_config import cfg
 from oslo_utils import timeutils
 
 from nova import block_device
@@ -30,6 +29,7 @@ from nova.compute import cells_api as compute_cells_api
 from nova.compute import flavors
 from nova.compute import utils as compute_utils
 from nova.compute import vm_states
+import nova.conf
 from nova import context
 from nova import db
 from nova import exception
@@ -39,10 +39,11 @@ from nova import test
 from nova.tests.unit.compute import test_compute
 from nova.tests.unit import fake_instance
 from nova.tests.unit.objects import test_flavor
+from nova.tests import uuidsentinel as uuids
 
 
 ORIG_COMPUTE_API = None
-cfg.CONF.import_opt('enable', 'nova.cells.opts', group='cells')
+CONF = nova.conf.CONF
 
 
 def stub_call_to_cells(context, instance, method, *args, **kwargs):
@@ -109,18 +110,10 @@ class CellsComputeAPITestCase(test_compute.ComputeAPITestCase):
         ORIG_COMPUTE_API = self.compute_api
         self.flags(enable=True, group='cells')
 
-        def _fake_cell_read_only(*args, **kwargs):
-            return False
-
         def _fake_validate_cell(*args, **kwargs):
             return
 
-        def _nop_update(context, instance, **kwargs):
-            return instance
-
         self.compute_api = compute_cells_api.ComputeCellsAPI()
-        self.stubs.Set(self.compute_api, '_cell_read_only',
-                _fake_cell_read_only)
         self.stubs.Set(self.compute_api, '_validate_cell',
                 _fake_validate_cell)
 
@@ -135,7 +128,16 @@ class CellsComputeAPITestCase(test_compute.ComputeAPITestCase):
         self.skipTest("Test is incompatible with cells.")
 
     def test_evacuate(self):
-        self.skipTest("Test is incompatible with cells.")
+        @mock.patch.object(compute_api.API, 'evacuate')
+        def _test(mock_evacuate):
+            instance = objects.Instance(uuid=uuids.evacuate_instance,
+                                        cell_name='fake_cell_name')
+            dest_host = 'fake_cell_name@fakenode2'
+            self.compute_api.evacuate(self.context, instance, host=dest_host)
+            mock_evacuate.assert_called_once_with(
+                self.context, instance, 'fakenode2')
+
+        _test()
 
     def test_error_evacuate(self):
         self.skipTest("Test is incompatible with cells.")
@@ -201,7 +203,8 @@ class CellsComputeAPITestCase(test_compute.ComputeAPITestCase):
         # it will raise ObjectActionError if the instance has already
         # been deleted by a instance_destroy_at_top, and instance.refresh()
         # will raise InstanceNotFound
-        instance = objects.Instance(uuid='fake-uuid', cell_name=None)
+        instance = objects.Instance(uuid=uuids.destroy_instance,
+                                    cell_name=None)
         actionerror = exception.ObjectActionError(action='destroy', reason='')
         notfound = exception.InstanceNotFound(instance_id=instance.uuid)
 
@@ -228,7 +231,7 @@ class CellsComputeAPITestCase(test_compute.ComputeAPITestCase):
         # lookup before instance.destroy() is reached, if the instance has
         # already been deleted by a instance_destroy_at_top,
         # InstanceNotFound will be raised
-        instance = objects.Instance(uuid='fake-uuid', cell_name=None)
+        instance = objects.Instance(uuid=uuids.delete_instance, cell_name=None)
         notfound = exception.InstanceNotFound(instance_id=instance.uuid)
 
         @mock.patch.object(compute_api.API, 'delete')
@@ -325,7 +328,7 @@ class CellsConductorAPIRPCRedirect(test.NoDBTestCase):
 
         self.compute_api = compute_cells_api.ComputeCellsAPI()
         self.cells_rpcapi = mock.MagicMock()
-        self.compute_api._compute_task_api.cells_rpcapi = self.cells_rpcapi
+        self.compute_api.compute_task_api.cells_rpcapi = self.cells_rpcapi
 
         self.context = context.RequestContext('fake', 'fake')
 
@@ -373,9 +376,10 @@ class CellsConductorAPIRPCRedirect(test.NoDBTestCase):
         self.compute_api.resize(self.context, instance)
         self.assertTrue(self.cells_rpcapi.resize_instance.called)
 
+    @mock.patch.object(objects.RequestSpec, 'get_by_instance_uuid')
     @mock.patch.object(compute_api.API, '_record_action_start')
     @mock.patch.object(objects.Instance, 'save')
-    def test_live_migrate_instance(self, instance_save, _record):
+    def test_live_migrate_instance(self, instance_save, _record, _get_spec):
         orig_system_metadata = {}
         instance = fake_instance.fake_instance_obj(self.context,
                 vm_state=vm_states.ACTIVE, cell_name='fake-cell',

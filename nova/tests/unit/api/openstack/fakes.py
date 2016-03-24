@@ -17,7 +17,6 @@ import datetime
 import uuid
 
 from oslo_serialization import jsonutils
-from oslo_utils import netutils
 from oslo_utils import timeutils
 import routes
 import six
@@ -42,7 +41,6 @@ from nova import context
 from nova.db.sqlalchemy import models
 from nova import exception as exc
 import nova.netconf
-from nova.network import api as network_api
 from nova import objects
 from nova.objects import base
 from nova import quota
@@ -58,22 +56,6 @@ QUOTAS = quota.QUOTAS
 
 FAKE_UUID = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'
 FAKE_UUIDS = {}
-
-
-class Context(object):
-    pass
-
-
-class FakeRouter(wsgi.Router):
-    def __init__(self, ext_mgr=None):
-        pass
-
-    @webob.dec.wsgify
-    def __call__(self, req):
-        res = webob.Response()
-        res.status = '200'
-        res.headers['X-Test-Success'] = 'True'
-        return res
 
 
 @webob.dec.wsgify
@@ -99,7 +81,6 @@ def wsgi_app(inner_app_v2=None, fake_auth_context=None,
 
     mapper = urlmap.URLMap()
     mapper['/v2'] = api_v2
-    mapper['/v1.1'] = api_v2
     mapper['/'] = openstack_api.FaultWrapper(versions.Versions())
     return mapper
 
@@ -113,7 +94,7 @@ def wsgi_app_v21(inner_app_v21=None, fake_auth_context=None,
         inner_app_v21 = openstack_api.LegacyV2CompatibleWrapper(inner_app_v21)
 
     if use_no_auth:
-        api_v21 = openstack_api.FaultWrapper(auth.NoAuthMiddlewareV3(
+        api_v21 = openstack_api.FaultWrapper(auth.NoAuthMiddleware(
               limits.RateLimitingMiddleware(inner_app_v21)))
     else:
         if fake_auth_context is not None:
@@ -162,7 +143,7 @@ def stub_out_rate_limiting(stubs):
     stubs.Set(v2_limits.RateLimitingMiddleware, '__call__', fake_wsgi)
 
 
-def stub_out_instance_quota(stubs, allowed, quota, resource='instances'):
+def stub_out_instance_quota(test, allowed, quota, resource='instances'):
     def fake_reserve(context, **deltas):
         requested = deltas.pop(resource, 0)
         if requested > allowed:
@@ -175,13 +156,13 @@ def stub_out_instance_quota(stubs, allowed, quota, resource='instances'):
             usages[resource]['reserved'] = quotas[resource] // 10
             raise exc.OverQuota(overs=[resource], quotas=quotas,
                                 usages=usages)
-    stubs.Set(QUOTAS, 'reserve', fake_reserve)
+    test.stub_out('nova.quota.QUOTAS.reserve', fake_reserve)
 
 
-def stub_out_networking(stubs):
+def stub_out_networking(test):
     def get_my_ip():
         return '127.0.0.1'
-    stubs.Set(netutils, 'get_my_ipv4', get_my_ip)
+    test.stub_out('oslo_utils.netutils.get_my_ipv4', get_my_ip)
 
 
 def stub_out_compute_api_snapshot(stubs):
@@ -212,11 +193,11 @@ class stub_out_compute_api_backup(object):
         return dict(id='123', status='ACTIVE', name=name, properties=props)
 
 
-def stub_out_nw_api_get_instance_nw_info(stubs, num_networks=1, func=None):
-    fake_network.stub_out_nw_api_get_instance_nw_info(stubs)
+def stub_out_nw_api_get_instance_nw_info(test, num_networks=1, func=None):
+    fake_network.stub_out_nw_api_get_instance_nw_info(test)
 
 
-def stub_out_nw_api(stubs, cls=None, private=None, publics=None):
+def stub_out_nw_api(test, cls=None, private=None, publics=None):
     if not private:
         private = '192.168.0.3'
     if not publics:
@@ -242,8 +223,8 @@ def stub_out_nw_api(stubs, cls=None, private=None, publics=None):
 
     if cls is None:
         cls = Fake
-    stubs.Set(network_api, 'API', cls)
-    fake_network.stub_out_nw_api_get_instance_nw_info(stubs)
+    test.stub_out('nova.network.api.API', cls)
+    fake_network.stub_out_nw_api_get_instance_nw_info(test)
 
 
 class FakeToken(object):
@@ -331,15 +312,6 @@ class FakeAuthDatabase(object):
         if token and token.token_hash in FakeAuthDatabase.data:
             del FakeAuthDatabase.data[token.token_hash]
             del FakeAuthDatabase.data['id_%i' % token_id]
-
-
-class FakeRateLimiter(object):
-    def __init__(self, application):
-        self.application = application
-
-    @webob.dec.wsgify
-    def __call__(self, req):
-        return self.application
 
 
 def create_info_cache(nw_cache):
@@ -459,6 +431,7 @@ def stub_instance(id=1, user_id=None, project_id=None, host=None,
                   flavor_id="1", name=None, key_name='',
                   access_ipv4=None, access_ipv6=None, progress=0,
                   auto_disk_config=False, display_name=None,
+                  display_description=None,
                   include_fake_metadata=True, config_drive=None,
                   power_state=None, nw_cache=None, metadata=None,
                   security_groups=None, root_device_name=None,
@@ -468,7 +441,8 @@ def stub_instance(id=1, user_id=None, project_id=None, host=None,
                   availability_zone='', locked_by=None, cleaned=False,
                   memory_mb=0, vcpus=0, root_gb=0, ephemeral_gb=0,
                   instance_type=None, launch_index=0, kernel_id="",
-                  ramdisk_id="", user_data=None, system_metadata=None):
+                  ramdisk_id="", user_data=None, system_metadata=None,
+                  services=None):
     if user_id is None:
         user_id = 'fake_user'
     if project_id is None:
@@ -549,7 +523,7 @@ def stub_instance(id=1, user_id=None, project_id=None, host=None,
         "terminated_at": terminated_at,
         "availability_zone": availability_zone,
         "display_name": display_name or server_name,
-        "display_description": "",
+        "display_description": display_description,
         "locked": locked_by is not None,
         "locked_by": locked_by,
         "metadata": metadata,
@@ -576,7 +550,8 @@ def stub_instance(id=1, user_id=None, project_id=None, host=None,
                   "pci_requests": None,
                   "flavor": flavorinfo,
               },
-        "cleaned": cleaned}
+        "cleaned": cleaned,
+        "services": services}
 
     instance.update(info_cache)
     instance['info_cache']['instance_uuid'] = instance['uuid']
@@ -592,6 +567,10 @@ def stub_instance_obj(ctxt, *args, **kwargs):
                                             db_inst,
                                             expected_attrs=expected)
     inst.fault = None
+    if db_inst["services"] is not None:
+        #  This ensures services there if one wanted so
+        inst.services = db_inst["services"]
+
     return inst
 
 
@@ -603,8 +582,6 @@ def stub_volume(id, **kwargs):
         'host': 'fakehost',
         'size': 1,
         'availability_zone': 'fakeaz',
-        'instance_uuid': 'fakeuuid',
-        'mountpoint': '/',
         'status': 'fakestatus',
         'attach_status': 'attached',
         'name': 'vol name',
@@ -614,7 +591,12 @@ def stub_volume(id, **kwargs):
         'snapshot_id': None,
         'volume_type_id': 'fakevoltype',
         'volume_metadata': [],
-        'volume_type': {'name': 'vol_type_name'}}
+        'volume_type': {'name': 'vol_type_name'},
+        'multiattach': True,
+        'attachments': {'fakeuuid': {'mountpoint': '/'},
+                        'fakeuuid2': {'mountpoint': '/dev/sdb'}
+                        }
+              }
 
     volume.update(kwargs)
     return volume
@@ -707,13 +689,21 @@ def stub_snapshot_get_all(self, context):
             stub_snapshot(102, project_id='superduperfake')]
 
 
-def stub_bdm_get_all_by_instance(context, instance_uuid, use_slave=False):
-    return [fake_block_device.FakeDbBlockDeviceDict(
-            {'id': 1, 'source_type': 'volume', 'destination_type': 'volume',
-            'volume_id': 'volume_id1', 'instance_uuid': instance_uuid}),
-            fake_block_device.FakeDbBlockDeviceDict(
-            {'id': 2, 'source_type': 'volume', 'destination_type': 'volume',
-            'volume_id': 'volume_id2', 'instance_uuid': instance_uuid})]
+def stub_bdm_get_all_by_instance_uuids(context, instance_uuids,
+                                       use_slave=False):
+    i = 1
+    result = []
+    for instance_uuid in instance_uuids:
+        for x in range(2):  # add two BDMs per instance
+            result.append(fake_block_device.FakeDbBlockDeviceDict({
+                'id': i,
+                'source_type': 'volume',
+                'destination_type': 'volume',
+                'volume_id': 'volume_id%d' % (i),
+                'instance_uuid': instance_uuid,
+            }))
+            i += 1
+    return result
 
 
 def fake_get_available_languages():

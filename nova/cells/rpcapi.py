@@ -23,11 +23,11 @@ services.  That communication is handled by the cells driver via the
 messaging module.
 """
 
-from oslo_config import cfg
 from oslo_log import log as logging
 import oslo_messaging as messaging
 from oslo_serialization import jsonutils
 
+import nova.conf
 from nova import exception
 from nova.i18n import _LE
 from nova import objects
@@ -35,13 +35,8 @@ from nova.objects import base as objects_base
 from nova import rpc
 
 LOG = logging.getLogger(__name__)
-CONF = cfg.CONF
-CONF.import_opt('enable', 'nova.cells.opts', group='cells')
-CONF.import_opt('topic', 'nova.cells.opts', group='cells')
 
-rpcapi_cap_opt = cfg.StrOpt('cells',
-        help='Set a version cap for messages sent to local cells services')
-CONF.register_opt(rpcapi_cap_opt, 'upgrade_levels')
+CONF = nova.conf.CONF
 
 
 class CellsAPI(object):
@@ -118,6 +113,11 @@ class CellsAPI(object):
                  and instance_info_cache_update_at_top use instance objects
         * 1.36 - Added 'delete_type' parameter to terminate_instance()
         * 1.37 - Add get_keypair_at_top to fetch keypair from api cell
+
+        ... Liberty and Mitaka support message version 1.37.  So, any
+        changes to existing methods in 1.x after that point should be
+        done such that they can handle the version_cap being set to
+        1.37.
     '''
 
     VERSION_ALIASES = {
@@ -126,6 +126,8 @@ class CellsAPI(object):
         'icehouse': '1.27',
         'juno': '1.29',
         'kilo': '1.34',
+        'liberty': '1.37',
+        'mitaka': '1.37',
     }
 
     def __init__(self):
@@ -571,7 +573,12 @@ class CellsAPI(object):
         cctxt.cast(ctxt, 'resize_instance', **msg_args)
 
     def live_migrate_instance(self, ctxt, instance, host_name,
-                              block_migration, disk_over_commit):
+                              block_migration, disk_over_commit,
+                              request_spec=None):
+        # NOTE(sbauza): Since Cells v1 is quite feature-freeze, we don't want
+        # to pass down request_spec to the manager and rather keep the
+        # cell conductor providing a new RequestSpec like the original
+        # behaviour
         cctxt = self.client.prepare(version='1.20')
         cctxt.cast(ctxt, 'live_migrate_instance',
                    instance=instance,
@@ -620,7 +627,12 @@ class CellsAPI(object):
     def rebuild_instance(self, ctxt, instance, new_pass, injected_files,
                          image_ref, orig_image_ref, orig_sys_metadata, bdms,
                          recreate=False, on_shared_storage=False, host=None,
-                         preserve_ephemeral=False, kwargs=None):
+                         preserve_ephemeral=False, request_spec=None,
+                         kwargs=None):
+        # NOTE(sbauza): Since Cells v1 is quite feature-freeze, we don't want
+        # to pass down request_spec to the manager and rather keep the
+        # cell conductor providing a new RequestSpec like the original
+        # behaviour
         cctxt = self.client.prepare(version='1.25')
         cctxt.cast(ctxt, 'rebuild_instance',
                    instance=instance, image_href=image_ref,

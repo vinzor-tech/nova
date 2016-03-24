@@ -36,6 +36,7 @@ from nova import exception
 from nova.i18n import _, _LE, _LI, _LW
 from nova import objects
 from nova.objects import base as objects_base
+from nova.objects import service as service_obj
 from nova import rpc
 from nova import servicegroup
 from nova import utils
@@ -57,22 +58,11 @@ service_opts = [
                     ' periodic task scheduler to reduce stampeding.'
                     ' (Disable by setting to 0)'),
     cfg.ListOpt('enabled_apis',
-                default=['ec2', 'osapi_compute', 'metadata'],
+                default=['osapi_compute', 'metadata'],
                 help='A list of APIs to enable by default'),
     cfg.ListOpt('enabled_ssl_apis',
                 default=[],
                 help='A list of APIs with enabled SSL'),
-    cfg.StrOpt('ec2_listen',
-               default="0.0.0.0",
-               help='The IP address on which the EC2 API will listen.'),
-    cfg.IntOpt('ec2_listen_port',
-               default=8773,
-               min=1,
-               max=65535,
-               help='The port on which the EC2 API will listen.'),
-    cfg.IntOpt('ec2_workers',
-               help='Number of workers for EC2 API service. The default will '
-                    'be equal to the number of CPUs available.'),
     cfg.StrOpt('osapi_compute_listen',
                default="0.0.0.0",
                help='The IP address on which the OpenStack API will listen.'),
@@ -86,7 +76,8 @@ service_opts = [
                     'will be the number of CPUs available.'),
     cfg.StrOpt('metadata_manager',
                default='nova.api.manager.MetadataManager',
-               help='OpenStack metadata service manager'),
+               help='DEPRECATED: OpenStack metadata service manager',
+               deprecated_for_removal=True),
     cfg.StrOpt('metadata_listen',
                default="0.0.0.0",
                help='The IP address on which the metadata API will listen.'),
@@ -98,24 +89,36 @@ service_opts = [
     cfg.IntOpt('metadata_workers',
                help='Number of workers for metadata service. The default will '
                     'be the number of CPUs available.'),
+    # NOTE(sdague): Ironic is still using this facility for their HA
+    # manager. Ensure they are sorted before removing this.
     cfg.StrOpt('compute_manager',
                default='nova.compute.manager.ComputeManager',
-               help='Full class name for the Manager for compute'),
+               help='DEPRECATED: Full class name for the Manager for compute',
+               deprecated_for_removal=True),
     cfg.StrOpt('console_manager',
                default='nova.console.manager.ConsoleProxyManager',
-               help='Full class name for the Manager for console proxy'),
+               help='DEPRECATED: Full class name for the Manager for '
+                   'console proxy',
+               deprecated_for_removal=True),
     cfg.StrOpt('consoleauth_manager',
                default='nova.consoleauth.manager.ConsoleAuthManager',
-               help='Manager for console auth'),
+               help='DEPRECATED: Manager for console auth',
+               deprecated_for_removal=True),
     cfg.StrOpt('cert_manager',
                default='nova.cert.manager.CertManager',
-               help='Full class name for the Manager for cert'),
+               help='DEPRECATED: Full class name for the Manager for cert',
+               deprecated_for_removal=True),
+    # NOTE(sdague): the network_manager has a bunch of different in
+    # tree classes that are still legit options. In Newton we should
+    # turn this into a selector.
     cfg.StrOpt('network_manager',
                default='nova.network.manager.VlanManager',
                help='Full class name for the Manager for network'),
     cfg.StrOpt('scheduler_manager',
                default='nova.scheduler.manager.SchedulerManager',
-               help='Full class name for the Manager for scheduler'),
+               help='DEPRECATED: Full class name for the Manager for '
+                   'scheduler',
+               deprecated_for_removal=True),
     cfg.IntOpt('service_down_time',
                default=60,
                help='Maximum time since last check-in for up service'),
@@ -124,6 +127,37 @@ service_opts = [
 CONF = cfg.CONF
 CONF.register_opts(service_opts)
 CONF.import_opt('host', 'nova.netconf')
+
+
+def _create_service_ref(this_service, context):
+    service = objects.Service(context)
+    service.host = this_service.host
+    service.binary = this_service.binary
+    service.topic = this_service.topic
+    service.report_count = 0
+    service.create()
+    return service
+
+
+def _update_service_ref(this_service, context):
+    service = objects.Service.get_by_host_and_binary(context,
+                                                     this_service.host,
+                                                     this_service.binary)
+    if not service:
+        LOG.error(_LE('Unable to find a service record to update for '
+                      '%(binary)s on %(host)s'),
+                  {'binary': this_service.binary,
+                   'host': this_service.host})
+        return
+    if service.version != service_obj.SERVICE_VERSION:
+        LOG.info(_LI('Updating service version for %(binary)s on '
+                     '%(host)s from %(old)i to %(new)i'),
+                 {'binary': this_service.binary,
+                  'host': this_service.host,
+                  'old': service.version,
+                  'new': service_obj.SERVICE_VERSION})
+        service.version = service_obj.SERVICE_VERSION
+        service.save()
 
 
 class Service(service.Service):
@@ -168,7 +202,7 @@ class Service(service.Service):
             ctxt, self.host, self.binary)
         if not self.service_ref:
             try:
-                self.service_ref = self._create_service_ref(ctxt)
+                self.service_ref = _create_service_ref(self, ctxt)
             except (exception.ServiceTopicExists,
                     exception.ServiceBinaryExists):
                 # NOTE(danms): If we race to create a record with a sibling
@@ -213,15 +247,6 @@ class Service(service.Service):
                                      initial_delay=initial_delay,
                                      periodic_interval_max=
                                         self.periodic_interval_max)
-
-    def _create_service_ref(self, context):
-        service = objects.Service(context)
-        service.host = self.host
-        service.binary = self.binary
-        service.topic = self.topic
-        service.report_count = 0
-        service.create()
-        return service
 
     def __getattr__(self, key):
         manager = self.__dict__.get('manager', None)
@@ -273,7 +298,13 @@ class Service(service.Service):
         return service_obj
 
     def kill(self):
-        """Destroy the service object in the datastore."""
+        """Destroy the service object in the datastore.
+
+        NOTE: Although this method is not used anywhere else than tests, it is
+        convenient to have it here, so the tests might easily and in clean way
+        stop and remove the service_ref.
+
+        """
         self.stop()
         try:
             self.service_ref.destroy()
@@ -310,6 +341,9 @@ class Service(service.Service):
             LOG.error(_LE('Temporary directory is invalid: %s'), e)
             sys.exit(1)
 
+    def reset(self):
+        self.manager.reset()
+
 
 class WSGIService(service.Service):
     """Provides ability to launch API from a 'paste' configuration."""
@@ -323,6 +357,10 @@ class WSGIService(service.Service):
 
         """
         self.name = name
+        # NOTE(danms): Name can be metadata, os_compute, or ec2, per
+        # nova.service's enabled_apis
+        self.binary = 'nova-%s' % name
+        self.topic = None
         self.manager = self._get_manager()
         self.loader = loader or wsgi.Loader()
         self.app = self.loader.load_app(name)
@@ -391,6 +429,20 @@ class WSGIService(service.Service):
         :returns: None
 
         """
+        ctxt = context.get_admin_context()
+        service_ref = objects.Service.get_by_host_and_binary(ctxt, self.host,
+                                                             self.binary)
+        if not service_ref:
+            try:
+                service_ref = _create_service_ref(self, ctxt)
+            except (exception.ServiceTopicExists,
+                    exception.ServiceBinaryExists):
+                # NOTE(danms): If we race to create a record wth a sibling,
+                # don't fail here.
+                service_ref = objects.Service.get_by_host_and_binary(
+                    ctxt, self.host, self.binary)
+        _update_service_ref(service_ref, ctxt)
+
         if self.manager:
             self.manager.init_host()
             self.manager.pre_start_hook()

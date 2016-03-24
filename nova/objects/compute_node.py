@@ -13,8 +13,10 @@
 #    under the License.
 
 from oslo_config import cfg
+from oslo_log import log as logging
 from oslo_serialization import jsonutils
-import six
+from oslo_utils import uuidutils
+from oslo_utils import versionutils
 
 from nova import db
 from nova import exception
@@ -22,11 +24,12 @@ from nova import objects
 from nova.objects import base
 from nova.objects import fields
 from nova.objects import pci_device_pool
-from nova import utils
 
 CONF = cfg.CONF
 CONF.import_opt('cpu_allocation_ratio', 'nova.compute.resource_tracker')
 CONF.import_opt('ram_allocation_ratio', 'nova.compute.resource_tracker')
+CONF.import_opt('disk_allocation_ratio', 'nova.compute.resource_tracker')
+LOG = logging.getLogger(__name__)
 
 
 # TODO(berrange): Remove NovaObjectDictCompat
@@ -48,10 +51,13 @@ class ComputeNode(base.NovaPersistentObject, base.NovaObject,
     # Version 1.12: HVSpec version 1.1
     # Version 1.13: Changed service_id field to be nullable
     # Version 1.14: Added cpu_allocation_ratio and ram_allocation_ratio
-    VERSION = '1.14'
+    # Version 1.15: Added uuid
+    # Version 1.16: Added disk_allocation_ratio
+    VERSION = '1.16'
 
     fields = {
         'id': fields.IntegerField(read_only=True),
+        'uuid': fields.UUIDField(read_only=True),
         'service_id': fields.IntegerField(nullable=True),
         'host': fields.StringField(nullable=True),
         'vcpus': fields.IntegerField(),
@@ -67,11 +73,16 @@ class ComputeNode(base.NovaPersistentObject, base.NovaObject,
         'free_disk_gb': fields.IntegerField(nullable=True),
         'current_workload': fields.IntegerField(nullable=True),
         'running_vms': fields.IntegerField(nullable=True),
+        # TODO(melwitt): cpu_info is non-nullable in the schema but we must
+        # wait until version 2.0 of ComputeNode to change it to non-nullable
         'cpu_info': fields.StringField(nullable=True),
         'disk_available_least': fields.IntegerField(nullable=True),
         'metrics': fields.StringField(nullable=True),
         'stats': fields.DictOfNullableStringsField(nullable=True),
         'host_ip': fields.IPAddressField(nullable=True),
+        # TODO(rlrossit): because of history, numa_topology is held here as a
+        # StringField, not a NUMATopology object. In version 2 of ComputeNode
+        # this will be converted over to a fields.ObjectField('NUMATopology')
         'numa_topology': fields.StringField(nullable=True),
         # NOTE(pmurray): the supported_hv_specs field maps to the
         # supported_instances field in the database
@@ -82,16 +93,18 @@ class ComputeNode(base.NovaPersistentObject, base.NovaObject,
                                                nullable=True),
         'cpu_allocation_ratio': fields.FloatField(),
         'ram_allocation_ratio': fields.FloatField(),
+        'disk_allocation_ratio': fields.FloatField(),
         }
-
-    obj_relationships = {
-        'pci_device_pools': [('1.9', '1.0'), ('1.11', '1.1')],
-        'supported_hv_specs': [('1.6', '1.0'), ('1.12', '1.1')],
-    }
 
     def obj_make_compatible(self, primitive, target_version):
         super(ComputeNode, self).obj_make_compatible(primitive, target_version)
-        target_version = utils.convert_version_to_tuple(target_version)
+        target_version = versionutils.convert_version_to_tuple(target_version)
+        if target_version < (1, 16):
+            if 'disk_allocation_ratio' in primitive:
+                del primitive['disk_allocation_ratio']
+        if target_version < (1, 15):
+            if 'uuid' in primitive:
+                del primitive['uuid']
         if target_version < (1, 14):
             if 'ram_allocation_ratio' in primitive:
                 del primitive['ram_allocation_ratio']
@@ -156,6 +169,7 @@ class ComputeNode(base.NovaPersistentObject, base.NovaObject,
             'supported_hv_specs',
             'host',
             'pci_device_pools',
+            'uuid',
             ])
         fields = set(compute.fields) - special_cases
         for key in fields:
@@ -166,11 +180,13 @@ class ComputeNode(base.NovaPersistentObject, base.NovaObject,
             # As we want to care about our operators and since we don't want to
             # ask them to change their configuration files before upgrading, we
             # prefer to hardcode the default values for the ratios here until
-            # the next release (Mitaka) where the opt default values will be
-            # restored for both cpu (16.0) and ram (1.5) allocation ratios.
+            # the next release (Newton) where the opt default values will be
+            # restored for both cpu (16.0), ram (1.5) and disk (1.0)
+            # allocation ratios.
             # TODO(sbauza): Remove that in the next major version bump where
-            # we break compatibilility with old Kilo computes
-            if key == 'cpu_allocation_ratio' or key == 'ram_allocation_ratio':
+            # we break compatibilility with old Liberty computes
+            if (key == 'cpu_allocation_ratio' or key == 'ram_allocation_ratio'
+                or key == 'disk_allocation_ratio'):
                 if value == 0.0:
                     # Operator has not yet provided a new value for that ratio
                     # on the compute node
@@ -186,6 +202,9 @@ class ComputeNode(base.NovaPersistentObject, base.NovaObject,
                     if value == 0.0 and key == 'ram_allocation_ratio':
                         # It's not specified either on the controller
                         value = 1.5
+                    if value == 0.0 and key == 'disk_allocation_ratio':
+                        # It's not specified either on the controller
+                        value = 1.0
             compute[key] = value
 
         stats = db_compute['stats']
@@ -200,14 +219,33 @@ class ComputeNode(base.NovaPersistentObject, base.NovaObject,
             compute['supported_hv_specs'] = hv_specs
 
         pci_stats = db_compute.get('pci_stats')
-        compute.pci_device_pools = pci_device_pool.from_pci_stats(pci_stats)
+        if pci_stats is not None:
+            pci_stats = pci_device_pool.from_pci_stats(pci_stats)
+        compute.pci_device_pools = pci_stats
         compute._context = context
 
         # Make sure that we correctly set the host field depending on either
         # host column is present in the table or not
         compute._host_from_db_object(compute, db_compute)
 
+        # NOTE(danms): Remove this conditional load (and remove uuid from
+        # the list of special_cases above) once we're in Newton and have
+        # enforced that all UUIDs in the database are not NULL.
+        if db_compute.get('uuid'):
+            compute.uuid = db_compute['uuid']
+
         compute.obj_reset_changes()
+
+        # NOTE(danms): This needs to come after obj_reset_changes() to make
+        # sure we only save the uuid, if we generate one.
+        # FIXME(danms): Remove this in Newton once we have enforced that
+        # all compute nodes have uuids set in the database.
+        if 'uuid' not in compute:
+            compute.uuid = uuidutils.generate_uuid()
+            LOG.debug('Generated UUID %(uuid)s for compute node %(id)i',
+                      dict(uuid=compute.uuid, id=compute.id))
+            compute.save()
+
         return compute
 
     @base.remotable_classmethod
@@ -227,34 +265,11 @@ class ComputeNode(base.NovaPersistentObject, base.NovaObject,
 
     @base.remotable_classmethod
     def get_by_host_and_nodename(cls, context, host, nodename):
-        try:
-            db_compute = db.compute_node_get_by_host_and_nodename(
-                context, host, nodename)
-        except exception.ComputeHostNotFound:
-            # FIXME(sbauza): Some old computes can still have no host record
-            # We need to provide compatibility by using the old service_id
-            # record.
-            # We assume the compatibility as an extra penalty of one more DB
-            # call but that's necessary until all nodes are upgraded.
-            try:
-                service = objects.Service.get_by_compute_host(context, host)
-                db_computes = db.compute_nodes_get_by_service_id(
-                    context, service.id)
-            except exception.ServiceNotFound:
-                # We need to provide the same exception upstream
-                raise exception.ComputeHostNotFound(host=host)
-            db_compute = None
-            for compute in db_computes:
-                if compute['hypervisor_hostname'] == nodename:
-                    db_compute = compute
-                    # We can avoid an extra call to Service object in
-                    # _from_db_object
-                    db_compute['host'] = service.host
-                    break
-            if not db_compute:
-                raise exception.ComputeHostNotFound(host=host)
+        db_compute = db.compute_node_get_by_host_and_nodename(
+            context, host, nodename)
         return cls._from_db_object(context, cls(), db_compute)
 
+    # TODO(pkholkin): Remove this method in the next major version bump
     @base.remotable_classmethod
     def get_first_node_by_host_for_old_compat(cls, context, host,
                                               use_slave=False):
@@ -286,9 +301,11 @@ class ComputeNode(base.NovaPersistentObject, base.NovaObject,
 
     @staticmethod
     def _convert_pci_stats_to_db_format(updates):
-        pools = updates.pop('pci_device_pools', None)
-        if pools:
-            updates['pci_stats'] = jsonutils.dumps(pools.obj_to_primitive())
+        if 'pci_device_pools' in updates:
+            pools = updates.pop('pci_device_pools')
+            if pools is not None:
+                pools = jsonutils.dumps(pools.obj_to_primitive())
+            updates['pci_stats'] = pools
 
     @base.remotable
     def create(self):
@@ -296,6 +313,9 @@ class ComputeNode(base.NovaPersistentObject, base.NovaObject,
             raise exception.ObjectActionError(action='create',
                                               reason='already created')
         updates = self.obj_get_changes()
+        if 'uuid' not in updates:
+            updates['uuid'] = uuidutils.generate_uuid()
+
         self._convert_stats_to_db_format(updates)
         self._convert_host_ip_to_db_format(updates)
         self._convert_supported_instances_to_db_format(updates)
@@ -337,12 +357,8 @@ class ComputeNode(base.NovaPersistentObject, base.NovaObject,
                 self[key] = resources[key]
 
         # supported_instances has a different name in compute_node
-        # TODO(pmurray): change virt drivers not to json encode
-        # values they add to the resources dict
         if 'supported_instances' in resources:
             si = resources['supported_instances']
-            if isinstance(si, six.string_types):
-                si = jsonutils.loads(si)
             self.supported_hv_specs = [objects.HVSpec.from_list(s) for s in si]
 
 
@@ -367,14 +383,6 @@ class ComputeNodeList(base.ObjectListBase, base.NovaObject):
     VERSION = '1.14'
     fields = {
         'objects': fields.ListOfObjectsField('ComputeNode'),
-        }
-    # NOTE(danms): ComputeNode was at 1.2 before we added this
-    obj_relationships = {
-        'objects': [('1.0', '1.2'), ('1.1', '1.3'), ('1.2', '1.3'),
-                    ('1.3', '1.4'), ('1.4', '1.5'), ('1.5', '1.5'),
-                    ('1.6', '1.6'), ('1.7', '1.7'), ('1.8', '1.8'),
-                    ('1.9', '1.9'), ('1.10', '1.10'), ('1.11', '1.11'),
-                    ('1.12', '1.12'), ('1.13', '1.13'), ('1.14', '1.14')],
         }
 
     @base.remotable_classmethod
@@ -404,27 +412,14 @@ class ComputeNodeList(base.ObjectListBase, base.NovaObject):
         return base.obj_make_list(context, cls(context), objects.ComputeNode,
                                   db_computes)
 
+    @staticmethod
+    @db.select_db_reader_mode
+    def _db_compute_node_get_all_by_host(context, host, use_slave=False):
+        return db.compute_node_get_all_by_host(context, host)
+
     @base.remotable_classmethod
     def get_all_by_host(cls, context, host, use_slave=False):
-        try:
-            db_computes = db.compute_node_get_all_by_host(context, host,
-                                                          use_slave)
-        except exception.ComputeHostNotFound:
-            # FIXME(sbauza): Some old computes can still have no host record
-            # We need to provide compatibility by using the old service_id
-            # record.
-            # We assume the compatibility as an extra penalty of one more DB
-            # call but that's necessary until all nodes are upgraded.
-            try:
-                service = objects.Service.get_by_compute_host(context, host,
-                                                              use_slave)
-                db_computes = db.compute_nodes_get_by_service_id(
-                    context, service.id)
-            except exception.ServiceNotFound:
-                # We need to provide the same exception upstream
-                raise exception.ComputeHostNotFound(host=host)
-            # We can avoid an extra call to Service object in _from_db_object
-            for db_compute in db_computes:
-                db_compute['host'] = service.host
+        db_computes = cls._db_compute_node_get_all_by_host(context, host,
+                                                      use_slave=use_slave)
         return base.obj_make_list(context, cls(context), objects.ComputeNode,
                                   db_computes)

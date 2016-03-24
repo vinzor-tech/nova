@@ -45,6 +45,7 @@ from nova.api.metadata import base as instance_metadata
 from nova.compute import power_state
 from nova.compute import task_states
 from nova.compute import vm_mode
+import nova.conf
 from nova import exception
 from nova.i18n import _, _LE, _LI, _LW
 from nova.network import model as network_model
@@ -118,10 +119,8 @@ xenapi_vm_utils_opts = [
                     'ISO image creation'),
     ]
 
-CONF = cfg.CONF
+CONF = nova.conf.CONF
 CONF.register_opts(xenapi_vm_utils_opts, 'xenserver')
-CONF.import_opt('default_ephemeral_format', 'nova.virt.driver')
-CONF.import_opt('use_cow_images', 'nova.virt.driver')
 CONF.import_opt('use_ipv6', 'nova.netconf')
 
 XENAPI_POWER_STATE = {
@@ -233,7 +232,7 @@ def create_vm(session, instance, name_label, kernel, ramdisk,
         3. Using hardware virtualization
     """
     flavor = instance.get_flavor()
-    mem = str(long(flavor.memory_mb) * units.Mi)
+    mem = str(int(flavor.memory_mb) * units.Mi)
     vcpus = str(flavor.vcpus)
 
     vcpu_weight = flavor.vcpu_weight
@@ -306,7 +305,7 @@ def create_vm(session, instance, name_label, kernel, ramdisk,
         rec['HVM_boot_policy'] = 'BIOS order'
 
     if device_id:
-        rec['platform']['device_id'] = device_id
+        rec['platform']['device_id'] = str(device_id).zfill(4)
 
     vm_ref = session.VM.create(rec)
     LOG.debug('Created VM', instance=instance)
@@ -363,9 +362,9 @@ def is_vm_shutdown(session, vm_ref):
 
 def is_enough_free_mem(session, instance):
     flavor = instance.get_flavor()
-    mem = long(flavor.memory_mb) * units.Mi
-    host_free_mem = long(session.call_xenapi("host.compute_free_memory",
-                                             session.host_ref))
+    mem = int(flavor.memory_mb) * units.Mi
+    host_free_mem = int(session.call_xenapi("host.compute_free_memory",
+                                            session.host_ref))
     return host_free_mem >= mem
 
 
@@ -470,8 +469,7 @@ def destroy_vdi(session, vdi_ref):
     try:
         session.call_xenapi('VDI.destroy', vdi_ref)
     except session.XenAPI.Failure:
-        msg = "Unable to destroy VDI %s" % vdi_ref
-        LOG.debug(msg, exc_info=True)
+        LOG.debug("Unable to destroy VDI %s", vdi_ref, exc_info=True)
         msg = _("Unable to destroy VDI %s") % vdi_ref
         LOG.error(msg)
         raise exception.StorageError(reason=msg)
@@ -483,8 +481,7 @@ def safe_destroy_vdis(session, vdi_refs):
         try:
             destroy_vdi(session, vdi_ref)
         except exception.StorageError:
-            msg = "Ignoring error while destroying VDI: %s" % vdi_ref
-            LOG.debug(msg)
+            LOG.debug("Ignoring error while destroying VDI: %s", vdi_ref)
 
 
 def create_vdi(session, sr_ref, instance, name_label, disk_type, virtual_size,
@@ -684,7 +681,7 @@ def _delete_snapshots_in_vdi_chain(session, instance, vdi_uuid_chain, sr_ref):
     # ensure garbage collector has been run
     _scan_sr(session, sr_ref)
 
-    LOG.info(_LI("Deleted %s snapshots.") % number_of_snapshots,
+    LOG.info(_LI("Deleted %s snapshots."), number_of_snapshots,
              instance=instance)
 
 
@@ -758,7 +755,7 @@ def get_sr_path(session, sr_ref=None):
 
     # NOTE(bobball): There can only be one PBD for a host/SR pair, but path is
     # not always present - older versions of XS do not set it.
-    pbd_ref = pbd_rec.keys()[0]
+    pbd_ref = list(pbd_rec.keys())[0]
     device_config = pbd_rec[pbd_ref]['device_config']
     if 'path' in device_config:
         return device_config['path']
@@ -847,7 +844,7 @@ def _find_cached_image(session, image_id, sr_ref):
     if number_found > 0:
         if number_found > 1:
             LOG.warning(_LW("Multiple base images for image: %s"), image_id)
-        return recs.keys()[0]
+        return list(recs.keys())[0]
 
 
 def _get_resize_func_name(session):
@@ -986,7 +983,7 @@ def try_auto_configure_disk(session, vdi_ref, new_gb):
         _auto_configure_disk(session, vdi_ref, new_gb)
     except exception.CannotResizeDisk as e:
         msg = _LW('Attempted auto_configure_disk failed because: %s')
-        LOG.warn(msg % e)
+        LOG.warning(msg % e)
 
 
 def _make_partition(session, dev, partition_start, partition_end):
@@ -1022,7 +1019,7 @@ def _make_partition(session, dev, partition_start, partition_end):
 
 
 def _generate_disk(session, instance, vm_ref, userdevice, name_label,
-                   disk_type, size_mb, fs_type):
+                   disk_type, size_mb, fs_type, fs_label=None):
     """Steps to programmatically generate a disk:
 
         1. Create VDI of desired size
@@ -1050,11 +1047,9 @@ def _generate_disk(session, instance, vm_ref, userdevice, name_label,
             partition_path = _make_partition(session, dev,
                                              partition_start, partition_end)
 
-            if fs_type == 'linux-swap':
-                utils.execute('mkswap', partition_path, run_as_root=True)
-            elif fs_type is not None:
-                utils.execute('mkfs', '-t', fs_type, partition_path,
-                              run_as_root=True)
+            if fs_type is not None:
+                utils.mkfs(fs_type, partition_path, fs_label,
+                           run_as_root=True)
 
         # 4. Create VBD between instance VM and VDI
         if vm_ref:
@@ -1072,7 +1067,7 @@ def generate_swap(session, instance, vm_ref, userdevice, name_label, swap_mb):
     # NOTE(jk0): We use a FAT32 filesystem for the Windows swap
     # partition because that is what parted supports.
     is_windows = instance['os_type'] == "windows"
-    fs_type = "vfat" if is_windows else "linux-swap"
+    fs_type = "vfat" if is_windows else "swap"
 
     _generate_disk(session, instance, vm_ref, userdevice, name_label,
                    'swap', swap_mb, fs_type)
@@ -1099,14 +1094,16 @@ def generate_single_ephemeral(session, instance, vm_ref, userdevice,
         instance_name_label = instance["name"]
 
     name_label = "%s ephemeral" % instance_name_label
+    fs_label = "ephemeral"
     # TODO(johngarbutt) need to move DEVICE_EPHEMERAL from vmops to use it here
     label_number = int(userdevice) - 4
     if label_number > 0:
         name_label = "%s (%d)" % (name_label, label_number)
+        fs_label = "ephemeral%d" % label_number
 
     return _generate_disk(session, instance, vm_ref, str(userdevice),
                           name_label, 'ephemeral', size_gb * 1024,
-                          CONF.default_ephemeral_format)
+                          CONF.default_ephemeral_format, fs_label)
 
 
 def generate_ephemeral(session, instance, vm_ref, first_userdevice,
@@ -1752,8 +1749,8 @@ def compile_info(session, vm_ref):
     num_cpu = session.call_xenapi("VM.get_VCPUs_max", vm_ref)
 
     return hardware.InstanceInfo(state=power_state,
-                                 max_mem_kb=long(max_mem) >> 10,
-                                 mem_kb=long(mem) >> 10,
+                                 max_mem_kb=int(max_mem) >> 10,
+                                 mem_kb=int(mem) >> 10,
                                  num_cpu=num_cpu)
 
 
@@ -1766,7 +1763,7 @@ def compile_instance_diagnostics(instance, vm_rec):
                                     driver='xenapi',
                                     config_drive=config_drive)
 
-    for cpu_num in range(0, long(vm_rec['VCPUs_max'])):
+    for cpu_num in range(0, int(vm_rec['VCPUs_max'])):
         diags.add_cpu()
 
     for vif in vm_rec['VIFs']:
@@ -1775,7 +1772,7 @@ def compile_instance_diagnostics(instance, vm_rec):
     for vbd in vm_rec['VBDs']:
         diags.add_disk()
 
-    max_mem_bytes = long(vm_rec['memory_dynamic_max'])
+    max_mem_bytes = int(vm_rec['memory_dynamic_max'])
     diags.memory_details.maximum = max_mem_bytes / units.Mi
 
     return diags
@@ -2109,7 +2106,7 @@ def _wait_for_vhd_coalesce(session, instance, sr_ref, vdi_ref,
                        'good_parent_uuids': good_parent_uuids},
                       instance=instance)
         else:
-            LOG.debug("Coalesce detected, because parent is: %s" % parent_uuid,
+            LOG.debug("Coalesce detected, because parent is: %s", parent_uuid,
                       instance=instance)
             return
 
@@ -2211,7 +2208,7 @@ def vdi_attached_here(session, vdi_ref, read_only=False):
 
 
 def _get_sys_hypervisor_uuid():
-    with file('/sys/hypervisor/uuid') as f:
+    with open('/sys/hypervisor/uuid') as f:
         return f.readline().strip()
 
 
@@ -2222,7 +2219,7 @@ def get_this_vm_uuid(session):
                                   'field "is_control_domain"="true" and '
                                   'field "resident_on"="%s"' %
                                   session.host_ref)
-        return vms[vms.keys()[0]]['uuid']
+        return vms[list(vms.keys())[0]]['uuid']
     try:
         return _get_sys_hypervisor_uuid()
     except IOError:

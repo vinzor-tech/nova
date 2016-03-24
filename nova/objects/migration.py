@@ -12,12 +12,13 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+from oslo_utils import versionutils
+
 from nova import db
 from nova import exception
 from nova import objects
 from nova.objects import base
 from nova.objects import fields
-from nova import utils
 
 
 def determine_migration_type(migration):
@@ -34,7 +35,9 @@ class Migration(base.NovaPersistentObject, base.NovaObject,
     # Version 1.0: Initial version
     # Version 1.1: String attributes updated to support unicode
     # Version 1.2: Added migration_type and hidden
-    VERSION = '1.2'
+    # Version 1.3: Added get_by_id_and_instance()
+    # Version 1.4: Added migration progress detail
+    VERSION = '1.4'
 
     fields = {
         'id': fields.IntegerField(),
@@ -51,6 +54,12 @@ class Migration(base.NovaPersistentObject, base.NovaObject,
                                             'live-migration', 'evacuation'],
                                            nullable=False),
         'hidden': fields.BooleanField(nullable=False, default=False),
+        'memory_total': fields.IntegerField(nullable=True),
+        'memory_processed': fields.IntegerField(nullable=True),
+        'memory_remaining': fields.IntegerField(nullable=True),
+        'disk_total': fields.IntegerField(nullable=True),
+        'disk_processed': fields.IntegerField(nullable=True),
+        'disk_remaining': fields.IntegerField(nullable=True),
         }
 
     @staticmethod
@@ -67,11 +76,19 @@ class Migration(base.NovaPersistentObject, base.NovaObject,
 
     def obj_make_compatible(self, primitive, target_version):
         super(Migration, self).obj_make_compatible(primitive, target_version)
-        target_version = utils.convert_version_to_tuple(target_version)
+        target_version = versionutils.convert_version_to_tuple(target_version)
         if target_version < (1, 2):
             if 'migration_type' in primitive:
                 del primitive['migration_type']
                 del primitive['hidden']
+        if target_version < (1, 4):
+            if 'memory_total' in primitive:
+                del primitive['memory_total']
+                del primitive['memory_processed']
+                del primitive['memory_remaining']
+                del primitive['disk_total']
+                del primitive['disk_processed']
+                del primitive['disk_remaining']
 
     def obj_load_attr(self, attrname):
         if attrname == 'migration_type':
@@ -86,6 +103,12 @@ class Migration(base.NovaPersistentObject, base.NovaObject,
     @base.remotable_classmethod
     def get_by_id(cls, context, migration_id):
         db_migration = db.migration_get(context, migration_id)
+        return cls._from_db_object(context, cls(), db_migration)
+
+    @base.remotable_classmethod
+    def get_by_id_and_instance(cls, context, migration_id, instance_uuid):
+        db_migration = db.migration_get_by_id_and_instance(
+            context, migration_id, instance_uuid)
         return cls._from_db_object(context, cls(), db_migration)
 
     @base.remotable_classmethod
@@ -118,7 +141,14 @@ class Migration(base.NovaPersistentObject, base.NovaObject,
 
     @property
     def instance(self):
-        return objects.Instance.get_by_uuid(self._context, self.instance_uuid)
+        if not hasattr(self, '_cached_instance'):
+            self._cached_instance = objects.Instance.get_by_uuid(
+                self._context, self.instance_uuid)
+        return self._cached_instance
+
+    @instance.setter
+    def instance(self, instance):
+        self._cached_instance = instance
 
 
 @base.NovaObjectRegistry.register
@@ -127,20 +157,25 @@ class MigrationList(base.ObjectListBase, base.NovaObject):
     #              Migration <= 1.1
     # Version 1.1: Added use_slave to get_unconfirmed_by_dest_compute
     # Version 1.2: Migration version 1.2
-    VERSION = '1.2'
+    # Version 1.3: Added a new function to get in progress migrations
+    #              for an instance.
+    VERSION = '1.3'
 
     fields = {
         'objects': fields.ListOfObjectsField('Migration'),
         }
-    # NOTE(danms): Migration was at 1.1 before we added this
-    obj_relationships = {
-        'objects': [('1.0', '1.1'), ('1.1', '1.1'), ('1.2', '1.2')],
-        }
+
+    @staticmethod
+    @db.select_db_reader_mode
+    def _db_migration_get_unconfirmed_by_dest_compute(
+            context, confirm_window, dest_compute, use_slave=False):
+        return db.migration_get_unconfirmed_by_dest_compute(
+            context, confirm_window, dest_compute)
 
     @base.remotable_classmethod
     def get_unconfirmed_by_dest_compute(cls, context, confirm_window,
                                         dest_compute, use_slave=False):
-        db_migrations = db.migration_get_unconfirmed_by_dest_compute(
+        db_migrations = cls._db_migration_get_unconfirmed_by_dest_compute(
             context, confirm_window, dest_compute, use_slave=use_slave)
         return base.obj_make_list(context, cls(context), objects.Migration,
                                   db_migrations)
@@ -155,5 +190,13 @@ class MigrationList(base.ObjectListBase, base.NovaObject):
     @base.remotable_classmethod
     def get_by_filters(cls, context, filters):
         db_migrations = db.migration_get_all_by_filters(context, filters)
+        return base.obj_make_list(context, cls(context), objects.Migration,
+                                  db_migrations)
+
+    @base.remotable_classmethod
+    def get_in_progress_by_instance(cls, context, instance_uuid,
+                                    migration_type=None):
+        db_migrations = db.migration_get_in_progress_by_instance(
+            context, instance_uuid, migration_type)
         return base.obj_make_list(context, cls(context), objects.Migration,
                                   db_migrations)

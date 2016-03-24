@@ -19,9 +19,12 @@ Shared constants across the VMware driver
 from nova.network import model as network_model
 
 MIN_VC_VERSION = '5.1.0'
+# The minimum VC version for Neutron 'ovs' port type support
+MIN_VC_OVS_VERSION = '5.5.0'
 
 DISK_FORMAT_ISO = 'iso'
 DISK_FORMAT_VMDK = 'vmdk'
+DISK_FORMAT_ISCSI = 'iscsi'
 DISK_FORMATS_ALL = [DISK_FORMAT_ISO, DISK_FORMAT_VMDK]
 
 DISK_TYPE_THIN = 'thin'
@@ -158,6 +161,8 @@ VALID_OS_TYPES = set([
     'solaris7Guest',
     'solaris8Guest',
     'solaris9Guest',
+    'suse64Guest',
+    'suseGuest',
     'turboLinux64Guest',
     'turboLinuxGuest',
     'ubuntu64Guest',

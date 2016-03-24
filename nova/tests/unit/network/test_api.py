@@ -15,12 +15,12 @@
 
 """Tests for network API."""
 
-import contextlib
 import itertools
 import uuid
 
 import mock
 from mox3 import mox
+from oslo_policy import policy as oslo_policy
 
 from nova.compute import flavors
 from nova import context
@@ -33,7 +33,6 @@ from nova.network import model as network_model
 from nova.network import rpcapi as network_rpcapi
 from nova import objects
 from nova.objects import fields
-from nova.openstack.common import policy as common_policy
 from nova import policy
 from nova import test
 from nova.tests.unit import fake_instance
@@ -77,8 +76,8 @@ class NetworkPolicyTestCase(test.TestCase):
 
     def test_skip_policy(self):
         policy.reset()
-        rules = {'network:get_all': common_policy.parse_rule('!')}
-        policy.set_rules(common_policy.Rules(rules))
+        rules = {'network:get_all': '!'}
+        policy.set_rules(oslo_policy.Rules.from_dict(rules))
         api = network.API()
         self.assertRaises(exception.PolicyNotAuthorized,
                           api.get_all, self.context)
@@ -139,7 +138,7 @@ class ApiTestCase(test.TestCase):
         self.assertEqual(123, vifs[0].network_id)
         self.assertEqual(str(mock.sentinel.network_uuid), vifs[0].net_uuid)
         mock_get_by_instance.assert_called_once_with(
-            self.context, str(mock.sentinel.inst_uuid), use_slave=False)
+            self.context, str(mock.sentinel.inst_uuid))
         mock_get_by_id.assert_called_once_with(self.context, 123,
                                                project_only='allow_none')
 
@@ -197,6 +196,8 @@ class ApiTestCase(test.TestCase):
         def fake_instance_get_by_uuid(context, instance_uuid,
                                       columns_to_join=None,
                                       use_slave=None):
+            if instance_uuid == orig_instance_uuid:
+                self.assertIn('extra.flavor', columns_to_join)
             return fake_instance.fake_db_instance(uuid=instance_uuid)
 
         self.stubs.Set(self.network_api.db, 'instance_get_by_uuid',
@@ -448,7 +449,7 @@ class ApiTestCase(test.TestCase):
     def _test_refresh_cache(self, method, *args, **kwargs):
         # This test verifies that no call to get_instance_nw_info() is made
         # from the @refresh_cache decorator for the tested method.
-        with contextlib.nested(
+        with test.nested(
             mock.patch.object(self.network_api.network_rpcapi, method),
             mock.patch.object(self.network_api.network_rpcapi,
                               'get_instance_nw_info'),

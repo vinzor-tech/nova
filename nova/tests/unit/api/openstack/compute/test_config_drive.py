@@ -26,14 +26,13 @@ from nova.api.openstack.compute import servers as servers_v21
 from nova.api.openstack import extensions
 from nova.compute import api as compute_api
 from nova.compute import flavors
-from nova import db
 from nova import exception
 from nova import objects
 from nova import test
 from nova.tests.unit.api.openstack import fakes
 from nova.tests.unit import fake_instance
 from nova.tests.unit.image import fake
-
+from nova.tests import uuidsentinel as uuids
 
 CONF = cfg.CONF
 
@@ -46,17 +45,17 @@ class ConfigDriveTestV21(test.TestCase):
 
     def setUp(self):
         super(ConfigDriveTestV21, self).setUp()
-        fakes.stub_out_networking(self.stubs)
+        fakes.stub_out_networking(self)
         fakes.stub_out_rate_limiting(self.stubs)
-        fake.stub_out_image_service(self.stubs)
+        fake.stub_out_image_service(self)
         self._setup_wsgi()
 
     def test_show(self):
-        self.stubs.Set(db, 'instance_get',
-                        fakes.fake_instance_get())
-        self.stubs.Set(db, 'instance_get_by_uuid',
-                        fakes.fake_instance_get())
-        req = webob.Request.blank(self.base_url + '1')
+        self.stub_out('nova.db.instance_get',
+                      fakes.fake_instance_get())
+        self.stub_out('nova.db.instance_get_by_uuid',
+                      fakes.fake_instance_get())
+        req = webob.Request.blank(self.base_url + uuids.sentinel)
         req.headers['Content-Type'] = 'application/json'
         response = req.get_response(self.app)
         self.assertEqual(response.status_int, 200)
@@ -142,8 +141,8 @@ class ServersControllerCreateTestV21(test.TestCase):
 
             return instance
 
-        fake.stub_out_image_service(self.stubs)
-        self.stubs.Set(db, 'instance_create', instance_create)
+        fake.stub_out_image_service(self)
+        self.stub_out('nova.db.instance_create', instance_create)
 
     def _test_create_extra(self, params, override_controller):
         image_uuid = 'c905cedb-7281-47e4-8a62-f26bc5fc4c77'
@@ -152,7 +151,7 @@ class ServersControllerCreateTestV21(test.TestCase):
         body = dict(server=server)
         req = fakes.HTTPRequest.blank(self.base_url + 'servers')
         req.method = 'POST'
-        req.body = jsonutils.dumps(body)
+        req.body = jsonutils.dump_as_bytes(body)
         req.headers["content-type"] = "application/json"
         if override_controller is not None:
             server = override_controller.create(req, body=body).obj['server']
@@ -193,7 +192,7 @@ class ServersControllerCreateTestV21(test.TestCase):
 
         req = fakes.HTTPRequest.blank(self.base_url + 'servers')
         req.method = 'POST'
-        req.body = jsonutils.dumps(body)
+        req.body = jsonutils.dump_as_bytes(body)
         req.headers["content-type"] = "application/json"
 
         return req, body

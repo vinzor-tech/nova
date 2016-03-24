@@ -15,6 +15,7 @@
 import os
 
 import mock
+from os_win import exceptions as os_win_exc
 from oslo_utils import units
 
 from nova import exception
@@ -23,7 +24,6 @@ from nova import test
 from nova.tests.unit import fake_instance
 from nova.tests.unit.virt.hyperv import test_base
 from nova.virt.hyperv import migrationops
-from nova.virt.hyperv import vmutils
 
 
 class MigrationOpsTestCase(test_base.HyperVBaseTestCase):
@@ -129,10 +129,12 @@ class MigrationOpsTestCase(test_base.HyperVBaseTestCase):
         expected = [mock.call(mock.sentinel.dest_path),
                     mock.call(mock.sentinel.revert_path)]
         self._migrationops._pathutils.exists.assert_has_calls(expected)
-        self._migrationops._pathutils.rmtree.assert_called_once_with(
-            mock.sentinel.dest_path)
-        self._migrationops._pathutils.rename.assert_called_once_with(
+        move_folder_files = self._migrationops._pathutils.move_folder_files
+        move_folder_files.assert_called_once_with(
             mock.sentinel.revert_path, mock.sentinel.instance_path)
+        self._migrationops._pathutils.rmtree.assert_has_calls([
+            mock.call(mock.sentinel.dest_path),
+            mock.call(mock.sentinel.revert_path)])
 
     def test_check_target_flavor(self):
         mock_instance = fake_instance.fake_instance_obj(self.context)
@@ -161,7 +163,7 @@ class MigrationOpsTestCase(test_base.HyperVBaseTestCase):
         instance.config_drive = 'True'
         self._migrationops._pathutils.lookup_configdrive_path.return_value = (
             None)
-        self.assertRaises(vmutils.HyperVException,
+        self.assertRaises(exception.ConfigDriveNotFound,
                           self._migrationops._check_and_attach_config_drive,
                           instance,
                           mock.sentinel.FAKE_VM_GEN)
@@ -255,7 +257,7 @@ class MigrationOpsTestCase(test_base.HyperVBaseTestCase):
         lookup_ephemeral.assert_called_with(mock_instance.name)
         get_image_vm_gen = self._migrationops._vmops.get_image_vm_generation
         get_image_vm_gen.assert_called_once_with(
-            fake_root_path,
+            mock_instance.uuid, fake_root_path,
             test.MatchType(objects.ImageMeta))
         self._migrationops._vmops.create_instance.assert_called_once_with(
             mock_instance, mock.sentinel.network_info,
@@ -288,7 +290,7 @@ class MigrationOpsTestCase(test_base.HyperVBaseTestCase):
         recon_parent_vhd.assert_called_once_with(fake_diff_vhd_path,
                                                  base_vhd_copy_path)
         self._migrationops._vhdutils.merge_vhd.assert_called_once_with(
-            fake_diff_vhd_path, base_vhd_copy_path)
+            fake_diff_vhd_path)
         self._migrationops._pathutils.rename.assert_called_once_with(
             base_vhd_copy_path, fake_diff_vhd_path)
 
@@ -300,10 +302,10 @@ class MigrationOpsTestCase(test_base.HyperVBaseTestCase):
             os.path.basename(fake_base_vhd_path))
 
         self._migrationops._vhdutils.reconnect_parent_vhd.side_effect = (
-            vmutils.HyperVException)
+            os_win_exc.HyperVException)
         self._migrationops._pathutils.exists.return_value = True
 
-        self.assertRaises(vmutils.HyperVException,
+        self.assertRaises(os_win_exc.HyperVException,
                           self._migrationops._merge_base_vhd,
                           fake_diff_vhd_path, fake_base_vhd_path)
         self._migrationops._pathutils.exists.assert_called_once_with(
@@ -314,15 +316,15 @@ class MigrationOpsTestCase(test_base.HyperVBaseTestCase):
     @mock.patch.object(migrationops.MigrationOps, '_resize_vhd')
     def test_check_resize_vhd(self, mock_resize_vhd):
         self._migrationops._check_resize_vhd(
-            vhd_path=mock.sentinel.vhd_path, vhd_info={'MaxInternalSize': 1},
+            vhd_path=mock.sentinel.vhd_path, vhd_info={'VirtualSize': 1},
             new_size=2)
         mock_resize_vhd.assert_called_once_with(mock.sentinel.vhd_path, 2)
 
     def test_check_resize_vhd_exception(self):
-        self.assertRaises(vmutils.VHDResizeException,
+        self.assertRaises(exception.CannotResizeDisk,
                           self._migrationops._check_resize_vhd,
                           mock.sentinel.vhd_path,
-                          {'MaxInternalSize': 1}, 0)
+                          {'VirtualSize': 1}, 0)
 
     @mock.patch.object(migrationops.MigrationOps, '_merge_base_vhd')
     def test_resize_vhd(self, mock_merge_base_vhd):
@@ -417,7 +419,8 @@ class MigrationOpsTestCase(test_base.HyperVBaseTestCase):
         self._migrationops._vhdutils.get_vhd_info.assert_has_calls(
             expected_get_info)
         get_image_vm_gen = self._migrationops._vmops.get_image_vm_generation
-        get_image_vm_gen.assert_called_once_with(root_vhd_path,
+        get_image_vm_gen.assert_called_once_with(mock_instance.uuid,
+                                                 root_vhd_path,
                                                  mock.sentinel.image_meta)
         self._migrationops._vmops.create_instance.assert_called_once_with(
             mock_instance, mock.sentinel.network_info, None, root_vhd_path,
@@ -446,7 +449,7 @@ class MigrationOpsTestCase(test_base.HyperVBaseTestCase):
         mock_ebs_root_in_block_devices.return_value = False
         self._migrationops._pathutils.lookup_root_vhd_path.return_value = None
 
-        self.assertRaises(vmutils.HyperVException,
+        self.assertRaises(exception.DiskNotFound,
                           self._migrationops.finish_migration,
                           self.context, mock.sentinel.migration,
                           mock_instance, mock.sentinel.disk_info,

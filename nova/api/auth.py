@@ -36,6 +36,7 @@ auth_opts = [
                      'is removed from v2.1 api.'),
     cfg.StrOpt('auth_strategy',
                default='keystone',
+               choices=('keystone', 'noauth2'),
                help='''
 The strategy to use for auth: keystone or noauth2. noauth2 is designed for
 testing only, as it does no actual credential checking. noauth2 provides
@@ -76,10 +77,6 @@ def pipeline_factory(loader, global_conf, **local_conf):
 def pipeline_factory_v21(loader, global_conf, **local_conf):
     """A paste pipeline replica that keys off of auth_strategy."""
     return _load_pipeline(loader, local_conf[CONF.auth_strategy].split())
-
-
-# NOTE(oomichi): This pipeline_factory_v3 is for passing check-grenade-dsvm.
-pipeline_factory_v3 = pipeline_factory_v21
 
 
 class InjectContext(wsgi.Middleware):

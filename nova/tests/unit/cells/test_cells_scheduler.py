@@ -18,14 +18,14 @@ Tests For CellsScheduler
 import copy
 import time
 
-from oslo_config import cfg
+import mock
 from oslo_utils import uuidutils
 
 from nova import block_device
 from nova.cells import filters
 from nova.cells import weights
-from nova.compute import flavors
 from nova.compute import vm_states
+import nova.conf
 from nova import context
 from nova import db
 from nova import exception
@@ -34,14 +34,10 @@ from nova.scheduler import utils as scheduler_utils
 from nova import test
 from nova.tests.unit.cells import fakes
 from nova.tests.unit import fake_block_device
+from nova.tests import uuidsentinel
 from nova import utils
 
-CONF = cfg.CONF
-CONF.import_opt('scheduler_retries', 'nova.cells.scheduler', group='cells')
-CONF.import_opt('scheduler_filter_classes', 'nova.cells.scheduler',
-                group='cells')
-CONF.import_opt('scheduler_weight_classes', 'nova.cells.scheduler',
-                group='cells')
+CONF = nova.conf.CONF
 
 
 class FakeFilterClass1(filters.BaseCellFilter):
@@ -98,7 +94,7 @@ class CellsSchedulerTestCase(test.TestCase):
 
     def test_create_instances_here(self):
         # Just grab the first instance type
-        inst_type = flavors.get_flavor(1)
+        inst_type = objects.Flavor.get_by_id(self.ctxt, 1)
         image = {'properties': {}}
         instance_uuids = self.instance_uuids
         instance_props = {'id': 'removed',
@@ -144,6 +140,37 @@ class CellsSchedulerTestCase(test.TestCase):
             self.assertEqual('moo-%d' % (count + 1),
                              instance['display_name'])
             self.assertEqual('fake_image_ref', instance['image_ref'])
+
+    @mock.patch('nova.objects.Instance.update')
+    def test_create_instances_here_pops_problematic_properties(self,
+                                                               mock_update):
+        values = {
+            'uuid': uuidsentinel.instance,
+            'metadata': [],
+            'id': 1,
+            'name': 'foo',
+            'info_cache': 'bar',
+            'security_groups': 'not secure',
+            'flavor': 'chocolate',
+            'pci_requests': 'no thanks',
+            'ec2_ids': 'prime',
+        }
+
+        @mock.patch.object(self.scheduler.compute_api,
+                           'create_db_entry_for_new_instance')
+        def test(mock_create_db):
+            self.scheduler._create_instances_here(
+                self.ctxt, [uuidsentinel.instance], values,
+                objects.Flavor(), 'foo', [], [])
+
+        test()
+
+        # NOTE(danms): Make sure that only the expected properties
+        # are applied to the instance object. The complex ones that
+        # would have been mangled over RPC should be removed.
+        mock_update.assert_called_once_with(
+            {'uuid': uuidsentinel.instance,
+             'metadata': {}})
 
     def test_build_instances_selects_child_cell(self):
         # Make sure there's no capacity info so we're sure to

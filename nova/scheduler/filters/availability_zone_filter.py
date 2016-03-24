@@ -13,16 +13,15 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from oslo_config import cfg
 from oslo_log import log as logging
 
+import nova.conf
 from nova.scheduler import filters
 from nova.scheduler.filters import utils
 
 LOG = logging.getLogger(__name__)
 
-CONF = cfg.CONF
-CONF.import_opt('default_availability_zone', 'nova.availability_zones')
+CONF = nova.conf.CONF
 
 
 class AvailabilityZoneFilter(filters.BaseHostFilter):
@@ -36,10 +35,8 @@ class AvailabilityZoneFilter(filters.BaseHostFilter):
     # Availability zones do not change within a request
     run_filter_once_per_request = True
 
-    def host_passes(self, host_state, filter_properties):
-        spec = filter_properties.get('request_spec', {})
-        props = spec.get('instance_properties', {})
-        availability_zone = props.get('availability_zone')
+    def host_passes(self, host_state, spec_obj):
+        availability_zone = spec_obj.availability_zone
 
         if not availability_zone:
             return True

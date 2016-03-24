@@ -50,7 +50,15 @@ Nova Specific Commandments
   assertEqual(A in B, False) or assertEqual(False, A in B) to the more specific
   assertIn/NotIn(A, B)
 - [N339] Check common raise_feature_not_supported() is used for v2.1 HTTPNotImplemented response.
-- [N340] Check nova.utils.spawn() is used instead of greenthread.spawn()
+- [N340] Check nova.utils.spawn() is used instead of greenthread.spawn() and eventlet.spawn()
+- [N341] contextlib.nested is deprecated
+- [N342] Config options should be in the central location ``nova/conf/``
+- [N343] Check for common double word typos
+- [N344] Python 3: do not use dict.iteritems.
+- [N345] Python 3: do not use dict.iterkeys.
+- [N346] Python 3: do not use dict.itervalues.
+- [N347] Provide enough help text for config options
+- [N348] Deprecated library function os.popen()
 
 Creating Unit Tests
 -------------------

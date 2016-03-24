@@ -40,6 +40,7 @@ from nova.api.metadata import base as instance_metadata
 from nova import compute
 from nova.compute import power_state
 from nova.compute import task_states
+import nova.conf
 from nova.console import type as ctype
 from nova import context as nova_context
 from nova import exception
@@ -71,20 +72,18 @@ vmops_opts = [
                     'system.'),
     ]
 
-CONF = cfg.CONF
+CONF = nova.conf.CONF
 CONF.register_opts(vmops_opts, 'vmware')
 
 CONF.import_opt('image_cache_subdirectory_name', 'nova.virt.imagecache')
 CONF.import_opt('remove_unused_base_images', 'nova.virt.imagecache')
-CONF.import_opt('enabled', 'nova.vnc', group='vnc')
 CONF.import_opt('my_ip', 'nova.netconf')
 
 LOG = logging.getLogger(__name__)
 
-VMWARE_POWER_STATES = {
-                   'poweredOff': power_state.SHUTDOWN,
-                    'poweredOn': power_state.RUNNING,
-                    'suspended': power_state.SUSPENDED}
+VMWARE_POWER_STATES = {'poweredOff': power_state.SHUTDOWN,
+                       'poweredOn': power_state.RUNNING,
+                       'suspended': power_state.SUSPENDED}
 
 RESIZE_TOTAL_STEPS = 6
 
@@ -231,13 +230,13 @@ class VMwareVMOps(object):
                                 injected_files, admin_password, network_info):
         session_vim = self._session.vim
         cookies = session_vim.client.options.transport.cookiejar
-
+        dc_path = vutil.get_inventory_path(session_vim, dc_info.ref)
         uploaded_iso_path = self._create_config_drive(instance,
                                                       injected_files,
                                                       admin_password,
                                                       network_info,
                                                       datastore.name,
-                                                      dc_info.name,
+                                                      dc_path,
                                                       instance.uuid,
                                                       cookies)
         uploaded_iso_path = datastore.build_path(uploaded_iso_path)
@@ -274,6 +273,27 @@ class VMwareVMOps(object):
                                    instance.image_ref,
                                    version.version_string_with_package())
 
+    def _create_folders(self, parent_folder, folder_path):
+        folders = folder_path.split('/')
+        path_list = []
+        for folder in folders:
+            path_list.append(folder)
+            folder_path = '/'.join(path_list)
+            folder_ref = vm_util.folder_ref_cache_get(folder_path)
+            if not folder_ref:
+                folder_ref = vm_util.create_folder(self._session,
+                                                   parent_folder,
+                                                   folder)
+                vm_util.folder_ref_cache_update(folder_path, folder_ref)
+            parent_folder = folder_ref
+        return folder_ref
+
+    def _get_folder_name(self, name, id):
+        # Maximum folder length must be less than 80 characters.
+        # The 'id' length is 36. The maximum prefix for name is 40.
+        # We cannot truncate the 'id' as this is unique across OpenStack.
+        return '%s (%s)' % (name[:40], id[:36])
+
     def build_virtual_machine(self, instance, image_info,
                               dc_info, datastore, network_info, extra_specs,
                               metadata):
@@ -298,15 +318,21 @@ class VMwareVMOps(object):
                                                  image_info.os_type,
                                                  profile_spec=profile_spec,
                                                  metadata=metadata)
+
+        folder_name = self._get_folder_name('Project',
+                                            instance.project_id)
+        folder_path = 'OpenStack/%s/Instances' % folder_name
+        folder = self._create_folders(dc_info.vmFolder, folder_path)
+
         # Create the VM
-        vm_ref = vm_util.create_vm(self._session, instance, dc_info.vmFolder,
+        vm_ref = vm_util.create_vm(self._session, instance, folder,
                                    config_spec, self._root_resource_pool)
         return vm_ref
 
     def _get_extra_specs(self, flavor, image_meta=None):
         image_meta = image_meta or objects.ImageMeta.from_dict({})
         extra_specs = vm_util.ExtraSpecs()
-        for resource in ['cpu', 'memory', 'disk_io']:
+        for resource in ['cpu', 'memory', 'disk_io', 'vif']:
             for (key, type) in (('limit', int),
                                 ('reservation', int),
                                 ('shares_level', str),
@@ -318,6 +344,7 @@ class VMwareVMOps(object):
         extra_specs.cpu_limits.validate()
         extra_specs.memory_limits.validate()
         extra_specs.disk_io_limits.validate()
+        extra_specs.vif_limits.validate()
         hw_version = flavor.extra_specs.get('vmware:hw_version')
         extra_specs.hw_version = hw_version
         if CONF.vmware.pbm_enabled:
@@ -329,12 +356,12 @@ class VMwareVMOps(object):
         extra_specs.cores_per_socket = topology.cores
         return extra_specs
 
-    def _get_esx_host_and_cookies(self, datastore, dc_name, file_path):
+    def _get_esx_host_and_cookies(self, datastore, dc_path, file_path):
         hosts = datastore.get_connected_hosts(self._session)
         host = ds_obj.Datastore.choose_host(hosts)
         host_name = self._session._call_method(vutil, 'get_object_property',
                                                host, 'name')
-        url = ds_obj.DatastoreURL('https', host_name, file_path, dc_name,
+        url = ds_obj.DatastoreURL('https', host_name, file_path, dc_path,
                                   datastore.name)
         cookie_header = url.get_transfer_ticket(self._session, 'PUT')
         name, value = cookie_header.split('=')
@@ -357,13 +384,13 @@ class VMwareVMOps(object):
 
         # try to get esx cookie to upload
         try:
-            dc_name = 'ha-datacenter'
+            dc_path = 'ha-datacenter'
             host, cookies = self._get_esx_host_and_cookies(vi.datastore,
-                                                        dc_name,
-                                                        image_ds_loc.rel_path)
+                dc_path, image_ds_loc.rel_path)
         except Exception as e:
             LOG.warning(_LW("Get esx cookies failed: %s"), e)
-            dc_name = vi.dc_info.name
+            dc_path = vutil.get_inventory_path(session.vim, vi.dc_info.ref)
+
             host = self._session._host
             cookies = session.vim.client.options.transport.cookiejar
 
@@ -372,7 +399,7 @@ class VMwareVMOps(object):
             vi.instance,
             host,
             session._port,
-            dc_name,
+            dc_path,
             vi.datastore.name,
             image_ds_loc.rel_path,
             cookies=cookies)
@@ -392,7 +419,7 @@ class VMwareVMOps(object):
                    'datastore_name': vi.datastore.name},
                   instance=vi.instance)
 
-        images.fetch_image_stream_optimized(
+        image_size = images.fetch_image_stream_optimized(
             context,
             vi.instance,
             self._session,
@@ -400,6 +427,10 @@ class VMwareVMOps(object):
             vi.datastore.name,
             vi.dc_info.vmFolder,
             self._root_resource_pool)
+        # The size of the image is different from the size of the virtual disk.
+        # We want to use the latter. On vSAN this is the only way to get this
+        # size because there is no VMDK descriptor.
+        vi.ii.file_size = image_size
 
     def _fetch_image_as_ova(self, context, vi, image_ds_loc):
         """Download root disk of an OVA image as streamOptimized."""
@@ -408,13 +439,17 @@ class VMwareVMOps(object):
         # of the VM use to import it with.
         vm_name = image_ds_loc.parent.basename
 
-        images.fetch_image_ova(context,
+        image_size = images.fetch_image_ova(context,
                                vi.instance,
                                self._session,
                                vm_name,
                                vi.datastore.name,
                                vi.dc_info.vmFolder,
                                self._root_resource_pool)
+        # The size of the image is different from the size of the virtual disk.
+        # We want to use the latter. On vSAN this is the only way to get this
+        # size because there is no VMDK descriptor.
+        vi.ii.file_size = image_size
 
     def _prepare_sparse_image(self, vi):
         tmp_dir_loc = vi.datastore.build_path(
@@ -613,7 +648,7 @@ class VMwareVMOps(object):
                                                   size, at, path)
 
         # There may be block devices defined but no ephemerals. In this case
-        # we need to allocate a ephemeral disk if required
+        # we need to allocate an ephemeral disk if required
         if not ephemerals and instance.ephemeral_gb:
             size = instance.ephemeral_gb * units.Mi
             filename = vm_util.get_ephemeral_name(0)
@@ -757,6 +792,11 @@ class VMwareVMOps(object):
             self._configure_config_drive(
                     instance, vm_ref, vi.dc_info, vi.datastore,
                     injected_files, admin_password, network_info)
+
+        # Rename the VM. This is done after the spec is created to ensure
+        # that all of the files for the instance are under the directory
+        # 'uuid' of the instance
+        vm_util.rename_vm(self._session, vm_ref, instance)
 
         vm_util.power_on_instance(self._session, instance, vm_ref=vm_ref)
 
@@ -1143,7 +1183,7 @@ class VMwareVMOps(object):
         dc_info = self.get_datacenter_ref_and_name(datastore.ref)
 
         # Get the image details of the instance
-        image_info = images.VMwareImage.from_image(instance.image_ref,
+        image_info = images.VMwareImage.from_image(image_meta.id,
                                                    image_meta)
         vi = VirtualMachineInstanceConfigInfo(instance,
                                               image_info,
@@ -1151,6 +1191,9 @@ class VMwareVMOps(object):
                                               dc_info,
                                               self._imagecache)
         vm_util.power_off_instance(self._session, instance, vm_ref)
+
+        # Fetch the image if it does not exist in the cache
+        self._fetch_image_if_missing(context, vi)
 
         # Get the rescue disk path
         rescue_disk_path = datastore.build_path(instance.uuid,
@@ -1308,8 +1351,7 @@ class VMwareVMOps(object):
                                        total_steps=RESIZE_TOTAL_STEPS)
 
         # 2. Reconfigure the VM properties
-        image_meta = objects.ImageMeta.from_instance(instance)
-        self._resize_vm(context, instance, vm_ref, flavor, image_meta)
+        self._resize_vm(context, instance, vm_ref, flavor, instance.image_meta)
 
         self._update_instance_progress(context, instance,
                                        step=2,
@@ -1353,8 +1395,8 @@ class VMwareVMOps(object):
         vm_util.power_off_instance(self._session, instance, vm_ref)
         client_factory = self._session.vim.client.factory
         # Reconfigure the VM properties
-        image_meta = objects.ImageMeta.from_instance(instance)
-        extra_specs = self._get_extra_specs(instance.flavor, image_meta)
+        extra_specs = self._get_extra_specs(instance.flavor,
+                                            instance.image_meta)
         metadata = self._get_instance_metadata(context, instance)
         vm_resize_spec = vm_util.get_vm_resize_spec(client_factory,
                                                     int(instance.vcpus),
@@ -1410,29 +1452,6 @@ class VMwareVMOps(object):
         self._update_instance_progress(context, instance,
                                        step=6,
                                        total_steps=RESIZE_TOTAL_STEPS)
-
-    def live_migration(self, context, instance_ref, dest,
-                       post_method, recover_method, block_migration=False):
-        """Spawning live_migration operation for distributing high-load."""
-        vm_ref = vm_util.get_vm_ref(self._session, instance_ref)
-
-        host_ref = self._get_host_ref_from_name(dest)
-        if host_ref is None:
-            raise exception.HostNotFound(host=dest)
-
-        LOG.debug("Migrating VM to host %s", dest, instance=instance_ref)
-        try:
-            vm_migrate_task = self._session._call_method(
-                                    self._session.vim,
-                                    "MigrateVM_Task", vm_ref,
-                                    host=host_ref,
-                                    priority="defaultPriority")
-            self._session._wait_for_task(vm_migrate_task)
-        except Exception:
-            with excutils.save_and_reraise_exception():
-                recover_method(context, instance_ref, dest, block_migration)
-        post_method(context, instance_ref, dest, block_migration)
-        LOG.debug("Migrated VM to host %s", dest, instance=instance_ref)
 
     def poll_rebooting_instances(self, timeout, instances):
         """Poll for rebooting instances."""
@@ -1667,17 +1686,19 @@ class VMwareVMOps(object):
 
         while retrieve_result:
             for vm in retrieve_result.objects:
-                vm_name = None
+                vm_uuid = None
                 conn_state = None
                 for prop in vm.propSet:
-                    if prop.name == "name":
-                        vm_name = prop.val
-                    elif prop.name == "runtime.connectionState":
+                    if prop.name == "runtime.connectionState":
                         conn_state = prop.val
+                    elif prop.name == 'config.extraConfig["nvp.vm-uuid"]':
+                        vm_uuid = prop.val.value
+                # Ignore VM's that do not have nvp.vm-uuid defined
+                if not vm_uuid:
+                    continue
                 # Ignoring the orphaned or inaccessible VMs
-                if (conn_state not in ["orphaned", "inaccessible"] and
-                    uuidutils.is_uuid_like(vm_name)):
-                    lst_vm_names.append(vm_name)
+                if conn_state not in ["orphaned", "inaccessible"]:
+                    lst_vm_names.append(vm_uuid)
             retrieve_result = self._session._call_method(vutil,
                                                          'continue_retrieval',
                                                          retrieve_result)
@@ -1712,7 +1733,7 @@ class VMwareVMOps(object):
                                        attach_config_spec)
             except Exception as e:
                 LOG.error(_LE('Attaching network adapter failed. Exception: '
-                              ' %s'),
+                              '%s'),
                           e, instance=instance)
                 raise exception.InterfaceAttachFailed(
                         instance_uuid=instance.uuid)
@@ -1904,7 +1925,8 @@ class VMwareVMOps(object):
 
     def list_instances(self):
         """Lists the VM instances that are registered with vCenter cluster."""
-        properties = ['name', 'runtime.connectionState']
+        properties = ['runtime.connectionState',
+                      'config.extraConfig["nvp.vm-uuid"]']
         LOG.debug("Getting list of instances from cluster %s",
                   self._cluster)
         vms = []

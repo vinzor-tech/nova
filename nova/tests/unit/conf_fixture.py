@@ -14,26 +14,23 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from oslo_config import cfg
 from oslo_config import fixture as config_fixture
+from oslo_policy import opts as policy_opts
 
+import nova.conf
 from nova import config
 from nova import ipv6
 from nova import paths
 from nova.tests.unit import utils
 
-CONF = cfg.CONF
+CONF = nova.conf.CONF
 CONF.import_opt('use_ipv6', 'nova.netconf')
 CONF.import_opt('host', 'nova.netconf')
-CONF.import_opt('scheduler_driver', 'nova.scheduler.manager')
 CONF.import_opt('fake_network', 'nova.network.linux_net')
 CONF.import_opt('network_size', 'nova.network.manager')
 CONF.import_opt('num_networks', 'nova.network.manager')
 CONF.import_opt('floating_ip_dns_manager', 'nova.network.floating_ips')
 CONF.import_opt('instance_dns_manager', 'nova.network.floating_ips')
-CONF.import_opt('policy_file', 'nova.openstack.common.policy')
-CONF.import_opt('compute_driver', 'nova.virt.driver')
-CONF.import_opt('api_paste_config', 'nova.wsgi')
 
 
 class ConfFixture(config_fixture.Config):
@@ -56,7 +53,8 @@ class ConfFixture(config_fixture.Config):
         self.conf.set_default('use_ipv6', True)
         self.conf.set_default('vlan_interface', 'eth0')
         self.conf.set_default('auth_strategy', 'noauth2')
-        config.parse_args([], default_config_files=[])
+        config.parse_args([], default_config_files=[], configure_db=False,
+                          init_rpc=False)
         self.conf.set_default('connection', "sqlite://", group='database')
         self.conf.set_default('connection', "sqlite://", group='api_database')
         self.conf.set_default('sqlite_synchronous', False, group='database')
@@ -64,7 +62,13 @@ class ConfFixture(config_fixture.Config):
                 group='api_database')
         self.conf.set_default('fatal_exception_format_errors', True)
         self.conf.set_default('enabled', True, 'osapi_v21')
+        # TODO(sdague): this makes our project_id match 'fake' as well.
+        # We should fix the tests to use real
+        # UUIDs then drop this work around.
+        self.conf.set_default('project_id_regex',
+                              '[0-9a-fk\-]+', 'osapi_v21')
         self.conf.set_default('force_dhcp_release', False)
         self.conf.set_default('periodic_enable', False)
+        policy_opts.set_defaults(self.conf)
         self.addCleanup(utils.cleanup_dns_managers)
         self.addCleanup(ipv6.api.reset_backend)

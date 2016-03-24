@@ -17,24 +17,24 @@ Tests for Crypto module.
 """
 
 import os
+import uuid
 
 from cryptography.hazmat import backends
 from cryptography.hazmat.primitives import serialization
 import mock
-from mox3 import mox
 from oslo_concurrency import processutils
 import paramiko
 import six
 
 from nova import crypto
-from nova import db
 from nova import exception
 from nova import test
 from nova import utils
 
 
-class X509Test(test.TestCase):
-    def test_can_generate_x509(self):
+class X509Test(test.NoDBTestCase):
+    @mock.patch('nova.db.certificate_create')
+    def test_can_generate_x509(self, mock_create):
         with utils.tempdir() as tmpdir:
             self.flags(ca_path=tmpdir)
             crypto.ensure_ca_filesystem()
@@ -92,9 +92,10 @@ class X509Test(test.TestCase):
             self.assertEqual(start, os.getcwd())
 
 
-class RevokeCertsTest(test.TestCase):
+class RevokeCertsTest(test.NoDBTestCase):
 
-    def test_revoke_certs_by_user_and_project(self):
+    @mock.patch('nova.crypto.revoke_cert')
+    def test_revoke_certs_by_user_and_project(self, mock_revoke):
         user_id = 'test_user'
         project_id = 2
         file_name = 'test_file'
@@ -106,17 +107,15 @@ class RevokeCertsTest(test.TestCase):
             return [{"user_id": user_id, "project_id": project_id,
                                           "file_name": file_name}]
 
-        self.stubs.Set(db, 'certificate_get_all_by_user_and_project',
-                           mock_certificate_get_all_by_user_and_project)
-
-        self.mox.StubOutWithMock(crypto, 'revoke_cert')
-        crypto.revoke_cert(project_id, file_name)
-
-        self.mox.ReplayAll()
+        self.stub_out('nova.db.certificate_get_all_by_user_and_project',
+                      mock_certificate_get_all_by_user_and_project)
 
         crypto.revoke_certs_by_user_and_project(user_id, project_id)
 
-    def test_revoke_certs_by_user(self):
+        mock_revoke.assert_called_once_with(project_id, file_name)
+
+    @mock.patch('nova.crypto.revoke_cert')
+    def test_revoke_certs_by_user(self, mock_revoke):
         user_id = 'test_user'
         project_id = 2
         file_name = 'test_file'
@@ -126,17 +125,14 @@ class RevokeCertsTest(test.TestCase):
             return [{"user_id": user_id, "project_id": project_id,
                                           "file_name": file_name}]
 
-        self.stubs.Set(db, 'certificate_get_all_by_user',
-                                    mock_certificate_get_all_by_user)
-
-        self.mox.StubOutWithMock(crypto, 'revoke_cert')
-        crypto.revoke_cert(project_id, mox.IgnoreArg())
-
-        self.mox.ReplayAll()
+        self.stub_out('nova.db.certificate_get_all_by_user',
+                      mock_certificate_get_all_by_user)
 
         crypto.revoke_certs_by_user(user_id)
+        mock_revoke.assert_called_once_with(project_id, mock.ANY)
 
-    def test_revoke_certs_by_project(self):
+    @mock.patch('nova.crypto.revoke_cert')
+    def test_revoke_certs_by_project(self, mock_revoke):
         user_id = 'test_user'
         project_id = 2
         file_name = 'test_file'
@@ -146,15 +142,11 @@ class RevokeCertsTest(test.TestCase):
             return [{"user_id": user_id, "project_id": project_id,
                                           "file_name": file_name}]
 
-        self.stubs.Set(db, 'certificate_get_all_by_project',
-                                    mock_certificate_get_all_by_project)
-
-        self.mox.StubOutWithMock(crypto, 'revoke_cert')
-        crypto.revoke_cert(project_id, mox.IgnoreArg())
-
-        self.mox.ReplayAll()
+        self.stub_out('nova.db.certificate_get_all_by_project',
+                      mock_certificate_get_all_by_project)
 
         crypto.revoke_certs_by_project(project_id)
+        mock_revoke.assert_called_once_with(project_id, mock.ANY)
 
     @mock.patch.object(utils, 'execute',
                        side_effect=processutils.ProcessExecutionError)
@@ -164,11 +156,12 @@ class RevokeCertsTest(test.TestCase):
                           2, 'test_file')
 
     def test_revoke_cert_project_not_found_chdir_fails(self, *args, **kargs):
+        self.flags(use_project_ca=True)
         self.assertRaises(exception.ProjectNotFound, crypto.revoke_cert,
-                          2, 'test_file')
+                          str(uuid.uuid4()), 'test_file')
 
 
-class CertExceptionTests(test.TestCase):
+class CertExceptionTests(test.NoDBTestCase):
     def test_fetch_ca_file_not_found(self):
         with utils.tempdir() as tmpdir:
             self.flags(ca_path=tmpdir)
@@ -186,7 +179,7 @@ class CertExceptionTests(test.TestCase):
                               crypto.fetch_crl, project_id='fake')
 
 
-class EncryptionTests(test.TestCase):
+class EncryptionTests(test.NoDBTestCase):
     pubkey = ("ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDArtgrfBu/g2o28o+H2ng/crv"
               "zgES91i/NNPPFTOutXelrJ9QiPTPTm+B8yspLsXifmbsmXztNOlBQgQXs6usxb4"
               "fnJKNUZ84Vkp5esbqK/L7eyRqwPvqo7btKBMoAMVX/kUyojMpxb7Ssh6M6Y8cpi"
@@ -263,7 +256,7 @@ e6fCXWECgYEAqgpGvva5kJ1ISgNwnJbwiNw0sOT9BMOsdNZBElf0kJIIy6FMPvap
                           crypto.ssh_encrypt_text, '', self.text)
 
 
-class KeyPairTest(test.TestCase):
+class KeyPairTest(test.NoDBTestCase):
     rsa_prv = (
         "-----BEGIN RSA PRIVATE KEY-----\n"
         "MIIEowIBAAKCAQEA5G44D6lEgMj6cRwCPydsMl1VRN2B9DVyV5lmwssGeJClywZM\n"
@@ -369,7 +362,7 @@ class KeyPairTest(test.TestCase):
         keyin.seek(0)
         key = paramiko.RSAKey.from_private_key(keyin)
 
-        with mock.patch.object(paramiko.RSAKey, 'generate') as mock_generate:
+        with mock.patch.object(crypto, 'generate_key') as mock_generate:
             mock_generate.return_value = key
             (private_key, public_key, fingerprint) = crypto.generate_key_pair()
             self.assertEqual(self.rsa_pub, public_key)

@@ -26,6 +26,7 @@ import base64
 import binascii
 import os
 
+from Crypto.PublicKey import RSA
 from cryptography import exceptions
 from cryptography.hazmat import backends
 from cryptography.hazmat.primitives.asymmetric import padding
@@ -37,7 +38,6 @@ from oslo_config import cfg
 from oslo_log import log as logging
 from oslo_utils import excutils
 from oslo_utils import fileutils
-from oslo_utils import timeutils
 import paramiko
 import six
 
@@ -162,8 +162,27 @@ def generate_x509_fingerprint(pem_key):
                      'Error message: %s') % ex)
 
 
+def generate_key(bits):
+    """Generate a paramiko RSAKey"""
+    # NOTE(dims): pycryptodome has changed the signature of the RSA.generate
+    # call. specifically progress_func has been dropped. paramiko still uses
+    # pycrypto. However some projects like latest pysaml2 have switched from
+    # pycrypto to pycryptodome as pycrypto seems to have been abandoned.
+    # paramiko project has started transition to pycryptodome as well but
+    # there is no release yet with that support. So at the moment depending on
+    # which version of pysaml2 is installed, Nova is likely to break. So we
+    # call "RSA.generate(bits)" which works on both pycrypto and pycryptodome
+    # and then wrap it into a paramiko.RSAKey
+    rsa = RSA.generate(bits)
+    key = paramiko.RSAKey(vals=(rsa.e, rsa.n))
+    key.d = rsa.d
+    key.p = rsa.p
+    key.q = rsa.q
+    return key
+
+
 def generate_key_pair(bits=2048):
-    key = paramiko.RSAKey.generate(bits)
+    key = generate_key(bits)
     keyout = six.StringIO()
     key.write_private_key(keyout)
     private_key = keyout.getvalue()
@@ -253,12 +272,12 @@ def revoke_certs_by_user_and_project(user_id, project_id):
 
 def _project_cert_subject(project_id):
     """Helper to generate user cert subject."""
-    return CONF.project_cert_subject % (project_id, timeutils.isotime())
+    return CONF.project_cert_subject % (project_id, utils.isotime())
 
 
 def _user_cert_subject(user_id, project_id):
     """Helper to generate user cert subject."""
-    return CONF.user_cert_subject % (project_id, user_id, timeutils.isotime())
+    return CONF.user_cert_subject % (project_id, user_id, utils.isotime())
 
 
 def generate_x509_cert(user_id, project_id, bits=2048):

@@ -14,7 +14,6 @@
 #    under the License.
 
 import mock
-from oslo_config import cfg
 
 from nova.api.openstack.compute import attach_interfaces \
         as attach_interfaces_v21
@@ -30,8 +29,6 @@ from nova.tests.unit import fake_network_cache_model
 
 from webob import exc
 
-
-CONF = cfg.CONF
 
 FAKE_UUID1 = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'
 FAKE_UUID2 = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'
@@ -135,8 +132,6 @@ class InterfaceAttachTestsV21(test.NoDBTestCase):
 
     def setUp(self):
         super(InterfaceAttachTestsV21, self).setUp()
-        self.flags(auth_strategy=None, group='neutron')
-        self.flags(url='http://anyhost/', group='neutron')
         self.flags(timeout=30, group='neutron')
         self.stubs.Set(network_api.API, 'show_port', fake_show_port)
         self.stubs.Set(network_api.API, 'list_ports', fake_list_ports)
@@ -402,6 +397,23 @@ class InterfaceAttachTestsV21(test.NoDBTestCase):
         self.assertRaises(self.not_usable_exc,
                           self.attachments.create, self.req, FAKE_UUID1,
                           body=body)
+        ctxt = self.req.environ['nova.context']
+        attach_mock.assert_called_once_with(ctxt, fake_instance, None,
+                                            None, None)
+        get_mock.assert_called_once_with(ctxt, FAKE_UUID1,
+                                         want_objects=True,
+                                         expected_attrs=None)
+
+    @mock.patch.object(compute_api.API, 'get')
+    @mock.patch.object(compute_api.API, 'attach_interface')
+    def test_attach_interface_failed_no_network(self, attach_mock, get_mock):
+        fake_instance = objects.Instance(uuid=FAKE_UUID1,
+                                         project_id=FAKE_UUID2)
+        get_mock.return_value = fake_instance
+        attach_mock.side_effect = (
+            exception.InterfaceAttachFailedNoNetwork(project_id=FAKE_UUID2))
+        self.assertRaises(exc.HTTPBadRequest, self.attachments.create,
+                          self.req, FAKE_UUID1, body={})
         ctxt = self.req.environ['nova.context']
         attach_mock.assert_called_once_with(ctxt, fake_instance, None,
                                             None, None)

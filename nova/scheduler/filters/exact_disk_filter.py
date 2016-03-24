@@ -23,12 +23,11 @@ LOG = logging.getLogger(__name__)
 class ExactDiskFilter(filters.BaseHostFilter):
     """Exact Disk Filter."""
 
-    def host_passes(self, host_state, filter_properties):
+    def host_passes(self, host_state, spec_obj):
         """Return True if host has the exact amount of disk available."""
-        instance_type = filter_properties.get('instance_type')
-        requested_disk = (1024 * (instance_type['root_gb'] +
-                                  instance_type['ephemeral_gb']) +
-                          instance_type['swap'])
+        requested_disk = (1024 * (spec_obj.root_gb +
+                                  spec_obj.ephemeral_gb) +
+                          spec_obj.swap)
 
         if requested_disk != host_state.free_disk_mb:
             LOG.debug("%(host_state)s does not have exactly "
@@ -39,4 +38,8 @@ class ExactDiskFilter(filters.BaseHostFilter):
                        'usable_disk_mb': host_state.free_disk_mb})
             return False
 
+        # NOTE(mgoddard): Setting the limit ensures that it is enforced in
+        # compute. This ensures that if multiple instances are scheduled to a
+        # single host, then all after the first will fail in the claim.
+        host_state.limits['disk_gb'] = host_state.total_usable_disk_gb
         return True

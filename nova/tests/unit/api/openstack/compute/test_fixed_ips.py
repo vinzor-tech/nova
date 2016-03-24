@@ -20,7 +20,6 @@ from nova.api.openstack.compute.legacy_v2.contrib import fixed_ips \
         as fixed_ips_v2
 from nova.api.openstack import wsgi as os_wsgi
 from nova import context
-from nova import db
 from nova import exception
 from nova import test
 from nova.tests.unit.api.openstack import fakes
@@ -127,9 +126,9 @@ class FixedIpTestV21(test.NoDBTestCase):
     def setUp(self):
         super(FixedIpTestV21, self).setUp()
 
-        self.stubs.Set(db, "fixed_ip_get_by_address",
-                       fake_fixed_ip_get_by_address)
-        self.stubs.Set(db, "fixed_ip_update", fake_fixed_ip_update)
+        self.stub_out("nova.db.fixed_ip_get_by_address",
+                      fake_fixed_ip_get_by_address)
+        self.stub_out("nova.db.fixed_ip_update", fake_fixed_ip_update)
 
         self.context = context.get_admin_context()
         self.controller = self.fixed_ips.FixedIPController()
@@ -181,7 +180,7 @@ class FixedIpTestV21(test.NoDBTestCase):
         result = action(req, "192.168.1.1", body=body)
 
         self._assert_equal(result or action, 202)
-        self.assertEqual(fake_fixed_ips[0]['reserved'], True)
+        self.assertTrue(fake_fixed_ips[0]['reserved'])
 
     def test_fixed_ip_reserve_bad_ip(self):
         body = {'reserve': None}
@@ -215,7 +214,7 @@ class FixedIpTestV21(test.NoDBTestCase):
         result = action(req, "192.168.1.1", body=body)
 
         self._assert_equal(result or action, 202)
-        self.assertEqual(fake_fixed_ips[0]['reserved'], False)
+        self.assertFalse(fake_fixed_ips[0]['reserved'])
 
     def test_fixed_ip_unreserve_bad_ip(self):
         body = {'unreserve': None}

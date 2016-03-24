@@ -10,20 +10,19 @@
 # OpenStack Infra <zanata@openstack.org>, 2015. #zanata
 msgid ""
 msgstr ""
-"Project-Id-Version: nova 12.0.0.0b4.dev203\n"
+"Project-Id-Version: nova 13.0.0.0b4.dev129\n"
 "Report-Msgid-Bugs-To: EMAIL@ADDRESS\n"
-"POT-Creation-Date: 2015-09-16 19:02+0000\n"
-"PO-Revision-Date: 2015-09-13 01:37+0000\n"
-"Last-Translator: Corinne Verheyde <cverheyd@gmail.com>\n"
-"Language-Team: French (http://www.transifex.com/openstack/nova/language/"
-"fr/)\n"
-"Language: fr\n"
+"POT-Creation-Date: 2016-03-10 03:26+0000\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
-"Generated-By: Babel 2.0\n"
+"PO-Revision-Date: 2015-09-13 01:37+0000\n"
+"Last-Translator: Corinne Verheyde <cverheyd@gmail.com>\n"
+"Language: fr\n"
 "Plural-Forms: nplurals=2; plural=(n > 1);\n"
-"X-Generator: Zanata 3.7.1\n"
+"Generated-By: Babel 2.0\n"
+"X-Generator: Zanata 3.7.3\n"
+"Language-Team: French\n"
 
 #, python-format
 msgid "%(cmd)s failed. Sleeping %(time)s seconds before retry."
@@ -33,18 +32,6 @@ msgstr ""
 #, python-format
 msgid "%(host_state)s has not been heard from in a while"
 msgstr "%(host_state)s n'a pas été entendu depuis un certain temps"
-
-#, python-format
-msgid "%(logprefix)sfailed to load json"
-msgstr "%(logprefix)s a échoué à charger json"
-
-#, python-format
-msgid "%(logprefix)sfile does not exist"
-msgstr "Le fichier %(logprefix)s n'existe pas"
-
-#, python-format
-msgid "%(logprefix)unexpected IOError when reading"
-msgstr "%(logprefix)u IOError inattendue lors de la lecture"
 
 #, python-format
 msgid "%(overs)s quota exceeded for %(pid)s, tried to resize instance."
@@ -59,15 +46,6 @@ msgstr "Échec de %s. Pas de nouvelle tentative."
 #, python-format
 msgid "%s is already mounted"
 msgstr "%s est déjà monté"
-
-#, python-format
-msgid ""
-"Access key %(access_key)s has had %(failures)d failed authentications and "
-"will be locked out for %(lock_mins)d minutes."
-msgstr ""
-"La clef d'accès %(access_key)s a rencontrée %(failures)d echecs "
-"d'authentification et sera par conséquent vérouillée pour %(lock_mins)d "
-"minutes."
 
 #, python-format
 msgid "Address |%(address)s| is not allocated"
@@ -101,9 +79,6 @@ msgstr ""
 msgid "Attempted to remove chain %s which does not exist"
 msgstr "Tentative de retrait de la chaîne %s qui n'existe pas"
 
-msgid "Bandwidth usage not supported by hypervisor."
-msgstr "L'usage de la bande passante n'est pas supporté par l'hyperviseur"
-
 #, python-format
 msgid ""
 "Cannot add security group %(name)s to %(instance)s since the port "
@@ -127,10 +102,6 @@ msgstr "Impossible de supprimer l'entrée |%s|"
 
 msgid "Cannot destroy instance, operation time out"
 msgstr "Impossible de détruire l'instance, l'opération a expiré"
-
-#, python-format
-msgid "Cannot get the metrics from %s."
-msgstr "Impossible de récupérer les indicateurs depuis: %s"
 
 msgid ""
 "Cannot get the number of cpu, because this function is not implemented for "
@@ -249,14 +220,6 @@ msgid "Device allocation failed after repeated retries."
 msgstr "L'allocation d'unité a échoué après des tentatives répétées."
 
 #, python-format
-msgid ""
-"Disk not found on controller \"%(controller_path)s\" with address "
-"\"%(address)s\""
-msgstr ""
-"Disque non trouvé sur le contrôleur \"%(controller_path)s\" avec l'adresse "
-"\"%(address)s\""
-
-#, python-format
 msgid "Domain |%(domain)s| already exists, changing project to |%(project)s|."
 msgstr ""
 "Le domaine |%(domain)s| existe déjà, définition de projet sur |%(project)s|."
@@ -271,11 +234,6 @@ msgstr "L'instance a disparu lord de l'opération detach_interface."
 
 msgid "During detach_volume, instance disappeared."
 msgstr "Pendant l'opération detach_volume, l'instance a disparu."
-
-msgid "Error cleaning up fixed ip allocation. Manual cleanup may be required."
-msgstr ""
-"Erreur lors du nettoyage de l'allocation des IP fixe. Un nettoyage manuel "
-"peut êter requis "
 
 #, python-format
 msgid ""
@@ -371,16 +329,8 @@ msgstr "Echec de chargement de l'extension %(ext_name)s:%(exc)s"
 msgid "Failed to power off instance"
 msgstr "Echec de mise sous tension de l'instance"
 
-#, python-format
-msgid "Failed to remove snapshot for VM %s"
-msgstr "Echec du retrait de l'instantané pour la machine virtuelle %s"
-
 msgid "Failed to resume instance"
 msgstr "Echec de la reprise de l'instance"
-
-#, python-format
-msgid "Failed to rollback quota for deallocate fixed ip: %s"
-msgstr "Échec à diminuer le quota pour désallouer une ip fixe : %s"
 
 #, python-format
 msgid "Failed to shutdown appliance %s"
@@ -402,20 +352,8 @@ msgstr ""
 "L'indicateur sr_matching_filter '%s' ne respecte pas la convention de mise "
 "en forme"
 
-#, python-format
-msgid "Flavor %d not found"
-msgstr "Flavor %d non trouvée"
-
 msgid "Flavor could not be found, skipping migration."
 msgstr "Version introuvable, migration ignorée."
-
-#, python-format
-msgid ""
-"Floating ip address |%(address)s| no longer belongs to instance "
-"%(instance_uuid)s. Will not migrate it "
-msgstr ""
-"L'IP flottante |%(address)s| n’appartiens plus a l'instance "
-"%(instance_uuid)s. Elle ne sera pas migré."
 
 #, python-format
 msgid ""
@@ -425,23 +363,12 @@ msgstr ""
 "Plusieurs correspondances trouvées pour le domaine %(domain)s\n"
 "%(entry)s"
 
-#, python-format
-msgid ""
-"Host %(hostname)s has more disk space than database expected (%(physical)sgb "
-"> %(database)sgb)"
-msgstr ""
-"L'hôte %(hostname)s a plus d'espace disque que ce qui est attendue par la "
-"base de donnée (%(physical)sgo > %(database)sgo)"
-
 msgid ""
 "Host field should not be set on the instance until resources have been "
 "claimed."
 msgstr ""
 "La zone hôte ne doit pas être définie sur l'instance jusqu'à ce que des "
 "ressources aient été demandées."
-
-msgid "Hypervisor driver does not support firewall rules"
-msgstr "L'hyperviseur ne prend pas en charge les règles de pare-feu"
 
 msgid "Hypervisor driver does not support resume guests"
 msgstr "L'hyperviseur ne prend pas en charge la reprise des invités"
@@ -579,10 +506,6 @@ msgstr ""
 "disque %(disk_type)s."
 
 #, python-format
-msgid "Invalid floating ip id %s in request"
-msgstr "IP flottante invalide d'ID: %s dans la requete "
-
-#, python-format
 msgid "Invalid value for id mapping %s"
 msgstr "Valeur invalide pour la configuration d'id %s"
 
@@ -674,14 +597,6 @@ msgstr "Aucun réseau ou adresse IP fixes ne peuvent être alloués"
 msgid "No valid host found for rebuild"
 msgstr "Hôte valide non trouvée pour la regénération."
 
-#, python-format
-msgid "Not loading %s because it is in the blacklist"
-msgstr "Pas de chargement de %s car il est la liste noire"
-
-#, python-format
-msgid "Not loading %s because it is not in the whitelist"
-msgstr "Pas de chargement de %s car il n'est pas dans la liste blanche"
-
 msgid ""
 "Old property name \"hw_watchdog_action\" is now deprecated and will be "
 "removed in the next release. Use updated property name \"hw:watchdog_action"
@@ -771,10 +686,6 @@ msgid "Rejecting snapshot request, snapshots currently disabled"
 msgstr "Rejet de la demande d'instantané, instantanés actuellement désactivés"
 
 #, python-format
-msgid "Removed %(num)d duplicate rules for floating ip %(float)s"
-msgstr "%(num)d règles en double supprimées pour l'IP flottante %(float)s"
-
-#, python-format
 msgid ""
 "Report interval must be less than service down time. Current config: "
 "<service_down_time: %(service_down_time)s, report_interval: "
@@ -794,16 +705,6 @@ msgstr ""
 "L'execution de Nova avec une version du VMware vCenter inferieure a "
 "%(version)s est déprécié. Le minimum requis de vCenter sera augmenté à "
 "%(version)s dans la version 13.0.0 de Nova"
-
-#, python-format
-msgid ""
-"Running Nova with a libvirt version less than %(version)s is deprecated. The "
-"required minimum version of libvirt will be raised to %(version)s in the "
-"13.0.0 release."
-msgstr ""
-"L’exécution de Nova avec une version de libvirt inférieure à %(version)s est "
-"déprécié. La version minimum requise de libvirt sera augmenté a %(version)s "
-"dans la version 13.0.0 de Nova"
 
 msgid ""
 "Running libvirt-lxc without user namespaces is dangerous. Containers spawned "
@@ -841,18 +742,6 @@ msgstr ""
 "Tenant_id %(tenant_id)s ne correspond pas avec le tenant_id de l'instance "
 "%(instance_id)s."
 
-msgid ""
-"The ZooKeeper service group driver in Nova is not tested by the OpenStack "
-"project and thus its quality can not be ensured. This may change in the "
-"future, but current deployers should be aware that the use of it in "
-"production right now may be risky."
-msgstr ""
-"Le service de centralisation de driver ZooKeeper de Nova n'est pas testé par "
-"la communauté du projet OpenStack par conséquent la qualité de peut être "
-"assurée. Cette situation peut changer a l'avenir, mais les actuels "
-"utilisateurs doivent être averti que l'utilisation immédiate de ce service "
-"en production peut être risquée."
-
 #, python-format
 msgid ""
 "The libvirt driver is not tested on %(type)s/%(arch)s by the OpenStack "
@@ -863,13 +752,6 @@ msgstr ""
 "OpenStack et sa qualité ne peut donc être garantie. Pour plus "
 "d'informations, voir : https://wiki.openstack.org/wiki/"
 "HypervisorSupportMatrix"
-
-msgid ""
-"The setting \"always\" will be deprecated in the Liberty version. Please use "
-"\"True\" instead"
-msgstr ""
-"La configuration \"always\" sera dépréciée dans la version Liberty. Veuillez "
-"utiliser \"True\" a la place."
 
 msgid "This shouldn't be getting called except during testing."
 msgstr "Le programme ne doit pas être appelé sauf pendant le test."
@@ -1003,16 +885,6 @@ msgstr ""
 
 #, python-format
 msgid ""
-"Volume group %(vg)s will not be able to hold sparse volume %(lv)s. Virtual "
-"volume size is %(size)db, but free space on volume group is only "
-"%(free_space)db."
-msgstr ""
-"Le groupe de volumes %(vg)s ne pourra pas contenir le volume incomplet "
-"%(lv)s. La taille du volume virtuel est de %(size)db, mais l'espace libre "
-"sur le groupe de volumes est de seulement %(free_space)db."
-
-#, python-format
-msgid ""
 "Volume id: %(vol_id)s finished being created but its status is "
 "%(vol_status)s."
 msgstr ""
@@ -1048,40 +920,11 @@ msgstr ""
 "X-instance-ID est présent dans les en-têtes de requêtes. L'option 'service-"
 "metadata-proxy' doit être activée pour traiter ces en-têtes."
 
-msgid ""
-"Your libvirt version does not support the VIR_DOMAIN_XML_MIGRATABLE flag, "
-"and the  graphics (VNC and/or SPICE) listen addresses on the destination "
-"node do not match the addresses on the source node. Since the source node "
-"has listen addresses set to either the catch-all address (0.0.0.0 or ::) or "
-"the local address (127.0.0.1 or ::1), the live migration will succeed, but "
-"the VM will continue to listen on the current addresses."
-msgstr ""
-"Votre version de libvirt ne supporte pas le drapeau "
-"VIR_DOMAIN_XML_MIGRATABLE, et l'adresse graphique (VNC et/ou SPICE) écoutée "
-"sur le nœud de destination n'est pas identique à l'adresse du nœud source. "
-"Le noeud source possède son adresse d'écoute réglée sur l'adresse \"catch-all"
-"\" (0.0.0.0 ou ::) ou alors l'adresse locale (127.0.0.1 ou ::1), la "
-"migration en cours s'effectura, mais la VM continuera d'écouter l'adresse "
-"actuelle."
-
-#, python-format
-msgid "couldn't obtain the XML from domain: %(uuid)s, exception: %(ex)s"
-msgstr ""
-"Impossible d'obtenir  de l'XML depuis le domaine : %(uuid)s, exception : "
-"%(ex)s"
-
 #, python-format
 msgid "couldn't obtain the memory from domain: %(uuid)s, exception: %(ex)s"
 msgstr ""
 "Impossible d'obtenir de la mémoire depuis le domaine : %(uuid)s, exception : "
 "%(ex)s"
-
-#, python-format
-msgid ""
-"couldn't obtain the vpu count from domain id: %(uuid)s, exception: %(ex)s"
-msgstr ""
-"Impossible d'obtenir le compte de vpu depuis l'id du domaine : %(uuid)s, "
-"exception : %(ex)s"
 
 #, python-format
 msgid "cpu_arch not defined for node '%s'"
@@ -1122,10 +965,6 @@ msgid "instance-dns-zone not found |%s|."
 msgstr "nstance-dns-zone non trouvé  |%s|."
 
 #, python-format
-msgid "multiple fixed_ips exist, using the first: %s"
-msgstr "plusieurs fixed_ips existent, utilisation de la première : %s"
-
-#, python-format
 msgid ""
 "my_ip address (%(my_ip)s) was not found on any of the interfaces: %(ifaces)s"
 msgstr ""
@@ -1153,9 +992,6 @@ msgid "set_admin_password is not implemented by this driver or guest instance."
 msgstr ""
 "set_admin_password n'est pas implémenté par ce pilote ou par cette instance "
 "invitée."
-
-msgid "set_bootable is not implemented for the current driver"
-msgstr "set_bootable n'est pas implémenté pour le driver actuel."
 
 #, python-format
 msgid ""

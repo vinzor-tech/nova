@@ -13,8 +13,6 @@
 #   License for the specific language governing permissions and limitations
 #   under the License.
 
-import os.path
-
 import webob
 
 from nova.api.openstack import common
@@ -36,7 +34,8 @@ class CreateBackupController(wsgi.Controller):
 
     @extensions.expected_errors((400, 403, 404, 409))
     @wsgi.action('createBackup')
-    @validation.schema(create_backup.create_backup)
+    @validation.schema(create_backup.create_backup_v20, '2.0', '2.0')
+    @validation.schema(create_backup.create_backup, '2.1')
     def _create_backup(self, req, id, body):
         """Backup a server instance.
 
@@ -52,7 +51,7 @@ class CreateBackupController(wsgi.Controller):
         authorize(context)
         entity = body["createBackup"]
 
-        image_name = entity["name"]
+        image_name = common.normalize_name(entity["name"])
         backup_type = entity["backup_type"]
         rotation = int(entity["rotation"])
 
@@ -79,7 +78,8 @@ class CreateBackupController(wsgi.Controller):
         # build location of newly-created image entity if rotation is not zero
         if rotation > 0:
             image_id = str(image['id'])
-            image_ref = os.path.join(req.application_url, 'images', image_id)
+            image_ref = common.url_join(req.application_url, 'images',
+                                        image_id)
             resp.headers['Location'] = image_ref
 
         return resp

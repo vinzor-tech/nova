@@ -166,7 +166,7 @@ class ComputeCellsAPI(compute_api.API):
         # Avoid casts/calls directly to compute
         self.compute_rpcapi = ComputeRPCAPIRedirect(self.cells_rpcapi)
         # Redirect conductor build_instances to cells
-        self._compute_task_api = ConductorTaskRPCAPIRedirect(self.cells_rpcapi)
+        self.compute_task_api = ConductorTaskRPCAPIRedirect(self.cells_rpcapi)
         self._cell_type = 'api'
 
     def _cast_to_cells(self, context, instance, method, *args, **kwargs):
@@ -247,7 +247,7 @@ class ComputeCellsAPI(compute_api.API):
                                     method_name)
             except exception.InstanceNotFound:
                 # NOTE(melwitt): We can get here if anything tries to
-                # lookup the instance after a instance_destroy_at_top hits.
+                # lookup the instance after an instance_destroy_at_top hits.
                 pass
             return
 
@@ -261,11 +261,12 @@ class ComputeCellsAPI(compute_api.API):
         self._cast_to_cells(context, instance, 'restore')
 
     @check_instance_cell
-    def evacuate(self, context, instance, *args, **kwargs):
+    def evacuate(self, context, instance, host, *args, **kwargs):
         """Evacuate the given instance with the provided attributes."""
-        super(ComputeCellsAPI, self).evacuate(context, instance, *args,
-                **kwargs)
-        self._cast_to_cells(context, instance, 'evacuate', *args, **kwargs)
+        if host:
+            cell_path, host = cells_utils.split_cell_and_item(host)
+        self._cast_to_cells(context, instance, 'evacuate',
+                host, *args, **kwargs)
 
     @check_instance_cell
     def add_fixed_ip(self, context, instance, *args, **kwargs):
@@ -429,7 +430,7 @@ class ComputeCellsAPI(compute_api.API):
     @check_instance_cell
     def _detach_volume(self, context, instance, volume):
         """Detach a volume from an instance."""
-        self.volume_api.check_detach(context, volume)
+        self.volume_api.check_detach(context, volume, instance=instance)
         self._cast_to_cells(context, instance, 'detach_volume',
                 volume)
 

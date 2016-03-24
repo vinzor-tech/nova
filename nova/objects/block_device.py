@@ -19,7 +19,7 @@ from nova.cells import opts as cells_opts
 from nova.cells import rpcapi as cells_rpcapi
 from nova import db
 from nova import exception
-from nova.i18n import _
+from nova.i18n import _, _LW
 from nova import objects
 from nova.objects import base
 from nova.objects import fields
@@ -58,7 +58,9 @@ class BlockDeviceMapping(base.NovaPersistentObject, base.NovaObject,
     # Version 1.13: Instance version 1.21
     # Version 1.14: Instance version 1.22
     # Version 1.15: Instance version 1.23
-    VERSION = '1.15'
+    # Version 1.16: Deprecate get_by_volume_id(), add
+    #               get_by_volume() and get_by_volume_and_instance()
+    VERSION = '1.16'
 
     fields = {
         'id': fields.IntegerField(),
@@ -78,14 +80,7 @@ class BlockDeviceMapping(base.NovaPersistentObject, base.NovaObject,
         'volume_size': fields.IntegerField(nullable=True),
         'image_id': fields.StringField(nullable=True),
         'no_device': fields.BooleanField(default=False),
-        'connection_info': fields.StringField(nullable=True),
-    }
-
-    obj_relationships = {
-        'instance': [('1.0', '1.13'), ('1.2', '1.14'), ('1.3', '1.15'),
-                     ('1.4', '1.16'), ('1.5', '1.17'), ('1.6', '1.18'),
-                     ('1.8', '1.19'), ('1.9', '1.20'), ('1.13', '1.21'),
-                     ('1.14', '1.22'), ('1.15', '1.23')],
+        'connection_info': fields.SensitiveStringField(nullable=True),
     }
 
     @staticmethod
@@ -202,15 +197,22 @@ class BlockDeviceMapping(base.NovaPersistentObject, base.NovaObject,
             cells_api.bdm_update_or_create_at_top(self._context, self,
                     create=create)
 
+    # NOTE(danms): This method is deprecated and will be removed in
+    # v2.0 of the object
     @base.remotable_classmethod
     def get_by_volume_id(cls, context, volume_id,
                          instance_uuid=None, expected_attrs=None):
         if expected_attrs is None:
             expected_attrs = []
-        db_bdm = db.block_device_mapping_get_by_volume_id(
+        db_bdms = db.block_device_mapping_get_all_by_volume_id(
                 context, volume_id, _expected_cols(expected_attrs))
-        if not db_bdm:
+        if not db_bdms:
             raise exception.VolumeBDMNotFound(volume_id=volume_id)
+        if len(db_bdms) > 1:
+            LOG.warning(_LW('Legacy get_by_volume_id() call found multiple '
+                            'BDMs for volume %(volume)s'),
+                        {'volume': volume_id})
+        db_bdm = db_bdms[0]
         # NOTE (ndipanov): Move this to the db layer into a
         # get_by_instance_and_volume_id method
         if instance_uuid and instance_uuid != db_bdm['instance_uuid']:
@@ -218,6 +220,32 @@ class BlockDeviceMapping(base.NovaPersistentObject, base.NovaObject,
                     reason=_("Volume does not belong to the "
                              "requested instance."))
         return cls._from_db_object(context, cls(), db_bdm,
+                                   expected_attrs=expected_attrs)
+
+    @base.remotable_classmethod
+    def get_by_volume_and_instance(cls, context, volume_id, instance_uuid,
+                                   expected_attrs=None):
+        if expected_attrs is None:
+            expected_attrs = []
+        db_bdm = db.block_device_mapping_get_by_instance_and_volume_id(
+            context, volume_id, instance_uuid,
+            _expected_cols(expected_attrs))
+        if not db_bdm:
+            raise exception.VolumeBDMNotFound(volume_id=volume_id)
+        return cls._from_db_object(context, cls(), db_bdm,
+                                   expected_attrs=expected_attrs)
+
+    @base.remotable_classmethod
+    def get_by_volume(cls, context, volume_id, expected_attrs=None):
+        if expected_attrs is None:
+            expected_attrs = []
+        db_bdms = db.block_device_mapping_get_all_by_volume_id(
+                context, volume_id, _expected_cols(expected_attrs))
+        if not db_bdms:
+            raise exception.VolumeBDMNotFound(volume_id=volume_id)
+        if len(db_bdms) > 1:
+            raise exception.VolumeBDMIsMultiAttach(volume_id=volume_id)
+        return cls._from_db_object(context, cls(), db_bdms[0],
                                    expected_attrs=expected_attrs)
 
     @property
@@ -245,7 +273,7 @@ class BlockDeviceMapping(base.NovaPersistentObject, base.NovaObject,
             raise exception.OrphanedObjectError(method='obj_load_attr',
                                                 objtype=self.obj_name())
 
-        LOG.debug("Lazy-loading `%(attr)s' on %(name)s uuid %(uuid)s",
+        LOG.debug("Lazy-loading '%(attr)s' on %(name)s uuid %(uuid)s",
                   {'attr': attrname,
                    'name': self.obj_name(),
                    'uuid': self.uuid,
@@ -274,28 +302,68 @@ class BlockDeviceMappingList(base.ObjectListBase, base.NovaObject):
     # Version 1.14: BlockDeviceMapping <= version 1.13
     # Version 1.15: BlockDeviceMapping <= version 1.14
     # Version 1.16: BlockDeviceMapping <= version 1.15
-    VERSION = '1.16'
+    # Version 1.17: Add get_by_instance_uuids()
+    VERSION = '1.17'
 
     fields = {
         'objects': fields.ListOfObjectsField('BlockDeviceMapping'),
     }
-    obj_relationships = {
-        'objects': [('1.0', '1.0'), ('1.1', '1.1'), ('1.2', '1.1'),
-                    ('1.3', '1.2'), ('1.4', '1.3'), ('1.5', '1.4'),
-                    ('1.6', '1.5'), ('1.7', '1.6'), ('1.8', '1.7'),
-                    ('1.9', '1.8'), ('1.10', '1.9'), ('1.11', '1.10'),
-                    ('1.12', '1.11'), ('1.13', '1.12'), ('1.14', '1.13'),
-                    ('1.15', '1.14'), ('1.16', '1.15')],
-    }
+
+    @property
+    def instance_uuids(self):
+        return set(
+            bdm.instance_uuid for bdm in self
+            if bdm.obj_attr_is_set('instance_uuid')
+        )
+
+    @classmethod
+    def bdms_by_instance_uuid(cls, context, instance_uuids):
+        bdms = cls.get_by_instance_uuids(context, instance_uuids)
+        return base.obj_make_dict_of_lists(
+                context, cls, bdms, 'instance_uuid')
+
+    @staticmethod
+    @db.select_db_reader_mode
+    def _db_block_device_mapping_get_all_by_instance_uuids(
+            context, instance_uuids, use_slave=False):
+        return db.block_device_mapping_get_all_by_instance_uuids(
+                context, instance_uuids)
+
+    @base.remotable_classmethod
+    def get_by_instance_uuids(cls, context, instance_uuids, use_slave=False):
+        db_bdms = cls._db_block_device_mapping_get_all_by_instance_uuids(
+            context, instance_uuids, use_slave=use_slave)
+        return base.obj_make_list(
+                context, cls(), objects.BlockDeviceMapping, db_bdms or [])
+
+    @staticmethod
+    @db.select_db_reader_mode
+    def _db_block_device_mapping_get_all_by_instance(
+            context, instance_uuid, use_slave=False):
+        return db.block_device_mapping_get_all_by_instance(
+            context, instance_uuid)
 
     @base.remotable_classmethod
     def get_by_instance_uuid(cls, context, instance_uuid, use_slave=False):
-        db_bdms = db.block_device_mapping_get_all_by_instance(
-                context, instance_uuid, use_slave=use_slave)
+        db_bdms = cls._db_block_device_mapping_get_all_by_instance(
+            context, instance_uuid, use_slave=use_slave)
         return base.obj_make_list(
                 context, cls(), objects.BlockDeviceMapping, db_bdms or [])
 
     def root_bdm(self):
+        """It only makes sense to call this method when the
+        BlockDeviceMappingList contains BlockDeviceMappings from
+        exactly one instance rather than BlockDeviceMappings from
+        multiple instances.
+
+        For example, you should not call this method from a
+        BlockDeviceMappingList created by get_by_instance_uuids(),
+        but you may call this method from a BlockDeviceMappingList
+        created by get_by_instance_uuid().
+        """
+
+        if len(self.instance_uuids) > 1:
+            raise exception.UndefinedRootBDM()
         try:
             return next(bdm_obj for bdm_obj in self if bdm_obj.is_root)
         except StopIteration:

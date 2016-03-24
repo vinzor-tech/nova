@@ -12,12 +12,11 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-import contextlib
 import datetime
 
 import mock
 from oslo_config import cfg
-from oslo_utils import timeutils
+from oslo_utils import fixture as utils_fixture
 from oslo_vmware.objects import datastore as ds_obj
 from oslo_vmware import vim_util as vutil
 
@@ -25,6 +24,7 @@ from nova import objects
 from nova import test
 from nova.tests.unit import fake_instance
 from nova.tests.unit.virt.vmwareapi import fake
+from nova.tests import uuidsentinel
 from nova.virt.vmwareapi import ds_util
 from nova.virt.vmwareapi import imagecache
 
@@ -55,11 +55,10 @@ class ImageCacheManagerTestCase(test.NoDBTestCase):
             if not self.exists:
                 return
             ts = '%s%s' % (imagecache.TIMESTAMP_PREFIX,
-                    timeutils.strtime(at=self._time,
-                                      fmt=imagecache.TIMESTAMP_FORMAT))
+                           self._time.strftime(imagecache.TIMESTAMP_FORMAT))
             return ts
 
-        with contextlib.nested(
+        with test.nested(
             mock.patch.object(self._imagecache, '_get_timestamp',
                               fake_get_timestamp),
             mock.patch.object(ds_util, 'file_delete')
@@ -87,10 +86,8 @@ class ImageCacheManagerTestCase(test.NoDBTestCase):
                 files.add(self._file_name)
                 return files
 
-        with contextlib.nested(
-            mock.patch.object(ds_util, 'get_sub_folders',
-                              fake_get_sub_folders)
-        ):
+        with mock.patch.object(ds_util, 'get_sub_folders',
+                               fake_get_sub_folders):
             self.exists = True
             ts = self._imagecache._get_timestamp(
                     'fake-ds-browser',
@@ -103,7 +100,7 @@ class ImageCacheManagerTestCase(test.NoDBTestCase):
             self.assertIsNone(ts)
 
     def test_get_timestamp_filename(self):
-        timeutils.set_time_override(override_time=self._time)
+        self.useFixture(utils_fixture.TimeFixture(self._time))
         fn = self._imagecache._get_timestamp_filename()
         self.assertEqual(self._file_name, fn)
 
@@ -132,7 +129,7 @@ class ImageCacheManagerTestCase(test.NoDBTestCase):
             files.add('image-ref-uuid')
             return files
 
-        with contextlib.nested(
+        with test.nested(
             mock.patch.object(vutil, 'get_object_property',
                               fake_get_object_property),
             mock.patch.object(ds_util, 'get_sub_folders',
@@ -208,7 +205,7 @@ class ImageCacheManagerTestCase(test.NoDBTestCase):
         def fake_timestamp_cleanup(dc_ref, ds_browser, ds_path):
             self.assertEqual('[fake-ds] fake-path/fake-image-4', str(ds_path))
 
-        with contextlib.nested(
+        with test.nested(
             mock.patch.object(self._imagecache, '_get_ds_browser',
                               fake_get_ds_browser),
             mock.patch.object(self._imagecache, '_get_timestamp',
@@ -221,7 +218,7 @@ class ImageCacheManagerTestCase(test.NoDBTestCase):
                               fake_timestamp_cleanup),
         ) as (_get_ds_browser, _get_timestamp, _mkdir, _file_delete,
               _timestamp_cleanup):
-            timeutils.set_time_override(override_time=self._time)
+            self.useFixture(utils_fixture.TimeFixture(self._time))
             datastore = ds_obj.Datastore(name='ds', ref='fake-ds-ref')
             dc_info = ds_util.DcInfo(ref='dc_ref', name='name',
                                      vmFolder='vmFolder')
@@ -249,7 +246,7 @@ class ImageCacheManagerTestCase(test.NoDBTestCase):
             self.assertEqual(self.images,
                              self._imagecache.originals)
 
-        with contextlib.nested(
+        with test.nested(
             mock.patch.object(self._imagecache, '_list_datastore_images',
                               fake_list_datastore_images),
             mock.patch.object(self._imagecache,
@@ -259,13 +256,13 @@ class ImageCacheManagerTestCase(test.NoDBTestCase):
             instances = [{'image_ref': '1',
                           'host': CONF.host,
                           'name': 'inst-1',
-                          'uuid': '123',
+                          'uuid': uuidsentinel.foo,
                           'vm_state': '',
                           'task_state': ''},
                          {'image_ref': '2',
                           'host': CONF.host,
                           'name': 'inst-2',
-                          'uuid': '456',
+                          'uuid': uuidsentinel.bar,
                           'vm_state': '',
                           'task_state': ''}]
             all_instances = [fake_instance.fake_instance_obj(None, **instance)

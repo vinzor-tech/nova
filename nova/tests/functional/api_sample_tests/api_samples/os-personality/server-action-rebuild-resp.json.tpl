@@ -16,7 +16,7 @@
             "id": "1",
             "links": [
                 {
-                    "href": "%(host)s/openstack/flavors/1",
+                    "href": "%(compute_endpoint)s/flavors/1",
                     "rel": "bookmark"
                 }
             ]
@@ -27,18 +27,18 @@
             "id": "%(image_id)s",
             "links": [
                 {
-                    "href": "%(host)s/openstack/images/%(image_id)s",
+                    "href": "%(compute_endpoint)s/images/%(image_id)s",
                     "rel": "bookmark"
                 }
             ]
         },
         "links": [
             {
-                "href": "%(host)s/v2/openstack/servers/%(uuid)s",
+                "href": "%(versioned_compute_endpoint)s/servers/%(uuid)s",
                 "rel": "self"
             },
             {
-                "href": "%(host)s/openstack/servers/%(uuid)s",
+                "href": "%(compute_endpoint)s/servers/%(uuid)s",
                 "rel": "bookmark"
             }
         ],
@@ -48,7 +48,7 @@
         "name": "new-server-test",
         "progress": 0,
         "status": "ACTIVE",
-        "tenant_id": "openstack",
+        "tenant_id": "6f70656e737461636b20342065766572",
         "updated": "%(isotime)s",
         "user_id": "fake"
     }

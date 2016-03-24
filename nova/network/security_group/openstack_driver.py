@@ -16,10 +16,14 @@
 from oslo_config import cfg
 from oslo_utils import importutils
 
+import nova.network
+
 security_group_opts = [
-    cfg.StrOpt('security_group_api',
-               default='nova',
-               help='The full class name of the security API class'),
+    cfg.StrOpt(
+        'security_group_api',
+        default='nova',
+        help='DEPRECATED: The full class name of the security API class',
+        deprecated_for_removal=True),
 ]
 
 CONF = cfg.CONF
@@ -28,19 +32,28 @@ CONF.register_opts(security_group_opts)
 NOVA_DRIVER = ('nova.compute.api.SecurityGroupAPI')
 NEUTRON_DRIVER = ('nova.network.security_group.neutron_driver.'
                   'SecurityGroupAPI')
+DRIVER_CACHE = {}
 
 
-def get_openstack_security_group_driver(skip_policy_check=False):
-    if CONF.security_group_api.lower() == 'nova':
-        return importutils.import_object(NOVA_DRIVER,
-                                         skip_policy_check=skip_policy_check)
-    elif is_neutron_security_groups():
+def _get_openstack_security_group_driver(skip_policy_check=False):
+    if is_neutron_security_groups():
         return importutils.import_object(NEUTRON_DRIVER,
+                                         skip_policy_check=skip_policy_check)
+    elif CONF.security_group_api.lower() == 'nova':
+        return importutils.import_object(NOVA_DRIVER,
                                          skip_policy_check=skip_policy_check)
     else:
         return importutils.import_object(CONF.security_group_api,
                                          skip_policy_check=skip_policy_check)
 
 
+def get_openstack_security_group_driver(skip_policy_check=False):
+    if skip_policy_check not in DRIVER_CACHE:
+        DRIVER_CACHE[skip_policy_check] = _get_openstack_security_group_driver(
+            skip_policy_check)
+    return DRIVER_CACHE[skip_policy_check]
+
+
 def is_neutron_security_groups():
-    return CONF.security_group_api.lower() in ('neutron', 'quantum')
+    return (CONF.security_group_api.lower() == 'neutron'
+            or nova.network.is_neutron())

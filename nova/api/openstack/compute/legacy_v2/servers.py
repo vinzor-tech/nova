@@ -15,7 +15,6 @@
 #    under the License.
 
 import base64
-import os
 import re
 import sys
 
@@ -54,7 +53,6 @@ server_opts = [
 ]
 CONF = cfg.CONF
 CONF.register_opts(server_opts)
-CONF.import_opt('network_api_class', 'nova.network')
 CONF.import_opt('reclaim_instance_interval', 'nova.compute.manager')
 
 LOG = logging.getLogger(__name__)
@@ -85,6 +83,7 @@ CREATE_EXCEPTIONS = {
     exception.InstanceExists: exc.HTTPConflict,
     exception.NoUniqueMatch: exc.HTTPConflict,
     exception.Invalid: exc.HTTPBadRequest,
+    exception.InstanceGroupNotFound: exc.HTTPBadRequest,
 }
 
 CREATE_EXCEPTIONS_MSGS = {
@@ -106,8 +105,7 @@ class Controller(wsgi.Controller):
         if 'server' not in robj.obj:
             return robj
 
-        link = filter(lambda l: l['rel'] == 'self',
-                      robj.obj['server']['links'])
+        link = [l for l in robj.obj['server']['links'] if l['rel'] == 'self']
         if link:
             robj['Location'] = utils.utf8(link[0]['href'])
 
@@ -235,6 +233,7 @@ class Controller(wsgi.Controller):
             instance_list = objects.InstanceList()
 
         if is_detail:
+            instance_list._context = context
             instance_list.fill_faults()
             response = self._view_builder.detail(req, instance_list)
         else:
@@ -366,6 +365,11 @@ class Controller(wsgi.Controller):
                            '|[A-Za-z0-9+\/]{3}=)?$')
 
     def _decode_base64(self, data):
+        if isinstance(data, six.binary_type) and hasattr(data, "decode"):
+            try:
+                data = data.decode("utf-8")
+            except UnicodeDecodeError:
+                return None
         data = re.sub(r'\s', '', data)
         if not self.B64_REGEX.match(data):
             return None
@@ -605,6 +609,8 @@ class Controller(wsgi.Controller):
         scheduler_hints = {}
         if self.ext_mgr.is_loaded('OS-SCH-HNT'):
             scheduler_hints = server_dict.get('scheduler_hints', {})
+        parse_az = self.compute_api.parse_availability_zone
+        availability_zone, host, node = parse_az(context, availability_zone)
 
         check_server_group_quota = self.ext_mgr.is_loaded(
                 'os-server-group-quotas')
@@ -630,6 +636,7 @@ class Controller(wsgi.Controller):
                         security_group=sg_names,
                         user_data=user_data,
                         availability_zone=availability_zone,
+                        forced_host=host, forced_node=node,
                         config_drive=config_drive,
                         block_device_mapping=block_device_mapping,
                         auto_disk_config=auto_disk_config,
@@ -639,8 +646,7 @@ class Controller(wsgi.Controller):
         except (exception.QuotaError,
                 exception.PortLimitExceeded) as error:
             raise exc.HTTPForbidden(
-                explanation=error.format_message(),
-                headers={'Retry-After': 0})
+                explanation=error.format_message())
         except messaging.RemoteError as err:
             msg = "%(err_type)s: %(err_msg)s" % {'err_type': err.exc_type,
                                                  'err_msg': err.value}
@@ -806,8 +812,7 @@ class Controller(wsgi.Controller):
             self.compute_api.resize(context, instance, flavor_id, **kwargs)
         except exception.QuotaError as error:
             raise exc.HTTPForbidden(
-                explanation=error.format_message(),
-                headers={'Retry-After': 0})
+                explanation=error.format_message())
         except exception.FlavorNotFound:
             msg = _("Unable to locate requested flavor.")
             raise exc.HTTPBadRequest(explanation=msg)
@@ -1115,10 +1120,10 @@ class Controller(wsgi.Controller):
         image_id = str(image['id'])
         url_prefix = self._view_builder._update_glance_link_prefix(
                 req.application_url)
-        image_ref = os.path.join(url_prefix,
-                                 context.project_id,
-                                 'images',
-                                 image_id)
+        image_ref = common.url_join(url_prefix,
+                                    context.project_id,
+                                    'images',
+                                    image_id)
 
         resp = webob.Response(status_int=202)
         resp.headers['Location'] = image_ref

@@ -10,6 +10,7 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+from oslo_serialization import jsonutils
 from oslo_utils import timeutils
 
 from nova import objects
@@ -21,21 +22,21 @@ _ts_now = timeutils.utcnow()
 _monitor_metric_spec = {
     'name': fields.MonitorMetricType.CPU_FREQUENCY,
     'value': 1000,
-    'timestamp': timeutils.strtime(_ts_now),
+    'timestamp': _ts_now.isoformat(),
     'source': 'nova.virt.libvirt.driver'
 }
 
 _monitor_metric_perc_spec = {
     'name': fields.MonitorMetricType.CPU_PERCENT,
     'value': 0.17,
-    'timestamp': timeutils.strtime(_ts_now),
+    'timestamp': _ts_now.isoformat(),
     'source': 'nova.virt.libvirt.driver'
 }
 
 _monitor_numa_metric_spec = {
     'name': fields.MonitorMetricType.NUMA_MEM_BW_CURRENT,
     'numa_membw_values': {"0": 10, "1": 43},
-    'timestamp': timeutils.strtime(_ts_now),
+    'timestamp': _ts_now.isoformat(),
     'source': 'nova.virt.libvirt.driver'
 }
 
@@ -72,6 +73,17 @@ class _TestMonitorMetricObject(object):
                                     timestamp=_ts_now,
                                     source='nova.virt.libvirt.driver')
         self.assertEqual(_monitor_numa_metric_spec, obj.to_dict())
+
+    def test_conversion_in_monitor_metric_list_from_json(self):
+        spec_list = [_monitor_metric_spec, _monitor_metric_perc_spec]
+        metrics = objects.MonitorMetricList.from_json(
+            jsonutils.dumps(spec_list))
+        for metric, spec in zip(metrics, spec_list):
+            exp = spec['value']
+            if (spec['name'] in
+                    objects.monitor_metric.FIELDS_REQUIRING_CONVERSION):
+                exp = spec['value'] * 100
+            self.assertEqual(exp, metric.value)
 
 
 class TestMonitorMetricObject(test_objects._LocalTest,

@@ -12,7 +12,16 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+from oslo_db.sqlalchemy import utils as sqlalchemyutils
+from sqlalchemy import or_
+from sqlalchemy.orm import joinedload
+from sqlalchemy.sql.expression import asc
+from sqlalchemy.sql import true
+
 from nova import db
+from nova.db.sqlalchemy import api as db_api
+from nova.db.sqlalchemy.api import require_context
+from nova.db.sqlalchemy import api_models
 from nova import exception
 from nova import objects
 from nova.objects import base
@@ -20,6 +29,13 @@ from nova.objects import fields
 
 
 OPTIONAL_FIELDS = ['extra_specs', 'projects']
+DEPRECATED_FIELDS = ['deleted', 'deleted_at']
+
+
+def _dict_with_extra_specs(flavor_model):
+    extra_specs = {x['key']: x['value']
+                   for x in flavor_model['extra_specs']}
+    return dict(flavor_model, extra_specs=extra_specs)
 
 
 # TODO(berrange): Remove NovaObjectDictCompat
@@ -61,10 +77,20 @@ class Flavor(base.NovaPersistentObject, base.NovaObject,
         for name, field in flavor.fields.items():
             if name in OPTIONAL_FIELDS:
                 continue
+            if name in DEPRECATED_FIELDS and name not in db_flavor:
+                continue
             value = db_flavor[name]
             if isinstance(field, fields.IntegerField):
                 value = value if value is not None else 0
             flavor[name] = value
+
+        # NOTE(danms): This is to support processing the API flavor
+        # model, which does not have these deprecated fields. When we
+        # remove compatibility with the old InstanceType model, we can
+        # remove this as well.
+        if any(f not in db_flavor for f in DEPRECATED_FIELDS):
+            flavor.deleted_at = None
+            flavor.deleted = False
 
         if 'extra_specs' in expected_attrs:
             flavor.extra_specs = db_flavor['extra_specs']
@@ -74,6 +100,53 @@ class Flavor(base.NovaPersistentObject, base.NovaObject,
 
         flavor.obj_reset_changes()
         return flavor
+
+    @staticmethod
+    @db_api.api_context_manager.reader
+    def _flavor_get_query_from_db(context):
+        query = context.session.query(api_models.Flavors).\
+                options(joinedload('extra_specs'))
+        if not context.is_admin:
+            the_filter = [api_models.Flavors.is_public == true()]
+            the_filter.extend([
+                api_models.Flavors.projects.any(project_id=context.project_id)
+            ])
+            query = query.filter(or_(*the_filter))
+        return query
+
+    @staticmethod
+    @require_context
+    def _flavor_get_from_db(context, id):
+        """Returns a dict describing specific flavor."""
+        result = Flavor._flavor_get_query_from_db(context).\
+                        filter_by(id=id).\
+                        first()
+        if not result:
+            raise exception.FlavorNotFound(flavor_id=id)
+        return db_api._dict_with_extra_specs(result)
+
+    @staticmethod
+    @require_context
+    def _flavor_get_by_name_from_db(context, name):
+        """Returns a dict describing specific flavor."""
+        result = Flavor._flavor_get_query_from_db(context).\
+                            filter_by(name=name).\
+                            first()
+        if not result:
+            raise exception.FlavorNotFoundByName(flavor_name=name)
+        return db_api._dict_with_extra_specs(result)
+
+    @staticmethod
+    @require_context
+    def _flavor_get_by_flavor_id_from_db(context, flavor_id):
+        """Returns a dict describing specific flavor_id."""
+        result = Flavor._flavor_get_query_from_db(context).\
+                        filter_by(flavorid=flavor_id).\
+                        order_by(asc(api_models.Flavors.id)).\
+                        first()
+        if not result:
+            raise exception.FlavorNotFound(flavor_id=flavor_id)
+        return db_api._dict_with_extra_specs(result)
 
     @base.remotable
     def _load_projects(self):
@@ -130,20 +203,30 @@ class Flavor(base.NovaPersistentObject, base.NovaObject,
 
     @base.remotable_classmethod
     def get_by_id(cls, context, id):
-        db_flavor = db.flavor_get(context, id)
+        try:
+            db_flavor = cls._flavor_get_from_db(context, id)
+        except exception.FlavorNotFound:
+            db_flavor = db.flavor_get(context, id)
         return cls._from_db_object(context, cls(context), db_flavor,
                                    expected_attrs=['extra_specs'])
 
     @base.remotable_classmethod
     def get_by_name(cls, context, name):
-        db_flavor = db.flavor_get_by_name(context, name)
+        try:
+            db_flavor = cls._flavor_get_by_name_from_db(context, name)
+        except exception.FlavorNotFoundByName:
+            db_flavor = db.flavor_get_by_name(context, name)
         return cls._from_db_object(context, cls(context), db_flavor,
                                    expected_attrs=['extra_specs'])
 
     @base.remotable_classmethod
     def get_by_flavor_id(cls, context, flavor_id, read_deleted=None):
-        db_flavor = db.flavor_get_by_flavor_id(context, flavor_id,
-                                               read_deleted)
+        try:
+            db_flavor = cls._flavor_get_by_flavor_id_from_db(context,
+                                                             flavor_id)
+        except exception.FlavorNotFound:
+            db_flavor = db.flavor_get_by_flavor_id(context, flavor_id,
+                                                   read_deleted)
         return cls._from_db_object(context, cls(context), db_flavor,
                                    expected_attrs=['extra_specs'])
 
@@ -252,6 +335,52 @@ class Flavor(base.NovaPersistentObject, base.NovaObject,
         db.flavor_destroy(self._context, self.name)
 
 
+@db_api.api_context_manager.reader
+def _flavor_get_all_from_db(context, inactive, filters, sort_key, sort_dir,
+                            limit, marker):
+    """Returns all flavors.
+    """
+    filters = filters or {}
+
+    query = Flavor._flavor_get_query_from_db(context)
+
+    if 'min_memory_mb' in filters:
+        query = query.filter(
+                api_models.Flavors.memory_mb >= filters['min_memory_mb'])
+
+    if 'min_root_gb' in filters:
+        query = query.filter(
+                api_models.Flavors.root_gb >= filters['min_root_gb'])
+
+    if 'disabled' in filters:
+        query = query.filter(
+               api_models.Flavors.disabled == filters['disabled'])
+
+    if 'is_public' in filters and filters['is_public'] is not None:
+        the_filter = [api_models.Flavors.is_public == filters['is_public']]
+        if filters['is_public'] and context.project_id is not None:
+            the_filter.extend([api_models.Flavors.projects.any(
+                project_id=context.project_id)])
+        if len(the_filter) > 1:
+            query = query.filter(or_(*the_filter))
+        else:
+            query = query.filter(the_filter[0])
+    marker_row = None
+    if marker is not None:
+        marker_row = Flavor._flavor_get_query_from_db(context).\
+                    filter_by(flavorid=marker).\
+                    first()
+        if not marker_row:
+            raise exception.MarkerNotFound(marker)
+
+    query = sqlalchemyutils.paginate_query(query, api_models.Flavors,
+                                           limit,
+                                           [sort_key, 'id'],
+                                           marker=marker_row,
+                                           sort_dir=sort_dir)
+    return [_dict_with_extra_specs(i) for i in query.all()]
+
+
 @base.NovaObjectRegistry.register
 class FlavorList(base.ObjectListBase, base.NovaObject):
     VERSION = '1.1'
@@ -259,16 +388,37 @@ class FlavorList(base.ObjectListBase, base.NovaObject):
     fields = {
         'objects': fields.ListOfObjectsField('Flavor'),
         }
-    obj_relationships = {
-        'objects': [('1.0', '1.0'), ('1.1', '1.1')],
-        }
 
     @base.remotable_classmethod
     def get_all(cls, context, inactive=False, filters=None,
                 sort_key='flavorid', sort_dir='asc', limit=None, marker=None):
-        db_flavors = db.flavor_get_all(context, inactive=inactive,
-                                       filters=filters, sort_key=sort_key,
-                                       sort_dir=sort_dir, limit=limit,
-                                       marker=marker)
+        try:
+            api_db_flavors = _flavor_get_all_from_db(context,
+                                                     inactive=inactive,
+                                                     filters=filters,
+                                                     sort_key=sort_key,
+                                                     sort_dir=sort_dir,
+                                                     limit=limit,
+                                                     marker=marker)
+            # NOTE(danms): If we were asked for a marker and found it in
+            # results from the API DB, we must continue our pagination with
+            # just the limit (if any) to the main DB.
+            marker = None
+        except exception.MarkerNotFound:
+            api_db_flavors = []
+
+        if limit is not None:
+            limit_more = limit - len(api_db_flavors)
+        else:
+            limit_more = None
+
+        if limit_more is None or limit_more > 0:
+            db_flavors = db.flavor_get_all(context, inactive=inactive,
+                                           filters=filters, sort_key=sort_key,
+                                           sort_dir=sort_dir, limit=limit_more,
+                                           marker=marker)
+        else:
+            db_flavors = []
         return base.obj_make_list(context, cls(context), objects.Flavor,
-                                  db_flavors, expected_attrs=['extra_specs'])
+                                  api_db_flavors + db_flavors,
+                                  expected_attrs=['extra_specs'])

@@ -12,29 +12,32 @@
 
 import itertools
 
+import nova.conf
 import nova.virt.configdrive
-import nova.virt.disk.api
-import nova.virt.disk.mount.nbd
 import nova.virt.disk.vfs.guestfs
-import nova.virt.driver
-import nova.virt.firewall
-import nova.virt.hardware
+import nova.virt.hyperv.eventhandler
 import nova.virt.hyperv.pathutils
-import nova.virt.hyperv.utilsfactory
 import nova.virt.hyperv.vif
 import nova.virt.hyperv.vmops
 import nova.virt.hyperv.volumeops
 import nova.virt.imagecache
-import nova.virt.images
-import nova.virt.ironic.driver
 import nova.virt.libvirt.driver
 import nova.virt.libvirt.imagebackend
 import nova.virt.libvirt.imagecache
 import nova.virt.libvirt.storage.lvm
 import nova.virt.libvirt.utils
 import nova.virt.libvirt.vif
+import nova.virt.libvirt.volume.aoe
+import nova.virt.libvirt.volume.glusterfs
+import nova.virt.libvirt.volume.iscsi
+import nova.virt.libvirt.volume.iser
+import nova.virt.libvirt.volume.net
+import nova.virt.libvirt.volume.nfs
+import nova.virt.libvirt.volume.quobyte
+import nova.virt.libvirt.volume.remotefs
+import nova.virt.libvirt.volume.scality
+import nova.virt.libvirt.volume.smbfs
 import nova.virt.libvirt.volume.volume
-import nova.virt.netutils
 import nova.virt.vmwareapi.driver
 import nova.virt.vmwareapi.images
 import nova.virt.vmwareapi.vif
@@ -57,25 +60,17 @@ def list_opts():
         ('DEFAULT',
          itertools.chain(
              nova.virt.configdrive.configdrive_opts,
-             nova.virt.disk.api.disk_opts,
-             nova.virt.disk.mount.nbd.nbd_opts,
-             nova.virt.driver.driver_opts,
-             nova.virt.firewall.firewall_opts,
-             nova.virt.hardware.virt_cpu_opts,
              nova.virt.imagecache.imagecache_opts,
-             nova.virt.images.image_opts,
-             nova.virt.netutils.netutils_opts,
          )),
         ('guestfs', nova.virt.disk.vfs.guestfs.guestfs_opts),
         ('hyperv',
          itertools.chain(
              nova.virt.hyperv.pathutils.hyperv_opts,
-             nova.virt.hyperv.utilsfactory.hyper_opts,
              nova.virt.hyperv.vif.hyperv_opts,
              nova.virt.hyperv.vmops.hyperv_opts,
              nova.virt.hyperv.volumeops.hyper_volumeops_opts,
+             nova.virt.hyperv.eventhandler.hyperv_opts
          )),
-        ('ironic', nova.virt.ironic.driver.opts),
         ('libvirt',
          itertools.chain(
              nova.virt.libvirt.driver.libvirt_opts,
@@ -85,6 +80,16 @@ def list_opts():
              nova.virt.libvirt.utils.libvirt_opts,
              nova.virt.libvirt.vif.libvirt_vif_opts,
              nova.virt.libvirt.volume.volume.volume_opts,
+             nova.virt.libvirt.volume.aoe.volume_opts,
+             nova.virt.libvirt.volume.glusterfs.volume_opts,
+             nova.virt.libvirt.volume.iscsi.volume_opts,
+             nova.virt.libvirt.volume.iser.volume_opts,
+             nova.virt.libvirt.volume.net.volume_opts,
+             nova.virt.libvirt.volume.nfs.volume_opts,
+             nova.virt.libvirt.volume.quobyte.volume_opts,
+             nova.virt.libvirt.volume.remotefs.libvirt_opts,
+             nova.virt.libvirt.volume.scality.volume_opts,
+             nova.virt.libvirt.volume.smbfs.volume_opts,
          )),
         ('vmware',
          itertools.chain(

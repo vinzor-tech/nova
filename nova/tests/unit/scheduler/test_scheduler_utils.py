@@ -18,13 +18,10 @@ Tests For Scheduler Utils
 import uuid
 
 import mock
-from mox3 import mox
-from oslo_config import cfg
 import six
 
 from nova.compute import flavors
 from nova.compute import utils as compute_utils
-from nova import db
 from nova import exception
 from nova import objects
 from nova import rpc
@@ -33,8 +30,6 @@ from nova import test
 from nova.tests.unit import fake_instance
 from nova.tests.unit.objects import test_flavor
 
-CONF = cfg.CONF
-
 
 class SchedulerUtilsTestCase(test.NoDBTestCase):
     """Test case for scheduler utils methods."""
@@ -42,20 +37,16 @@ class SchedulerUtilsTestCase(test.NoDBTestCase):
         super(SchedulerUtilsTestCase, self).setUp()
         self.context = 'fake-context'
 
-    @mock.patch('nova.objects.Flavor.get_by_flavor_id')
-    def test_build_request_spec_without_image(self, mock_get):
-        image = None
+    def test_build_request_spec_without_image(self):
         instance = {'uuid': 'fake-uuid'}
         instance_type = objects.Flavor(**test_flavor.fake_flavor)
 
-        mock_get.return_value = objects.Flavor(extra_specs={})
-
-        self.mox.StubOutWithMock(flavors, 'extract_flavor')
-        flavors.extract_flavor(mox.IgnoreArg()).AndReturn(instance_type)
-        self.mox.ReplayAll()
-
-        request_spec = scheduler_utils.build_request_spec(self.context, image,
-                                                          [instance])
+        with mock.patch.object(flavors, 'extract_flavor') as mock_extract:
+            mock_extract.return_value = instance_type
+            request_spec = scheduler_utils.build_request_spec(self.context,
+                                                              None,
+                                                              [instance])
+            mock_extract.assert_called_once_with({'uuid': 'fake-uuid'})
         self.assertEqual({}, request_spec['image'])
 
     def test_build_request_spec_with_object(self):
@@ -96,8 +87,7 @@ class SchedulerUtilsTestCase(test.NoDBTestCase):
                                                 method,
                                                 updates,
                                                 exc_info,
-                                                request_spec,
-                                                db)
+                                                request_spec)
         mock_save.assert_called_once_with()
         mock_add.assert_called_once_with(self.context, mock.ANY,
                                          exc_info, mock.ANY)
@@ -106,6 +96,30 @@ class SchedulerUtilsTestCase(test.NoDBTestCase):
         mock_get.return_value.error.assert_called_once_with(self.context,
                                                             event_type,
                                                             payload)
+
+    def test_build_filter_properties(self):
+        sched_hints = {'hint': ['over-there']}
+        forced_host = 'forced-host1'
+        forced_node = 'forced-node1'
+        instance_type = objects.Flavor()
+        filt_props = scheduler_utils.build_filter_properties(sched_hints,
+                forced_host, forced_node, instance_type)
+        self.assertEqual(sched_hints, filt_props['scheduler_hints'])
+        self.assertEqual([forced_host], filt_props['force_hosts'])
+        self.assertEqual([forced_node], filt_props['force_nodes'])
+        self.assertEqual(instance_type, filt_props['instance_type'])
+
+    def test_build_filter_properties_no_forced_host_no_force_node(self):
+        sched_hints = {'hint': ['over-there']}
+        forced_host = None
+        forced_node = None
+        instance_type = objects.Flavor()
+        filt_props = scheduler_utils.build_filter_properties(sched_hints,
+                forced_host, forced_node, instance_type)
+        self.assertEqual(sched_hints, filt_props['scheduler_hints'])
+        self.assertEqual(instance_type, filt_props['instance_type'])
+        self.assertNotIn('forced_host', filt_props)
+        self.assertNotIn('forced_node', filt_props)
 
     def _test_populate_filter_props(self, host_state_obj=True,
                                     with_retry=True,
@@ -187,12 +201,11 @@ class SchedulerUtilsTestCase(test.NoDBTestCase):
         self._test_populate_filter_props(force_nodes=['force-node1',
                                                       'force-node2'])
 
-    @mock.patch.object(scheduler_utils, '_max_attempts')
-    def test_populate_retry_exception_at_max_attempts(self, _max_attempts):
-        _max_attempts.return_value = 2
+    def test_populate_retry_exception_at_max_attempts(self):
+        self.flags(scheduler_max_attempts=2)
         msg = 'The exception text was preserved!'
         filter_properties = dict(retry=dict(num_attempts=2, hosts=[],
-                                            exc=[msg]))
+                                            exc_reason=[msg]))
         nvh = self.assertRaises(exception.MaxRetriesExceeded,
                                 scheduler_utils.populate_retry,
                                 filter_properties, 'fake-uuid')
@@ -234,6 +247,23 @@ class SchedulerUtilsTestCase(test.NoDBTestCase):
         self.assertTrue(scheduler_utils.validate_filter('FakeFilter2'))
         self.assertFalse(scheduler_utils.validate_filter('FakeFilter3'))
 
+    def test_validate_weighers_configured(self):
+        self.flags(scheduler_weight_classes=
+                   ['ServerGroupSoftAntiAffinityWeigher',
+                    'FakeFilter1'])
+
+        self.assertTrue(scheduler_utils.validate_weigher(
+            'ServerGroupSoftAntiAffinityWeigher'))
+        self.assertTrue(scheduler_utils.validate_weigher('FakeFilter1'))
+        self.assertFalse(scheduler_utils.validate_weigher(
+            'ServerGroupSoftAffinityWeigher'))
+
+    def test_validate_weighers_configured_all_weighers(self):
+        self.assertTrue(scheduler_utils.validate_weigher(
+            'ServerGroupSoftAffinityWeigher'))
+        self.assertTrue(scheduler_utils.validate_weigher(
+            'ServerGroupSoftAntiAffinityWeigher'))
+
     def _create_server_group(self, policy='anti-affinity'):
         instance = fake_instance.fake_instance_obj(self.context,
                 params={'host': 'hostA'})
@@ -259,35 +289,22 @@ class SchedulerUtilsTestCase(test.NoDBTestCase):
             group_info = scheduler_utils._get_group_details(
                 self.context, 'fake_uuid', group_hosts)
             self.assertEqual(
-                (set(['hostA', 'hostB']), [policy]),
+                (set(['hostA', 'hostB']), [policy], group.members),
                 group_info)
 
     def test_get_group_details(self):
-        for policy in ['affinity', 'anti-affinity']:
+        for policy in ['affinity', 'anti-affinity',
+                       'soft-affinity', 'soft-anti-affinity']:
             group = self._create_server_group(policy)
             self._get_group_details(group, policy=policy)
 
-    def test_get_group_details_with_no_affinity_filters(self):
-        self.flags(scheduler_default_filters=['fake'])
-        scheduler_utils._SUPPORTS_ANTI_AFFINITY = None
-        scheduler_utils._SUPPORTS_AFFINITY = None
-        group_info = scheduler_utils._get_group_details(self.context,
-                                                        'fake-uuid')
-        self.assertIsNone(group_info)
-
     def test_get_group_details_with_no_instance_uuid(self):
-        self.flags(scheduler_default_filters=['fake'])
-        scheduler_utils._SUPPORTS_ANTI_AFFINITY = None
-        scheduler_utils._SUPPORTS_AFFINITY = None
         group_info = scheduler_utils._get_group_details(self.context, None)
         self.assertIsNone(group_info)
 
     def _get_group_details_with_filter_not_configured(self, policy):
-        wrong_filter = {
-            'affinity': 'ServerGroupAntiAffinityFilter',
-            'anti-affinity': 'ServerGroupAffinityFilter',
-        }
-        self.flags(scheduler_default_filters=[wrong_filter[policy]])
+        self.flags(scheduler_default_filters=['fake'])
+        self.flags(scheduler_weight_classes=['fake'])
 
         instance = fake_instance.fake_instance_obj(self.context,
                 params={'host': 'hostA'})
@@ -300,24 +317,26 @@ class SchedulerUtilsTestCase(test.NoDBTestCase):
         with test.nested(
             mock.patch.object(objects.InstanceGroup, 'get_by_instance_uuid',
                               return_value=group),
-            mock.patch.object(objects.InstanceGroup, 'get_hosts',
-                              return_value=['hostA']),
-        ) as (get_group, get_hosts):
+        ) as (get_group,):
             scheduler_utils._SUPPORTS_ANTI_AFFINITY = None
             scheduler_utils._SUPPORTS_AFFINITY = None
+            scheduler_utils._SUPPORTS_SOFT_AFFINITY = None
+            scheduler_utils._SUPPORTS_SOFT_ANTI_AFFINITY = None
             self.assertRaises(exception.UnsupportedPolicyException,
                               scheduler_utils._get_group_details,
                               self.context, 'fake-uuid')
 
     def test_get_group_details_with_filter_not_configured(self):
-        policies = ['anti-affinity', 'affinity']
+        policies = ['anti-affinity', 'affinity',
+                    'soft-affinity', 'soft-anti-affinity']
         for policy in policies:
             self._get_group_details_with_filter_not_configured(policy)
 
     @mock.patch.object(scheduler_utils, '_get_group_details')
     def test_setup_instance_group_in_filter_properties(self, mock_ggd):
         mock_ggd.return_value = scheduler_utils.GroupDetails(
-            hosts=set(['hostA', 'hostB']), policies=['policy'])
+            hosts=set(['hostA', 'hostB']), policies=['policy'],
+            members=['instance1'])
         spec = {'instance_properties': {'uuid': 'fake-uuid'}}
         filter_props = {'group_hosts': ['hostC']}
 
@@ -327,7 +346,8 @@ class SchedulerUtilsTestCase(test.NoDBTestCase):
                                          ['hostC'])
         expected_filter_props = {'group_updated': True,
                                  'group_hosts': set(['hostA', 'hostB']),
-                                 'group_policies': ['policy']}
+                                 'group_policies': ['policy'],
+                                 'group_members': ['instance1']}
         self.assertEqual(expected_filter_props, filter_props)
 
     @mock.patch.object(scheduler_utils, '_get_group_details')

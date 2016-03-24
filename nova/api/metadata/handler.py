@@ -21,19 +21,19 @@ import os
 
 from oslo_config import cfg
 from oslo_log import log as logging
+from oslo_utils import secretutils as secutils
 import six
 import webob.dec
 import webob.exc
 
 from nova.api.metadata import base
+from nova import cache_utils
 from nova import context as nova_context
 from nova import exception
 from nova.i18n import _
 from nova.i18n import _LE
 from nova.i18n import _LW
 from nova.network.neutronv2 import api as neutronapi
-from nova.openstack.common import memorycache
-from nova import utils
 from nova import wsgi
 
 CONF = cfg.CONF
@@ -72,7 +72,8 @@ class MetadataRequestHandler(wsgi.Application):
     """Serve metadata."""
 
     def __init__(self):
-        self._cache = memorycache.get_client()
+        self._cache = cache_utils.get_client(
+                expiration_time=CONF.metadata_cache_expiration)
 
     def get_metadata_by_remote_address(self, address):
         if not address:
@@ -90,7 +91,7 @@ class MetadataRequestHandler(wsgi.Application):
             return None
 
         if CONF.metadata_cache_expiration > 0:
-            self._cache.set(cache_key, data, CONF.metadata_cache_expiration)
+            self._cache.set(cache_key, data)
 
         return data
 
@@ -107,7 +108,7 @@ class MetadataRequestHandler(wsgi.Application):
             return None
 
         if CONF.metadata_cache_expiration > 0:
-            self._cache.set(cache_key, data, CONF.metadata_cache_expiration)
+            self._cache.set(cache_key, data)
 
         return data
 
@@ -160,7 +161,7 @@ class MetadataRequestHandler(wsgi.Application):
         try:
             meta_data = self.get_metadata_by_remote_address(remote_address)
         except Exception:
-            LOG.exception(_LE('Failed to get metadata for ip: %s'),
+            LOG.exception(_LE('Failed to get metadata for IP: %s'),
                           remote_address)
             msg = _('An unknown error has occurred. '
                     'Please try your request again.')
@@ -168,7 +169,7 @@ class MetadataRequestHandler(wsgi.Application):
                                                explanation=six.text_type(msg))
 
         if meta_data is None:
-            LOG.error(_LE('Failed to get metadata for ip: %s'),
+            LOG.error(_LE('Failed to get metadata for IP: %s'),
                       remote_address)
 
         return meta_data
@@ -254,9 +255,9 @@ class MetadataRequestHandler(wsgi.Application):
         instance_id = instance_data['device_id']
         tenant_id = instance_data['tenant_id']
 
-        # instance_data is unicode-encoded, while memorycache doesn't like
+        # instance_data is unicode-encoded, while cache_utils doesn't like
         # that. Therefore we convert to str
-        if isinstance(instance_id, unicode):
+        if isinstance(instance_id, six.text_type):
             instance_id = instance_id.encode('utf-8')
         return instance_id, tenant_id
 
@@ -289,7 +290,7 @@ class MetadataRequestHandler(wsgi.Application):
             CONF.neutron.metadata_proxy_shared_secret,
             requestor_id, hashlib.sha256).hexdigest()
 
-        if not utils.constant_time_compare(expected_signature, signature):
+        if not secutils.constant_time_compare(expected_signature, signature):
             if requestor_id:
                 LOG.warning(_LW('X-Instance-ID-Signature: %(signature)s does '
                                 'not match the expected value: '

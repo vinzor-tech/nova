@@ -25,18 +25,14 @@ LOG = logging.getLogger(__name__)
 class ExactCoreFilter(filters.BaseHostFilter):
     """Exact Core Filter."""
 
-    def host_passes(self, host_state, filter_properties):
+    def host_passes(self, host_state, spec_obj):
         """Return True if host has the exact number of CPU cores."""
-        instance_type = filter_properties.get('instance_type')
-        if not instance_type:
-            return True
-
         if not host_state.vcpus_total:
             # Fail safe
             LOG.warning(_LW("VCPUs not set; assuming CPU collection broken"))
             return False
 
-        required_vcpus = instance_type['vcpus']
+        required_vcpus = spec_obj.vcpus
         usable_vcpus = host_state.vcpus_total - host_state.vcpus_used
 
         if required_vcpus != usable_vcpus:
@@ -48,4 +44,8 @@ class ExactCoreFilter(filters.BaseHostFilter):
                        'usable_vcpus': usable_vcpus})
             return False
 
+        # NOTE(mgoddard): Setting the limit ensures that it is enforced in
+        # compute. This ensures that if multiple instances are scheduled to a
+        # single host, then all after the first will fail in the claim.
+        host_state.limits['vcpu'] = host_state.vcpus_total
         return True

@@ -58,33 +58,40 @@ Changes to the Compute API post v2.1 are made using microversions. You can see a
 
    api_microversion_history
 
-We also have a local copy of the v2 docs:
+We also publish end-user API docs as an API Guide.
 
-.. toctree::
-   :maxdepth: 1
-
-   v2/index
-
+* `Compute API Guide`_
 
 .. _`v2.1 (CURRENT)`: http://developer.openstack.org/api-ref-compute-v2.1.html
 .. _`v2 (SUPPORTED)`: http://developer.openstack.org/api-ref-compute-v2.html
 .. _`v2 extensions (SUPPORTED)`: http://developer.openstack.org/api-ref-compute-v2-ext.html
+.. _`Compute API Guide`: http://developer.openstack.org/api-guide/compute/
 
 There was a session on the v2.1 API at the Liberty summit which you can watch
 `here <https://www.openstack.org/summit/vancouver-2015/summit-videos/presentation/introduction-of-a-new-nova-rest-api-why-we-need-to-use-nova-v2-1-api>`_.
 
 
 
-Hypervisor Support Matrix
-=========================
+Feature Status
+==============
 
-The hypervisor support matrix is how we document what features we require
-hypervisor drivers to implement, as well as the level of support for optional
-features that we currently have. You can see the support matrix here:
+Nova aims to have a single compute API that works the same across
+all deployments of Nova.
+While many features are well-tested, well-documented, support live upgrade,
+and are ready for production, some are not. Also the choice of underlying
+technology affects the list of features that are ready for production.
+
+Our first attempt to communicate this is the feature support matrix
+(previously called the hypervisor support matrix).
+Over time we hope to evolve that to include a classification of each feature's
+maturity and exactly what technology combinations are covered by current
+integration testing efforts.
 
 .. toctree::
    :maxdepth: 1
 
+   test_strategy
+   feature_classification
    support-matrix
 
 Developer Guide
@@ -97,6 +104,7 @@ actually does, and why.
    :maxdepth: 1
 
    how_to_get_involved
+   process
    architecture
    project_scope
    development.environment
@@ -145,9 +153,10 @@ Open Development.
    i18n
    filter_scheduler
    rpc
-   hooks
    block_device_mapping
    addmethod.openstackapi
+   conductor
+   notifications
 
 Architecture Evolution Plans
 -----------------------------
@@ -168,6 +177,8 @@ these are a great place to start reading up on the current plans.
    api_microversion_dev
    policy_enforcement
    stable_api
+   code-review
+   scheduler_evolution
 
 Advanced testing and guides
 ----------------------------
@@ -178,6 +189,15 @@ Advanced testing and guides
     gmr
     testing/libvirt-numa
     testing/serial-console
+
+Sample Configuration File
+-------------------------
+
+.. toctree::
+    :maxdepth: 1
+
+    sample_config
+
 
 Man Pages
 ----------
@@ -202,12 +222,7 @@ Module Reference
 .. toctree::
    :hidden:
 
-   api/autoindex
-
 Indices and tables
 ==================
 
-* :ref:`genindex`
-* :ref:`modindex`
 * :ref:`search`
-

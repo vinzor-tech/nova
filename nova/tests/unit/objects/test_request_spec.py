@@ -13,11 +13,17 @@
 #    under the License.
 
 import mock
+from oslo_serialization import jsonutils
 from oslo_utils import uuidutils
 
 from nova import context
+from nova import exception
 from nova import objects
 from nova.objects import base
+from nova.objects import request_spec
+from nova.tests.unit import fake_flavor
+from nova.tests.unit import fake_instance
+from nova.tests.unit import fake_request_spec
 from nova.tests.unit.objects import test_objects
 
 
@@ -101,6 +107,51 @@ class _TestRequestSpecObject(object):
             else:
                 self.assertEqual(instance.get(field), getattr(spec, field))
 
+    @mock.patch.object(objects.InstancePCIRequests,
+                       'from_request_spec_instance_props')
+    def test_from_instance_with_pci_requests(self, pci_from_spec):
+        fake_pci_requests = objects.InstancePCIRequests()
+        pci_from_spec.return_value = fake_pci_requests
+
+        instance = dict(
+            uuid=uuidutils.generate_uuid(),
+            root_gb=10,
+            ephemeral_gb=0,
+            memory_mb=10,
+            vcpus=1,
+            numa_topology=None,
+            project_id='1',
+            availability_zone='nova',
+            pci_requests={
+                'instance_uuid': 'fakeid',
+                'requests': [{'count': 1, 'spec': [{'vendor_id': '8086'}]}]})
+        spec = objects.RequestSpec()
+
+        spec._from_instance(instance)
+        pci_from_spec.assert_called_once_with(instance['pci_requests'])
+        self.assertEqual(fake_pci_requests, spec.pci_requests)
+
+    def test_from_instance_with_numa_stuff(self):
+        instance = dict(
+            uuid=uuidutils.generate_uuid(),
+            root_gb=10,
+            ephemeral_gb=0,
+            memory_mb=10,
+            vcpus=1,
+            project_id='1',
+            availability_zone='nova',
+            pci_requests=None,
+            numa_topology={'cells': [{'id': 1, 'cpuset': ['1'], 'memory': 8192,
+                                      'pagesize': None, 'cpu_topology': None,
+                                      'cpu_pinning_raw': None}]})
+        spec = objects.RequestSpec()
+
+        spec._from_instance(instance)
+        self.assertIsInstance(spec.numa_topology, objects.InstanceNUMATopology)
+        cells = spec.numa_topology.cells
+        self.assertEqual(1, len(cells))
+        self.assertIsInstance(cells[0], objects.InstanceNUMACell)
+
     def test_from_flavor_as_object(self):
         flavor = objects.Flavor()
 
@@ -167,12 +218,14 @@ class _TestRequestSpecObject(object):
         filt_props['group_updated'] = True
         filt_props['group_policies'] = set(['affinity'])
         filt_props['group_hosts'] = set(['fake1'])
+        filt_props['group_members'] = set(['fake-instance1'])
 
         spec = objects.RequestSpec()
         spec._populate_group_info(filt_props)
         self.assertIsInstance(spec.instance_group, objects.InstanceGroup)
         self.assertEqual(['affinity'], spec.instance_group.policies)
         self.assertEqual(['fake1'], spec.instance_group.hosts)
+        self.assertEqual(['fake-instance1'], spec.instance_group.members)
 
     def test_populate_group_info_missing_values(self):
         filt_props = {}
@@ -237,10 +290,64 @@ class _TestRequestSpecObject(object):
         mock_limits.assert_called_once_with({})
         # Make sure that all fields are set using that helper method
         for field in [f for f in spec.obj_fields if f != 'id']:
+            self.assertTrue(spec.obj_attr_is_set(field),
+                             'Field: %s is not set' % field)
+        # just making sure that the context is set by the method
+        self.assertEqual(ctxt, spec._context)
+
+    def test_from_components(self):
+        ctxt = context.RequestContext('fake-user', 'fake-project')
+        instance = fake_instance.fake_instance_obj(ctxt)
+        image = {'id': 'fake-image-id', 'properties': {'mappings': []},
+                 'status': 'fake-status', 'location': 'far-away'}
+        flavor = fake_flavor.fake_flavor_obj(ctxt)
+        filter_properties = {}
+        instance_group = None
+
+        spec = objects.RequestSpec.from_components(ctxt, instance, image,
+                flavor, instance.numa_topology, instance.pci_requests,
+                filter_properties, instance_group, instance.availability_zone)
+        # Make sure that all fields are set using that helper method
+        for field in [f for f in spec.obj_fields if f != 'id']:
             self.assertEqual(True, spec.obj_attr_is_set(field),
                              'Field: %s is not set' % field)
         # just making sure that the context is set by the method
         self.assertEqual(ctxt, spec._context)
+
+    @mock.patch('nova.objects.RequestSpec._populate_group_info')
+    def test_from_components_with_instance_group(self, mock_pgi):
+        # This test makes sure that we don't overwrite instance group passed
+        # to from_components
+        ctxt = context.RequestContext('fake-user', 'fake-project')
+        instance = fake_instance.fake_instance_obj(ctxt)
+        image = {'id': 'fake-image-id', 'properties': {'mappings': []},
+                 'status': 'fake-status', 'location': 'far-away'}
+        flavor = fake_flavor.fake_flavor_obj(ctxt)
+        filter_properties = {'fake': 'property'}
+        instance_group = objects.InstanceGroup()
+
+        objects.RequestSpec.from_components(ctxt, instance, image,
+                flavor, instance.numa_topology, instance.pci_requests,
+                filter_properties, instance_group, instance.availability_zone)
+
+        self.assertFalse(mock_pgi.called)
+
+    @mock.patch('nova.objects.RequestSpec._populate_group_info')
+    def test_from_components_without_instance_group(self, mock_pgi):
+        # This test makes sure that we populate instance group if not
+        # present
+        ctxt = context.RequestContext('fake-user', 'fake-project')
+        instance = fake_instance.fake_instance_obj(ctxt)
+        image = {'id': 'fake-image-id', 'properties': {'mappings': []},
+                 'status': 'fake-status', 'location': 'far-away'}
+        flavor = fake_flavor.fake_flavor_obj(ctxt)
+        filter_properties = {'fake': 'property'}
+
+        objects.RequestSpec.from_components(ctxt, instance, image,
+                flavor, instance.numa_topology, instance.pci_requests,
+                filter_properties, None, instance.availability_zone)
+
+        mock_pgi.assert_called_once_with(filter_properties)
 
     def test_get_scheduler_hint(self):
         spec_obj = objects.RequestSpec(scheduler_hints={'foo_single': ['1'],
@@ -346,6 +453,83 @@ class _TestRequestSpecObject(object):
     def test_to_legacy_filter_properties_dict_with_unset_values(self):
         spec = objects.RequestSpec()
         self.assertEqual({}, spec.to_legacy_filter_properties_dict())
+
+    @mock.patch.object(request_spec.RequestSpec,
+            '_get_by_instance_uuid_from_db')
+    def test_get_by_instance_uuid(self, get_by_uuid):
+        fake_spec = fake_request_spec.fake_db_spec()
+        get_by_uuid.return_value = fake_spec
+
+        req_obj = request_spec.RequestSpec.get_by_instance_uuid(self.context,
+                fake_spec['instance_uuid'])
+
+        self.assertEqual(1, req_obj.num_instances)
+        self.assertEqual(['host2', 'host4'], req_obj.ignore_hosts)
+        self.assertEqual('fake', req_obj.project_id)
+        self.assertEqual({'hint': ['over-there']}, req_obj.scheduler_hints)
+        self.assertEqual(['host1', 'host3'], req_obj.force_hosts)
+        self.assertIsNone(req_obj.availability_zone)
+        self.assertEqual(['node1', 'node2'], req_obj.force_nodes)
+        self.assertIsInstance(req_obj.image, objects.ImageMeta)
+        self.assertIsInstance(req_obj.numa_topology,
+                objects.InstanceNUMATopology)
+        self.assertIsInstance(req_obj.pci_requests,
+                objects.InstancePCIRequests)
+        self.assertIsInstance(req_obj.flavor, objects.Flavor)
+        self.assertIsInstance(req_obj.retry, objects.SchedulerRetries)
+        self.assertIsInstance(req_obj.limits, objects.SchedulerLimits)
+        self.assertIsInstance(req_obj.instance_group, objects.InstanceGroup)
+
+    def _check_update_primitive(self, req_obj, changes):
+        self.assertEqual(req_obj.instance_uuid, changes['instance_uuid'])
+        serialized_obj = objects.RequestSpec.obj_from_primitive(
+                jsonutils.loads(changes['spec']))
+
+        # primitive fields
+        for field in ['instance_uuid', 'num_instances', 'ignore_hosts',
+                'project_id', 'scheduler_hints', 'force_hosts',
+                'availability_zone', 'force_nodes']:
+            self.assertEqual(getattr(req_obj, field),
+                    getattr(serialized_obj, field))
+
+        # object fields
+        for field in ['image', 'numa_topology', 'pci_requests', 'flavor',
+                'retry', 'limits', 'instance_group']:
+            self.assertDictEqual(
+                    getattr(req_obj, field).obj_to_primitive(),
+                    getattr(serialized_obj, field).obj_to_primitive())
+
+    def test_create(self):
+        req_obj = fake_request_spec.fake_spec_obj(remove_id=True)
+
+        def _test_create_args(self2, context, changes):
+            self._check_update_primitive(req_obj, changes)
+            # DB creation would have set an id
+            changes['id'] = 42
+            return changes
+
+        with mock.patch.object(request_spec.RequestSpec, '_create_in_db',
+                _test_create_args):
+            req_obj.create()
+
+    def test_create_id_set(self):
+        req_obj = request_spec.RequestSpec(self.context)
+        req_obj.id = 3
+
+        self.assertRaises(exception.ObjectActionError, req_obj.create)
+
+    def test_save(self):
+        req_obj = fake_request_spec.fake_spec_obj()
+
+        def _test_save_args(self2, context, instance_uuid, changes):
+            self._check_update_primitive(req_obj, changes)
+            # DB creation would have set an id
+            changes['id'] = 42
+            return changes
+
+        with mock.patch.object(request_spec.RequestSpec, '_save_in_db',
+                _test_save_args):
+            req_obj.save()
 
 
 class TestRequestSpecObject(test_objects._LocalTest,

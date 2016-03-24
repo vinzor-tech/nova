@@ -22,6 +22,10 @@ import os
 import time
 
 from eventlet import timeout as etimeout
+from os_win import constants as os_win_const
+from os_win import exceptions as os_win_exc
+from os_win.utils.io import ioutils
+from os_win import utilsfactory
 from oslo_concurrency import processutils
 from oslo_config import cfg
 from oslo_log import log as logging
@@ -31,8 +35,10 @@ from oslo_utils import fileutils
 from oslo_utils import importutils
 from oslo_utils import units
 from oslo_utils import uuidutils
+import six
 
 from nova.api.metadata import base as instance_metadata
+import nova.conf
 from nova import exception
 from nova.i18n import _, _LI, _LE, _LW
 from nova import utils
@@ -40,9 +46,7 @@ from nova.virt import configdrive
 from nova.virt import hardware
 from nova.virt.hyperv import constants
 from nova.virt.hyperv import imagecache
-from nova.virt.hyperv import ioutils
-from nova.virt.hyperv import utilsfactory
-from nova.virt.hyperv import vmutils
+from nova.virt.hyperv import pathutils
 from nova.virt.hyperv import volumeops
 
 LOG = logging.getLogger(__name__)
@@ -84,10 +88,8 @@ hyperv_opts = [
                     ' if instance does not shutdown within this window.'),
 ]
 
-CONF = cfg.CONF
+CONF = nova.conf.CONF
 CONF.register_opts(hyperv_opts, 'hyperv')
-CONF.import_opt('use_cow_images', 'nova.virt.driver')
-CONF.import_opt('network_api_class', 'nova.network')
 
 SHUTDOWN_TIME_INCREMENT = 5
 REBOOT_TYPE_SOFT = 'SOFT'
@@ -113,24 +115,32 @@ def check_admin_permissions(function):
         return function(self, *args, **kwds)
     return wrapper
 
+NEUTRON_VIF_DRIVER = 'nova.virt.hyperv.vif.HyperVNeutronVIFDriver'
+NOVA_VIF_DRIVER = 'nova.virt.hyperv.vif.HyperVNovaNetworkVIFDriver'
+
+
+def get_network_driver():
+    """"Return the correct network module"""
+    if nova.network.is_neutron() is None:
+        # this is an unknown network type, not neutron or nova
+        raise KeyError()
+    elif nova.network.is_neutron():
+        return NEUTRON_VIF_DRIVER
+    else:
+        return NOVA_VIF_DRIVER
+
 
 class VMOps(object):
-    _vif_driver_class_map = {
-        'nova.network.neutronv2.api.API':
-        'nova.virt.hyperv.vif.HyperVNeutronVIFDriver',
-        'nova.network.api.API':
-        'nova.virt.hyperv.vif.HyperVNovaNetworkVIFDriver',
-    }
-
     # The console log is stored in two files, each should have at most half of
     # the maximum console log size.
     _MAX_CONSOLE_LOG_FILE_SIZE = units.Mi / 2
 
     def __init__(self):
         self._vmutils = utilsfactory.get_vmutils()
+        self._metricsutils = utilsfactory.get_metricsutils()
         self._vhdutils = utilsfactory.get_vhdutils()
-        self._pathutils = utilsfactory.get_pathutils()
         self._hostutils = utilsfactory.get_hostutils()
+        self._pathutils = pathutils.PathUtils()
         self._volumeops = volumeops.VolumeOps()
         self._imagecache = imagecache.ImageCache()
         self._vif_driver = None
@@ -139,7 +149,7 @@ class VMOps(object):
 
     def _load_vif_driver_class(self):
         try:
-            class_name = self._vif_driver_class_map[CONF.network_api_class]
+            class_name = get_network_driver()
             self._vif_driver = importutils.import_object(class_name)
         except KeyError:
             raise TypeError(_("VIF driver not found for "
@@ -153,7 +163,7 @@ class VMOps(object):
                 instance_uuids.append(str(notes[0]))
             else:
                 LOG.debug("Notes not found or not resembling a GUID for "
-                          "instance: %s" % instance_name)
+                          "instance: %s", instance_name)
         return instance_uuids
 
     def list_instances(self):
@@ -179,7 +189,7 @@ class VMOps(object):
     def _create_root_vhd(self, context, instance):
         base_vhd_path = self._imagecache.get_cached_image(context, instance)
         base_vhd_info = self._vhdutils.get_vhd_info(base_vhd_path)
-        base_vhd_size = base_vhd_info['MaxInternalSize']
+        base_vhd_size = base_vhd_info['VirtualSize']
         format_ext = base_vhd_path.split('.')[-1]
         root_vhd_path = self._pathutils.get_root_vhd_path(instance.name,
                                                           format_ext)
@@ -227,15 +237,11 @@ class VMOps(object):
 
     def _is_resize_needed(self, vhd_path, old_size, new_size, instance):
         if new_size < old_size:
-            error_msg = _("Cannot resize a VHD to a smaller size, the"
-                          " original size is %(old_size)s, the"
-                          " newer size is %(new_size)s"
-                          ) % {'old_size': old_size,
-                               'new_size': new_size}
-            raise vmutils.VHDResizeException(error_msg)
+            raise exception.FlavorDiskSmallerThanImage(
+                flavor_size=new_size, image_size=old_size)
         elif new_size > old_size:
             LOG.debug("Resizing VHD %(vhd_path)s to new "
-                      "size %(new_size)s" %
+                      "size %(new_size)s",
                       {'new_size': new_size,
                        'vhd_path': vhd_path},
                       instance=instance)
@@ -249,8 +255,7 @@ class VMOps(object):
 
             eph_vhd_path = self._pathutils.get_ephemeral_vhd_path(
                 instance.name, vhd_format)
-            self._vhdutils.create_dynamic_vhd(eph_vhd_path, eph_vhd_size,
-                                              vhd_format)
+            self._vhdutils.create_dynamic_vhd(eph_vhd_path, eph_vhd_size)
             return eph_vhd_path
 
     @check_admin_permissions
@@ -272,7 +277,8 @@ class VMOps(object):
             root_vhd_path = self._create_root_vhd(context, instance)
 
         eph_vhd_path = self.create_ephemeral_vhd(instance)
-        vm_gen = self.get_image_vm_generation(root_vhd_path, image_meta)
+        vm_gen = self.get_image_vm_generation(
+            instance.uuid, root_vhd_path, image_meta)
 
         try:
             self.create_instance(instance, network_info, block_device_info,
@@ -333,7 +339,7 @@ class VMOps(object):
             self._vif_driver.plug(instance, vif)
 
         if CONF.hyperv.enable_instance_metrics_collection:
-            self._vmutils.enable_vm_metrics_collection(instance_name)
+            self._metricsutils.enable_vm_metrics_collection(instance_name)
 
         self._create_vm_com_port_pipe(instance)
 
@@ -345,36 +351,33 @@ class VMOps(object):
             self._vmutils.attach_ide_drive(instance_name, path, drive_addr,
                                            ctrl_disk_addr, drive_type)
 
-    def get_image_vm_generation(self, root_vhd_path, image_meta):
+    def get_image_vm_generation(self, instance_id, root_vhd_path, image_meta):
         default_vm_gen = self._hostutils.get_default_vm_generation()
         image_prop_vm = image_meta.properties.get(
             'hw_machine_type', default_vm_gen)
         if image_prop_vm not in self._hostutils.get_supported_vm_types():
-            LOG.error(_LE('Requested VM Generation %s is not supported on '
-                         ' this OS.'), image_prop_vm)
-            raise vmutils.HyperVException(
-                _('Requested VM Generation %s is not supported on this '
-                  'OS.') % image_prop_vm)
+            reason = _LE('Requested VM Generation %s is not supported on '
+                         'this OS.') % image_prop_vm
+            raise exception.InstanceUnacceptable(instance_id=instance_id,
+                                                 reason=reason)
 
         vm_gen = VM_GENERATIONS[image_prop_vm]
 
         if (vm_gen != constants.VM_GEN_1 and root_vhd_path and
                 self._vhdutils.get_vhd_format(
                     root_vhd_path) == constants.DISK_FORMAT_VHD):
-            LOG.error(_LE('Requested VM Generation %s, but provided VHD '
-                          'instead of VHDX.'), vm_gen)
-            raise vmutils.HyperVException(
-                _('Requested VM Generation %s, but provided VHD instead of '
-                  'VHDX.') % vm_gen)
+            reason = _LE('Requested VM Generation %s, but provided VHD '
+                         'instead of VHDX.') % vm_gen
+            raise exception.InstanceUnacceptable(instance_id=instance_id,
+                                                 reason=reason)
 
         return vm_gen
 
     def _create_config_drive(self, instance, injected_files, admin_password,
                              network_info):
         if CONF.config_drive_format != 'iso9660':
-            raise vmutils.UnsupportedConfigDriveFormatException(
-                _('Invalid config_drive_format "%s"') %
-                CONF.config_drive_format)
+            raise exception.ConfigDriveUnsupportedFormat(
+                format=CONF.config_drive_format)
 
         LOG.info(_LI('Using config drive for instance'), instance=instance)
 
@@ -448,6 +451,10 @@ class VMOps(object):
                 self._vmutils.stop_vm_jobs(instance_name)
                 self.power_off(instance)
 
+                if network_info:
+                    for vif in network_info:
+                        self._vif_driver.unplug(instance, vif)
+
                 self._vmutils.destroy_vm(instance_name)
                 self._volumeops.disconnect_volumes(block_device_info)
             else:
@@ -470,7 +477,7 @@ class VMOps(object):
                 return
 
         self._set_vm_state(instance,
-                           constants.HYPERV_VM_STATE_REBOOT)
+                           os_win_const.HYPERV_VM_STATE_REBOOT)
 
     def _soft_shutdown(self, instance,
                        timeout=CONF.hyperv.wait_soft_reboot_seconds,
@@ -496,7 +503,7 @@ class VMOps(object):
                     LOG.info(_LI("Soft shutdown succeeded."),
                              instance=instance)
                     return True
-            except vmutils.HyperVException as e:
+            except os_win_exc.HyperVException as e:
                 # Exception is raised when trying to shutdown the instance
                 # while it is still booting.
                 LOG.debug("Soft shutdown failed: %s", e, instance=instance)
@@ -512,25 +519,25 @@ class VMOps(object):
         """Pause VM instance."""
         LOG.debug("Pause instance", instance=instance)
         self._set_vm_state(instance,
-                           constants.HYPERV_VM_STATE_PAUSED)
+                           os_win_const.HYPERV_VM_STATE_PAUSED)
 
     def unpause(self, instance):
         """Unpause paused VM instance."""
         LOG.debug("Unpause instance", instance=instance)
         self._set_vm_state(instance,
-                           constants.HYPERV_VM_STATE_ENABLED)
+                           os_win_const.HYPERV_VM_STATE_ENABLED)
 
     def suspend(self, instance):
         """Suspend the specified instance."""
         LOG.debug("Suspend instance", instance=instance)
         self._set_vm_state(instance,
-                           constants.HYPERV_VM_STATE_SUSPENDED)
+                           os_win_const.HYPERV_VM_STATE_SUSPENDED)
 
     def resume(self, instance):
         """Resume the suspended VM instance."""
         LOG.debug("Resume instance", instance=instance)
         self._set_vm_state(instance,
-                           constants.HYPERV_VM_STATE_ENABLED)
+                           os_win_const.HYPERV_VM_STATE_ENABLED)
 
     def power_off(self, instance, timeout=0, retry_interval=0):
         """Power off the specified instance."""
@@ -545,8 +552,8 @@ class VMOps(object):
                 return
 
             self._set_vm_state(instance,
-                               constants.HYPERV_VM_STATE_DISABLED)
-        except exception.InstanceNotFound:
+                               os_win_const.HYPERV_VM_STATE_DISABLED)
+        except os_win_exc.HyperVVMNotFoundException:
             # The manager can call the stop API after receiving instance
             # power off events. If this is triggered when the instance
             # is being deleted, it might attempt to power off an unexisting
@@ -562,7 +569,7 @@ class VMOps(object):
             self._volumeops.fix_instance_volume_disk_paths(instance.name,
                                                            block_device_info)
 
-        self._set_vm_state(instance, constants.HYPERV_VM_STATE_ENABLED)
+        self._set_vm_state(instance, os_win_const.HYPERV_VM_STATE_ENABLED)
 
     def _set_vm_state(self, instance, req_state):
         instance_name = instance.name
@@ -571,11 +578,11 @@ class VMOps(object):
         try:
             self._vmutils.set_vm_state(instance_name, req_state)
 
-            if req_state in (constants.HYPERV_VM_STATE_DISABLED,
-                             constants.HYPERV_VM_STATE_REBOOT):
+            if req_state in (os_win_const.HYPERV_VM_STATE_DISABLED,
+                             os_win_const.HYPERV_VM_STATE_REBOOT):
                 self._delete_vm_console_log(instance)
-            if req_state in (constants.HYPERV_VM_STATE_ENABLED,
-                             constants.HYPERV_VM_STATE_REBOOT):
+            if req_state in (os_win_const.HYPERV_VM_STATE_ENABLED,
+                             os_win_const.HYPERV_VM_STATE_REBOOT):
                 self.log_vm_serial_output(instance_name,
                                           instance_uuid)
 
@@ -600,7 +607,7 @@ class VMOps(object):
                     False otherwise.
         """
 
-        desired_vm_states = [constants.HYPERV_VM_STATE_DISABLED]
+        desired_vm_states = [os_win_const.HYPERV_VM_STATE_DISABLED]
 
         def _check_vm_status(instance_name):
             if self._get_vm_state(instance_name) in desired_vm_states:
@@ -663,8 +670,8 @@ class VMOps(object):
                         instance_log += fp.read()
             return instance_log
         except IOError as err:
-            msg = _("Could not get instance console log. Error: %s") % err
-            raise vmutils.HyperVException(msg, instance=instance)
+            raise exception.ConsoleLogOutputException(
+                instance_id=instance.uuid, reason=six.text_type(err))
 
     def _delete_vm_console_log(self, instance):
         console_log_files = self._pathutils.get_vm_console_log_paths(
@@ -717,3 +724,54 @@ class VMOps(object):
             vm_name, remote_server=dest_host)
         for path in dvd_disk_paths:
             self._pathutils.copyfile(path, dest_path)
+
+    def _check_hotplug_available(self, instance):
+        """Check whether attaching an interface is possible for the given
+        instance.
+
+        :returns: True if attaching / detaching interfaces is possible for the
+                  given instance.
+        """
+        vm_state = self._get_vm_state(instance.name)
+        if vm_state == os_win_const.HYPERV_VM_STATE_DISABLED:
+            # can attach / detach interface to stopped VMs.
+            return True
+
+        if not self._hostutils.check_min_windows_version(10, 0):
+            # TODO(claudiub): add set log level to error after string freeze.
+            LOG.debug("vNIC hot plugging is supported only in newer "
+                      "versions than Windows Hyper-V / Server 2012 R2.")
+            return False
+
+        if (self._vmutils.get_vm_generation(instance.name) ==
+                constants.VM_GEN_1):
+            # TODO(claudiub): add set log level to error after string freeze.
+            LOG.debug("Cannot hot plug vNIC to a first generation VM.",
+                      instance=instance)
+            return False
+
+        return True
+
+    def attach_interface(self, instance, vif):
+        if not self._check_hotplug_available(instance):
+            raise exception.InterfaceAttachFailed(instance_uuid=instance.uuid)
+
+        LOG.debug('Attaching vif: %s', vif['id'], instance=instance)
+        self._vmutils.create_nic(instance.name, vif['id'], vif['address'])
+        self._vif_driver.plug(instance, vif)
+
+    def detach_interface(self, instance, vif):
+        try:
+            if not self._check_hotplug_available(instance):
+                raise exception.InterfaceDetachFailed(
+                    instance_uuid=instance.uuid)
+
+            LOG.debug('Detaching vif: %s', vif['id'], instance=instance)
+            self._vif_driver.unplug(instance, vif)
+            self._vmutils.destroy_nic(instance.name, vif['id'])
+        except os_win_exc.HyperVVMNotFoundException:
+            # TODO(claudiub): add set log level to error after string freeze.
+            LOG.debug("Instance not found during detach interface. It "
+                      "might have been destroyed beforehand.",
+                      instance=instance)
+            raise exception.InterfaceDetachFailed(instance_uuid=instance.uuid)

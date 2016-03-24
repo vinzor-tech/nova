@@ -19,7 +19,7 @@ import oslo_messaging as messaging
 from oslo_utils import timeutils
 import six
 
-from nova.i18n import _, _LI, _LW
+from nova.i18n import _, _LI, _LW, _LE
 from nova.servicegroup import api
 from nova.servicegroup.drivers import base
 
@@ -75,13 +75,16 @@ class DbDriver(base.Driver):
         elapsed = timeutils.delta_seconds(last_heartbeat, timeutils.utcnow())
         is_up = abs(elapsed) <= self.service_down_time
         if not is_up:
-            LOG.debug('Seems service is down. Last heartbeat was %(lhb)s. '
-                      'Elapsed time is %(el)s',
-                      {'lhb': str(last_heartbeat), 'el': str(elapsed)})
+            LOG.debug('Seems service %(binary)s on host %(host)s is down. '
+                      'Last heartbeat was %(lhb)s. Elapsed time is %(el)s',
+                      {'binary': service_ref.get('binary'),
+                       'host': service_ref.get('host'),
+                       'lhb': str(last_heartbeat), 'el': str(elapsed)})
         return is_up
 
     def _report_state(self, service):
         """Update the state of this service in the datastore."""
+
         try:
             service.service_ref.report_count += 1
             service.service_ref.save()
@@ -90,13 +93,20 @@ class DbDriver(base.Driver):
             if getattr(service, 'model_disconnected', False):
                 service.model_disconnected = False
                 LOG.info(
-                    _LI('Recovered connection to nova-conductor '
-                        'for reporting service status.'))
-
-        # because we are communicating over conductor, a failure to
-        # connect is going to be a messaging failure, not a db error.
+                    _LI('Recovered from being unable to report status.'))
         except messaging.MessagingTimeout:
+            # NOTE(johngarbutt) during upgrade we will see messaging timeouts
+            # as nova-conductor is restarted, so only log this error once.
             if not getattr(service, 'model_disconnected', False):
                 service.model_disconnected = True
-                LOG.warn(_LW('Lost connection to nova-conductor '
+                LOG.warning(_LW('Lost connection to nova-conductor '
                              'for reporting service status.'))
+        except Exception:
+            # NOTE(rpodolyaka): we'd like to avoid catching of all possible
+            # exceptions here, but otherwise it would become possible for
+            # the state reporting thread to stop abruptly, and thus leave
+            # the service unusable until it's restarted.
+            LOG.exception(
+                _LE('Unexpected error while reporting service status'))
+            # trigger the recovery log message, if this error goes away
+            service.model_disconnected = True

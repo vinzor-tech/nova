@@ -16,19 +16,18 @@
 
 """Tests for the testing base code."""
 
-from oslo_config import cfg
 from oslo_log import log as logging
 import oslo_messaging as messaging
 import six
 
+import nova.conf
 from nova import rpc
 from nova import test
 from nova.tests import fixtures
 
 LOG = logging.getLogger(__name__)
 
-CONF = cfg.CONF
-CONF.import_opt('use_local', 'nova.conductor.api', group='conductor')
+CONF = nova.conf.CONF
 
 
 class IsolationTestCase(test.TestCase):
@@ -54,7 +53,7 @@ class IsolationTestCase(test.TestCase):
         server.start()
 
 
-class JsonTestCase(test.TestCase):
+class JsonTestCase(test.NoDBTestCase):
     def test_json_equal(self):
         expected = {
             "employees": [
@@ -149,7 +148,7 @@ class JsonTestCase(test.TestCase):
             self.fail("This should have raised a mismatch exception")
 
 
-class BadLogTestCase(test.TestCase):
+class BadLogTestCase(test.NoDBTestCase):
     """Make sure a mis-formatted debug log will get caught."""
 
     def test_bad_debug_log(self):
@@ -157,7 +156,7 @@ class BadLogTestCase(test.TestCase):
             LOG.debug, "this is a misformated %(log)s", {'nothing': 'nothing'})
 
 
-class MatchTypeTestCase(test.TestCase):
+class MatchTypeTestCase(test.NoDBTestCase):
 
     def test_match_type_simple(self):
         matcher = test.MatchType(dict)

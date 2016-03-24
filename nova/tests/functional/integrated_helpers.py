@@ -21,23 +21,18 @@ import random
 import string
 import uuid
 
-from oslo_config import cfg
 from oslo_log import log as logging
 
-from nova import crypto
+import nova.conf
 import nova.image.glance
-from nova import service
 from nova import test
 from nova.tests import fixtures as nova_fixtures
-from nova.tests.functional.api import client
 from nova.tests.unit import cast_as_call
-from nova.tests.unit import fake_crypto
 import nova.tests.unit.image.fake
 
 
-CONF = cfg.CONF
+CONF = nova.conf.CONF
 LOG = logging.getLogger(__name__)
-CONF.import_opt('manager', 'nova.cells.opts', group='cells')
 
 
 def generate_random_alphanumeric(length):
@@ -75,17 +70,11 @@ class _IntegratedTestBase(test.TestCase):
         self.flags(**f)
         self.flags(verbose=True)
 
-        nova.tests.unit.image.fake.stub_out_image_service(self.stubs)
-        self.stubs.Set(crypto, 'ensure_ca_filesystem',
-                       fake_crypto.ensure_ca_filesystem)
-        self.stubs.Set(crypto, 'fetch_ca',
-                       fake_crypto.fetch_ca)
-        self.stubs.Set(crypto, 'generate_x509_cert',
-                       fake_crypto.generate_x509_cert)
+        nova.tests.unit.image.fake.stub_out_image_service(self)
         self._setup_services()
 
         self.api_fixture = self.useFixture(
-            nova_fixtures.OSAPIFixture(self._api_version))
+            nova_fixtures.OSAPIFixture(self.api_major_version))
 
         # if the class needs to run as admin, make the api endpoint
         # the admin, otherwise it's safer to run as non admin user.
@@ -102,30 +91,17 @@ class _IntegratedTestBase(test.TestCase):
         return self.start_service('compute')
 
     def _setup_scheduler_service(self):
-        self.flags(scheduler_driver='nova.scheduler.'
-                    'chance.ChanceScheduler')
+        self.flags(scheduler_driver='chance_scheduler')
         return self.start_service('scheduler')
 
     def _setup_services(self):
         self.conductor = self.start_service('conductor',
                                             manager=CONF.conductor.manager)
         self.compute = self._setup_compute_service()
-        self.cert = self.start_service('cert')
         self.consoleauth = self.start_service('consoleauth')
 
         self.network = self.start_service('network')
         self.scheduler = self._setup_scheduler_service()
-        self.cells = self.start_service('cells', manager=CONF.cells.manager)
-
-    def _get_test_client(self):
-        return client.TestOpenStackClient('fake', 'fake', self.auth_url)
-
-    def _start_api_service(self):
-        self.osapi = service.WSGIService("osapi_compute")
-        self.osapi.start()
-        self.auth_url = 'http://%(host)s:%(port)s/%(api_version)s' % ({
-            'host': self.osapi.host, 'port': self.osapi.port,
-            'api_version': self._api_version})
 
     def _get_flags(self):
         """Allow subclass to modify global config before we start services."""

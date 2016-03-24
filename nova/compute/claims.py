@@ -22,6 +22,7 @@ from oslo_log import log as logging
 from nova import exception
 from nova.i18n import _
 from nova.i18n import _LI
+from nova.i18n import _LW
 from nova import objects
 from nova.virt import hardware
 
@@ -32,8 +33,8 @@ LOG = logging.getLogger(__name__)
 class NopClaim(object):
     """For use with compute drivers that do not support resource tracking."""
 
-    def __init__(self, migration=None):
-        self.migration = migration
+    def __init__(self, *args, **kwargs):
+        self.migration = kwargs.pop('migration', None)
         self.claimed_numa_topology = None
 
     @property
@@ -42,6 +43,10 @@ class NopClaim(object):
 
     @property
     def memory_mb(self):
+        return 0
+
+    @property
+    def vcpus(self):
         return 0
 
     def __enter__(self):
@@ -97,6 +102,10 @@ class Claim(NopClaim):
         return self.instance.memory_mb + self.overhead['memory_mb']
 
     @property
+    def vcpus(self):
+        return self.instance.vcpus
+
+    @property
     def numa_topology(self):
         if self._numa_topology_loaded:
             return self._numa_topology
@@ -108,7 +117,7 @@ class Claim(NopClaim):
         """Compute operation requiring claimed resources has failed or
         been aborted.
         """
-        LOG.debug("Aborting claim: %s" % self, instance=self.instance)
+        LOG.debug("Aborting claim: %s", self, instance=self.instance)
         self.tracker.abort_instance_claim(self.context, self.instance)
 
     def _claim_test(self, resources, limits=None):
@@ -128,15 +137,17 @@ class Claim(NopClaim):
         # unlimited:
         memory_mb_limit = limits.get('memory_mb')
         disk_gb_limit = limits.get('disk_gb')
+        vcpus_limit = limits.get('vcpu')
         numa_topology_limit = limits.get('numa_topology')
 
-        msg = _("Attempting claim: memory %(memory_mb)d MB, disk %(disk_gb)d "
-                "GB")
-        params = {'memory_mb': self.memory_mb, 'disk_gb': self.disk_gb}
-        LOG.info(msg % params, instance=self.instance)
+        LOG.info(_LI("Attempting claim: memory %(memory_mb)d MB, "
+                     "disk %(disk_gb)d GB, vcpus %(vcpus)d CPU"),
+                 {'memory_mb': self.memory_mb, 'disk_gb': self.disk_gb,
+                  'vcpus': self.vcpus}, instance=self.instance)
 
         reasons = [self._test_memory(resources, memory_mb_limit),
                    self._test_disk(resources, disk_gb_limit),
+                   self._test_vcpus(resources, vcpus_limit),
                    self._test_numa_topology(resources, numa_topology_limit),
                    self._test_pci()]
         reasons = reasons + self._test_ext_resources(limits)
@@ -165,14 +176,22 @@ class Claim(NopClaim):
 
         return self._test(type_, unit, total, used, requested, limit)
 
+    def _test_vcpus(self, resources, limit):
+        type_ = _("vcpu")
+        unit = "VCPU"
+        total = resources['vcpus']
+        used = resources['vcpus_used']
+        requested = self.vcpus
+
+        return self._test(type_, unit, total, used, requested, limit)
+
     def _test_pci(self):
         pci_requests = objects.InstancePCIRequests.get_by_instance_uuid(
             self.context, self.instance.uuid)
 
         if pci_requests.requests:
-            devs = self.tracker.pci_tracker.claim_instance(self.context,
-                                                           self.instance)
-            if not devs:
+            stats = self.tracker.pci_tracker.stats
+            if not stats.support_requests(pci_requests.requests):
                 return _('Claim pci failed.')
 
     def _test_ext_resources(self, limits):
@@ -265,6 +284,10 @@ class MoveClaim(Claim):
         return self.instance_type.memory_mb + self.overhead['memory_mb']
 
     @property
+    def vcpus(self):
+        return self.instance_type.vcpus
+
+    @property
     def numa_topology(self):
         image_meta = objects.ImageMeta.from_dict(self.image_meta)
         return hardware.numa_get_constraints(
@@ -288,17 +311,17 @@ class MoveClaim(Claim):
         """Compute operation requiring claimed resources has failed or
         been aborted.
         """
-        LOG.debug("Aborting claim: %s" % self, instance=self.instance)
+        LOG.debug("Aborting claim: %s", self, instance=self.instance)
         self.tracker.drop_move_claim(
             self.context,
-            self.instance, instance_type=self.instance_type,
-            image_meta=self.image_meta)
+            self.instance, instance_type=self.instance_type)
 
     def create_migration_context(self):
         if not self.migration:
-            # FIXME(ndipanov): Move this to a LOG.warn once Mitaka opens up
-            LOG.debug("Can't create a migration_context record without a "
-                      "migration object specified.")
+            LOG.warning(
+                _LW("Can't create a migration_context record without a "
+                    "migration object specified."),
+                instance=self.instance)
             return
 
         mig_context = objects.MigrationContext(

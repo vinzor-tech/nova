@@ -19,29 +19,51 @@
 Scheduler base class that all Schedulers should inherit from
 """
 
-from oslo_config import cfg
-from oslo_utils import importutils
+import abc
 
-from nova import db
-from nova.i18n import _
+from oslo_log import log as logging
+from oslo_utils import importutils
+import six
+from stevedore import driver
+
+import nova.conf
+from nova.i18n import _, _LW
+from nova import objects
 from nova import servicegroup
 
-scheduler_driver_opts = [
-    cfg.StrOpt('scheduler_host_manager',
-               default='nova.scheduler.host_manager.HostManager',
-               help='The scheduler host manager class to use'),
-    ]
+CONF = nova.conf.CONF
 
-CONF = cfg.CONF
-CONF.register_opts(scheduler_driver_opts)
+LOG = logging.getLogger(__name__)
 
 
+@six.add_metaclass(abc.ABCMeta)
 class Scheduler(object):
     """The base class that all Scheduler classes should inherit from."""
 
     def __init__(self):
-        self.host_manager = importutils.import_object(
-                CONF.scheduler_host_manager)
+        try:
+            self.host_manager = driver.DriverManager(
+                    "nova.scheduler.host_manager",
+                    CONF.scheduler_host_manager,
+                    invoke_on_load=True).driver
+        # TODO(Yingxin): Change to catch stevedore.exceptions.NoMatches
+        # after stevedore v1.9.0
+        except RuntimeError:
+            # NOTE(Yingxin): Loading full class path is deprecated and
+            # should be removed in the N release.
+            try:
+                self.host_manager = importutils.import_object(
+                    CONF.scheduler_host_manager)
+                LOG.warning(_LW("DEPRECATED: scheduler_host_manager uses "
+                                "classloader to load %(path)s. This legacy "
+                                "loading style will be removed in the "
+                                "N release."),
+                            {'path': CONF.scheduler_host_manager})
+            except (ImportError, ValueError):
+                raise RuntimeError(
+                        _("Cannot load host manager from configuration "
+                          "scheduler_host_manager = %(conf)s."),
+                        {'conf': CONF.scheduler_host_manager})
         self.servicegroup_api = servicegroup.API()
 
     def run_periodic_tasks(self, context):
@@ -51,16 +73,16 @@ class Scheduler(object):
     def hosts_up(self, context, topic):
         """Return the list of hosts that have a running service for topic."""
 
-        services = db.service_get_all_by_topic(context, topic)
-        return [service['host']
+        services = objects.ServiceList.get_by_topic(context, topic)
+        return [service.host
                 for service in services
                 if self.servicegroup_api.service_is_up(service)]
 
-    def select_destinations(self, context, request_spec, filter_properties):
+    @abc.abstractmethod
+    def select_destinations(self, context, spec_obj):
         """Must override select_destinations method.
 
         :return: A list of dicts with 'host', 'nodename' and 'limits' as keys
             that satisfies the request_spec and filter_properties.
         """
-        msg = _("Driver must implement select_destinations")
-        raise NotImplementedError(msg)
+        return []

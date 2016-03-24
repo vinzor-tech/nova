@@ -10,8 +10,6 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from oslo_versionedobjects import base as ovo
-
 from nova.db.sqlalchemy import api as db_api
 from nova.db.sqlalchemy import api_models
 from nova import exception
@@ -19,10 +17,8 @@ from nova.objects import base
 from nova.objects import fields
 
 
-# NOTE(danms): Maintain Dict compatibility because of ovo bug 1474952
 @base.NovaObjectRegistry.register
-class CellMapping(base.NovaTimestampObject, base.NovaObject,
-                  ovo.VersionedObjectDictCompat):
+class CellMapping(base.NovaTimestampObject, base.NovaObject):
     # Version 1.0: Initial version
     VERSION = '1.0'
 
@@ -43,14 +39,13 @@ class CellMapping(base.NovaTimestampObject, base.NovaObject,
         return cell_mapping
 
     @staticmethod
+    @db_api.api_context_manager.reader
     def _get_by_uuid_from_db(context, uuid):
-        session = db_api.get_api_session()
 
-        with session.begin():
-            db_mapping = session.query(api_models.CellMapping).filter_by(
-                    uuid=uuid).first()
-            if not db_mapping:
-                raise exception.CellMappingNotFound(uuid=uuid)
+        db_mapping = context.session.query(api_models.CellMapping).filter_by(
+                uuid=uuid).first()
+        if not db_mapping:
+            raise exception.CellMappingNotFound(uuid=uuid)
 
         return db_mapping
 
@@ -61,12 +56,12 @@ class CellMapping(base.NovaTimestampObject, base.NovaObject,
         return cls._from_db_object(context, cls(), db_mapping)
 
     @staticmethod
+    @db_api.api_context_manager.writer
     def _create_in_db(context, updates):
-        session = db_api.get_api_session()
 
         db_mapping = api_models.CellMapping()
         db_mapping.update(updates)
-        db_mapping.save(session)
+        db_mapping.save(context.session)
         return db_mapping
 
     @base.remotable
@@ -75,17 +70,16 @@ class CellMapping(base.NovaTimestampObject, base.NovaObject,
         self._from_db_object(self._context, self, db_mapping)
 
     @staticmethod
+    @db_api.api_context_manager.writer
     def _save_in_db(context, uuid, updates):
-        session = db_api.get_api_session()
 
-        with session.begin():
-            db_mapping = session.query(
-                    api_models.CellMapping).filter_by(uuid=uuid).first()
-            if not db_mapping:
-                raise exception.CellMappingNotFound(uuid=uuid)
+        db_mapping = context.session.query(
+                api_models.CellMapping).filter_by(uuid=uuid).first()
+        if not db_mapping:
+            raise exception.CellMappingNotFound(uuid=uuid)
 
-            db_mapping.update(updates)
-            session.add(db_mapping)
+        db_mapping.update(updates)
+        context.session.add(db_mapping)
         return db_mapping
 
     @base.remotable
@@ -96,14 +90,13 @@ class CellMapping(base.NovaTimestampObject, base.NovaObject,
         self.obj_reset_changes()
 
     @staticmethod
+    @db_api.api_context_manager.writer
     def _destroy_in_db(context, uuid):
-        session = db_api.get_api_session()
 
-        with session.begin():
-            result = session.query(api_models.CellMapping).filter_by(
-                    uuid=uuid).delete()
-            if not result:
-                raise exception.CellMappingNotFound(uuid=uuid)
+        result = context.session.query(api_models.CellMapping).filter_by(
+                uuid=uuid).delete()
+        if not result:
+            raise exception.CellMappingNotFound(uuid=uuid)
 
     @base.remotable
     def destroy(self):

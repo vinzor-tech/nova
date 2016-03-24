@@ -20,6 +20,7 @@ from neutronclient.common import exceptions as n_exc
 from neutronclient.neutron import v2_0 as neutronv20
 from oslo_config import cfg
 from oslo_serialization import jsonutils
+from oslo_utils import encodeutils
 import webob
 
 from nova.api.openstack.compute.legacy_v2.contrib import security_groups
@@ -34,6 +35,9 @@ from nova.objects import instance as instance_obj
 from nova import test
 from nova.tests.unit.api.openstack.compute import test_security_groups
 from nova.tests.unit.api.openstack import fakes
+from nova.tests import uuidsentinel as uuids
+
+UUID_SERVER = uuids.server
 
 
 class TestNeutronSecurityGroupsTestCase(test.TestCase):
@@ -146,8 +150,8 @@ class TestNeutronSecurityGroupsV21(
             device_id=test_security_groups.FAKE_UUID1)
         expected = [{'rules': [], 'tenant_id': 'fake', 'id': sg['id'],
                     'name': 'test', 'description': 'test-description'}]
-        self.stubs.Set(nova.db, 'instance_get_by_uuid',
-                       test_security_groups.return_server_by_uuid)
+        self.stub_out('nova.db.instance_get_by_uuid',
+                      test_security_groups.return_server_by_uuid)
         req = fakes.HTTPRequest.blank('/v2/fake/servers/%s/os-security-groups'
                                       % test_security_groups.FAKE_UUID1)
         res_dict = self.server_controller.index(
@@ -211,14 +215,15 @@ class TestNeutronSecurityGroupsV21(
         net = self._create_network()
         self._create_port(
             network_id=net['network']['id'], security_groups=[sg['id']],
-            device_id=test_security_groups.FAKE_UUID1)
+            device_id=UUID_SERVER)
 
-        self.stubs.Set(nova.db, 'instance_get',
-                       test_security_groups.return_server)
+        self.stub_out('nova.db.instance_get_by_uuid',
+                      test_security_groups.return_server)
         body = dict(addSecurityGroup=dict(name="test"))
 
-        req = fakes.HTTPRequest.blank('/v2/fake/servers/1/action')
-        self.manager._addSecurityGroup(req, '1', body)
+        req = fakes.HTTPRequest.blank('/v2/fake/servers/%s/action' %
+                                      UUID_SERVER)
+        self.manager._addSecurityGroup(req, UUID_SERVER, body)
 
     def test_associate_duplicate_names(self):
         sg1 = self._create_security_group(name='sg1',
@@ -228,15 +233,17 @@ class TestNeutronSecurityGroupsV21(
         net = self._create_network()
         self._create_port(
             network_id=net['network']['id'], security_groups=[sg1['id']],
-            device_id=test_security_groups.FAKE_UUID1)
+            device_id=UUID_SERVER)
 
-        self.stubs.Set(nova.db, 'instance_get',
-                       test_security_groups.return_server)
+        self.stub_out('nova.db.instance_get_by_uuid',
+                      test_security_groups.return_server)
         body = dict(addSecurityGroup=dict(name="sg1"))
 
-        req = fakes.HTTPRequest.blank('/v2/fake/servers/1/action')
+        req = fakes.HTTPRequest.blank('/v2/fake/servers/%s/action' %
+                                      UUID_SERVER)
         self.assertRaises(webob.exc.HTTPConflict,
-                          self.manager._addSecurityGroup, req, '1', body)
+                          self.manager._addSecurityGroup,
+                          req, UUID_SERVER, body)
 
     def test_associate_port_security_enabled_true(self):
         sg = self._create_sg_template().get('security_group')
@@ -244,39 +251,43 @@ class TestNeutronSecurityGroupsV21(
         self._create_port(
             network_id=net['network']['id'], security_groups=[sg['id']],
             port_security_enabled=True,
-            device_id=test_security_groups.FAKE_UUID1)
+            device_id=UUID_SERVER)
 
-        self.stubs.Set(nova.db, 'instance_get',
-                       test_security_groups.return_server)
+        self.stub_out('nova.db.instance_get_by_uuid',
+                      test_security_groups.return_server)
         body = dict(addSecurityGroup=dict(name="test"))
 
-        req = fakes.HTTPRequest.blank('/v2/fake/servers/1/action')
-        self.manager._addSecurityGroup(req, '1', body)
+        req = fakes.HTTPRequest.blank('/v2/fake/servers/%s/action' %
+                                      UUID_SERVER)
+        self.manager._addSecurityGroup(req, UUID_SERVER, body)
 
     def test_associate_port_security_enabled_false(self):
         self._create_sg_template().get('security_group')
         net = self._create_network()
         self._create_port(
             network_id=net['network']['id'], port_security_enabled=False,
-            device_id=test_security_groups.FAKE_UUID1)
+            device_id=UUID_SERVER)
 
-        self.stubs.Set(nova.db, 'instance_get',
-                       test_security_groups.return_server)
+        self.stub_out('nova.db.instance_get_by_uuid',
+                      test_security_groups.return_server)
         body = dict(addSecurityGroup=dict(name="test"))
 
-        req = fakes.HTTPRequest.blank('/v2/fake/servers/1/action')
+        req = fakes.HTTPRequest.blank('/v2/fake/servers/%s/action' %
+                                      UUID_SERVER)
         self.assertRaises(webob.exc.HTTPBadRequest,
                           self.manager._addSecurityGroup,
-                          req, '1', body)
+                          req, UUID_SERVER, body)
 
     def test_disassociate_by_non_existing_security_group_name(self):
-        self.stubs.Set(nova.db, 'instance_get',
-                       test_security_groups.return_server)
+        self.stub_out('nova.db.instance_get_by_uuid',
+                      test_security_groups.return_server)
         body = dict(removeSecurityGroup=dict(name='non-existing'))
 
-        req = fakes.HTTPRequest.blank('/v2/fake/servers/1/action')
+        req = fakes.HTTPRequest.blank('/v2/fake/servers/%s/action' %
+                                      UUID_SERVER)
         self.assertRaises(webob.exc.HTTPNotFound,
-                          self.manager._removeSecurityGroup, req, '1', body)
+                          self.manager._removeSecurityGroup,
+                          req, UUID_SERVER, body)
 
     def test_disassociate_non_running_instance(self):
         # Neutron does not care if the instance is running or not. When the
@@ -295,14 +306,15 @@ class TestNeutronSecurityGroupsV21(
         net = self._create_network()
         self._create_port(
             network_id=net['network']['id'], security_groups=[sg['id']],
-            device_id=test_security_groups.FAKE_UUID1)
+            device_id=UUID_SERVER)
 
-        self.stubs.Set(nova.db, 'instance_get',
-                       test_security_groups.return_server)
+        self.stub_out('nova.db.instance_get_by_uuid',
+                      test_security_groups.return_server)
         body = dict(removeSecurityGroup=dict(name="test"))
 
-        req = fakes.HTTPRequest.blank('/v2/fake/servers/1/action')
-        self.manager._removeSecurityGroup(req, '1', body)
+        req = fakes.HTTPRequest.blank('/v2/fake/servers/%s/action' %
+                                      UUID_SERVER)
+        self.manager._removeSecurityGroup(req, UUID_SERVER, body)
 
     def test_get_raises_no_unique_match_error(self):
 
@@ -358,7 +370,8 @@ class TestNeutronSecurityGroupsV21(
                     {'name': sg3['id']}]
         security_group_api = self.controller.security_group_api
         sgs = security_group_api.get_instance_security_groups(
-            context.get_admin_context(), test_security_groups.FAKE_UUID1)
+            context.get_admin_context(),
+            instance_obj.Instance(uuid=test_security_groups.FAKE_UUID1))
         self.assertEqual(sgs, expected)
 
     @mock.patch('nova.network.security_group.neutron_driver.SecurityGroupAPI.'
@@ -370,7 +383,7 @@ class TestNeutronSecurityGroupsV21(
         security_group_api = self.controller.security_group_api
         ctx = context.get_admin_context()
         sgs = security_group_api.get_instance_security_groups(ctx,
-                test_security_groups.FAKE_UUID1)
+                instance_obj.Instance(uuid=test_security_groups.FAKE_UUID1))
 
         neutron_sg_bind_mock.assert_called_once_with(ctx, servers, False)
         self.assertEqual([], sgs)
@@ -384,7 +397,8 @@ class TestNeutronSecurityGroupsV21(
             device_id=test_security_groups.FAKE_UUID1)
         security_group_api = self.controller.security_group_api
         sgs = security_group_api.get_instance_security_groups(
-            context.get_admin_context(), test_security_groups.FAKE_UUID1)
+            context.get_admin_context(),
+            instance_obj.Instance(uuid=test_security_groups.FAKE_UUID1))
         self.assertEqual(sgs, [{'name': 'test1'}])
 
     def test_create_port_with_sg_and_port_security_enabled_false(self):
@@ -483,7 +497,7 @@ class TestNeutronSecurityGroupsOutputTest(TestNeutronSecurityGroupsTestCase):
 
     def setUp(self):
         super(TestNeutronSecurityGroupsOutputTest, self).setUp()
-        fakes.stub_out_nw_api(self.stubs)
+        fakes.stub_out_nw_api(self)
         self.controller = security_groups.SecurityGroupController()
         self.stubs.Set(compute.api.API, 'get',
                        test_security_groups.fake_compute_get)
@@ -504,7 +518,7 @@ class TestNeutronSecurityGroupsOutputTest(TestNeutronSecurityGroupsTestCase):
         req = webob.Request.blank(url)
         if body:
             req.method = 'POST'
-            req.body = self._encode_body(body)
+            req.body = encodeutils.safe_encode(self._encode_body(body))
         req.content_type = self.content_type
         req.headers['Accept'] = self.content_type
         res = req.get_response(fakes.wsgi_app(init_only=('servers',)))

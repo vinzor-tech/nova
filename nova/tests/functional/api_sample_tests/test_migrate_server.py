@@ -15,11 +15,9 @@
 
 import mock
 from oslo_config import cfg
+from oslo_utils import versionutils
 
-from nova.conductor import manager as conductor_manager
-from nova import db
 from nova.tests.functional.api_sample_tests import test_servers
-from nova import utils
 
 CONF = cfg.CONF
 CONF.import_opt('osapi_compute_extension',
@@ -28,7 +26,6 @@ CONF.import_opt('osapi_compute_extension',
 
 class MigrateServerSamplesJsonTest(test_servers.ServersSampleBase):
     extension_name = "os-migrate-server"
-    ctype = 'json'
 
     def _get_flags(self):
         f = super(MigrateServerSamplesJsonTest, self)._get_flags()
@@ -56,14 +53,14 @@ class MigrateServerSamplesJsonTest(test_servers.ServersSampleBase):
     def test_post_live_migrate_server(self):
         # Get api samples to server live migrate request.
         def fake_live_migrate(_self, context, instance, scheduler_hint,
-                              block_migration, disk_over_commit):
+                              block_migration, disk_over_commit, request_spec):
             self.assertEqual(self.uuid, instance["uuid"])
             host = scheduler_hint["host"]
             self.assertEqual(self.compute.host, host)
 
-        self.stubs.Set(conductor_manager.ComputeTaskManager,
-                       '_live_migrate',
-                       fake_live_migrate)
+        self.stub_out(
+            'nova.conductor.manager.ComputeTaskManager._live_migrate',
+            fake_live_migrate)
 
         def fake_get_compute(context, host):
             service = dict(host=host,
@@ -72,13 +69,23 @@ class MigrateServerSamplesJsonTest(test_servers.ServersSampleBase):
                            report_count=1,
                            updated_at='foo',
                            hypervisor_type='bar',
-                           hypervisor_version=utils.convert_version_to_int(
-                               '1.0'),
+                           hypervisor_version=(
+                                versionutils.convert_version_to_int('1.0')),
                            disabled=False)
             return {'compute_node': [service]}
-        self.stubs.Set(db, "service_get_by_compute_host", fake_get_compute)
+        self.stub_out("nova.db.service_get_by_compute_host", fake_get_compute)
 
         response = self._do_post('servers/%s/action' % self.uuid,
                                  'live-migrate-server',
                                  {'hostname': self.compute.host})
         self.assertEqual(202, response.status_code)
+
+
+class MigrateServerSamplesJsonTestV225(MigrateServerSamplesJsonTest):
+    extension_name = "os-migrate-server"
+    microversion = '2.25'
+    scenarios = [('v2_25', {'api_major_version': 'v2.1'})]
+
+    def test_post_migrate(self):
+        # no changes for migrate-server
+        pass

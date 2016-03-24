@@ -23,8 +23,8 @@ import re
 
 from oslo_config import cfg
 from oslo_log import log as logging
-from oslo_serialization import jsonutils
 from oslo_utils import excutils
+from oslo_utils import versionutils as v_utils
 from oslo_vmware import api
 from oslo_vmware import exceptions as vexc
 from oslo_vmware import pbm
@@ -32,11 +32,9 @@ from oslo_vmware import vim
 from oslo_vmware import vim_util
 
 from nova.compute import task_states
-from nova.compute import vm_states
+import nova.conf
 from nova import exception
-from nova import utils
 from nova.i18n import _, _LI, _LE, _LW
-from nova import objects
 from nova.virt import driver
 from nova.virt.vmwareapi import constants
 from nova.virt.vmwareapi import error_util
@@ -52,11 +50,9 @@ vmwareapi_opts = [
     cfg.StrOpt('host_ip',
                help='Hostname or IP address for connection to VMware '
                     'vCenter host.'),
-    cfg.IntOpt('host_port',
-               default=443,
-               min=1,
-               max=65535,
-               help='Port for connection to VMware vCenter host.'),
+    cfg.PortOpt('host_port',
+                default=443,
+                help='Port for connection to VMware vCenter host.'),
     cfg.StrOpt('host_username',
                help='Username for connection to VMware vCenter host.'),
     cfg.StrOpt('host_password',
@@ -82,11 +78,9 @@ vmwareapi_opts = [
                default=10,
                help='The number of times we retry on failures, e.g., '
                     'socket error, etc.'),
-    cfg.IntOpt('vnc_port',
-               default=5900,
-               min=1,
-               max=65535,
-               help='VNC starting port'),
+    cfg.PortOpt('vnc_port',
+                default=5900,
+                help='VNC starting port'),
     cfg.IntOpt('vnc_port_total',
                default=10000,
                help='Total number of VNC ports'),
@@ -115,7 +109,7 @@ spbm_opts = [
                     'request then this policy will be used.'),
     ]
 
-CONF = cfg.CONF
+CONF = nova.conf.CONF
 CONF.register_opts(vmwareapi_opts, 'vmware')
 CONF.register_opts(spbm_opts, 'vmware')
 
@@ -197,10 +191,10 @@ class VMwareVCDriver(driver.ComputeDriver):
         self._register_openstack_extension()
 
     def _check_min_version(self):
-        min_version = utils.convert_version_to_int(constants.MIN_VC_VERSION)
+        min_version = v_utils.convert_version_to_int(constants.MIN_VC_VERSION)
         vc_version = vim_util.get_vc_version(self._session)
         LOG.info(_LI("VMware vCenter version: %s"), vc_version)
-        if min_version > utils.convert_version_to_int(vc_version):
+        if min_version > v_utils.convert_version_to_int(vc_version):
             # TODO(garyk): enforce this from M
             LOG.warning(_LW('Running Nova with a VMware vCenter version less '
                             'than %(version)s is deprecated. The required '
@@ -307,26 +301,9 @@ class VMwareVCDriver(driver.ComputeDriver):
                          network_info, image_meta, resize_instance,
                          block_device_info=None, power_on=True):
         """Completes a resize, turning on the migrated instance."""
-        image_meta = objects.ImageMeta.from_dict(image_meta)
         self._vmops.finish_migration(context, migration, instance, disk_info,
                                      network_info, image_meta, resize_instance,
                                      block_device_info, power_on)
-
-    def live_migration(self, context, instance, dest,
-                       post_method, recover_method, block_migration=False,
-                       migrate_data=None):
-        """Live migration of an instance to another host."""
-        self._vmops.live_migration(context, instance, dest,
-                                   post_method, recover_method,
-                                   block_migration)
-
-    def rollback_live_migration_at_destination(self, context, instance,
-                                               network_info,
-                                               block_device_info,
-                                               destroy_disks=True,
-                                               migrate_data=None):
-        """Clean up destination node after a failed live migration."""
-        self.destroy(context, instance, network_info, block_device_info)
 
     def get_instance_disk_info(self, instance, block_device_info=None):
         pass
@@ -373,8 +350,7 @@ class VMwareVCDriver(driver.ComputeDriver):
                 # impossible to provide any meaningful info on the CPU
                 # model of the "host"
                'cpu_info': None,
-               'supported_instances': jsonutils.dumps(
-                   host_stats['supported_instances']),
+               'supported_instances': host_stats['supported_instances'],
                'numa_topology': None,
                }
 
@@ -401,7 +377,6 @@ class VMwareVCDriver(driver.ComputeDriver):
     def spawn(self, context, instance, image_meta, injected_files,
               admin_password, network_info=None, block_device_info=None):
         """Create VM instance."""
-        image_meta = objects.ImageMeta.from_dict(image_meta)
         self._vmops.spawn(context, instance, image_meta, injected_files,
                           admin_password, network_info, block_device_info)
 
@@ -441,19 +416,15 @@ class VMwareVCDriver(driver.ComputeDriver):
             # plugging. Hence we need to power off the instance and update
             # the instance state.
             self._vmops.power_off(instance)
-            # TODO(garyk): update the volumeops to read the state form the
-            # VM instead of relying on an instance flag
-            instance.vm_state = vm_states.STOPPED
             for disk in block_device_mapping:
                 connection_info = disk['connection_info']
                 try:
                     self.detach_volume(connection_info, instance,
                                        disk.get('device_name'))
-                except exception.StorageError:
-                    # The volume does not exist
-                    # NOTE(garyk): change to warning after string freeze
-                    LOG.debug('%s does not exist!', disk.get('device_name'),
-                              instance=instance)
+                except exception.DiskNotFound:
+                    LOG.warning(_LW('The volume %s does not exist!'),
+                                disk.get('device_name'),
+                                instance=instance)
                 except Exception as e:
                     with excutils.save_and_reraise_exception():
                         LOG.error(_LE("Failed to detach %(device_name)s. "
@@ -506,7 +477,6 @@ class VMwareVCDriver(driver.ComputeDriver):
     def rescue(self, context, instance, network_info, image_meta,
                rescue_password):
         """Rescue the specified instance."""
-        image_meta = objects.ImageMeta.from_dict(image_meta)
         self._vmops.rescue(context, instance, network_info, image_meta)
 
     def unrescue(self, instance, network_info):
@@ -582,7 +552,6 @@ class VMwareVCDriver(driver.ComputeDriver):
 
     def attach_interface(self, instance, image_meta, vif):
         """Attach an interface to the instance."""
-        image_meta = objects.ImageMeta.from_dict(image_meta)
         self._vmops.attach_interface(instance, image_meta, vif)
 
     def detach_interface(self, instance, vif):

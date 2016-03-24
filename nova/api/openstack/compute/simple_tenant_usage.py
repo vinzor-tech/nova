@@ -67,10 +67,7 @@ class SimpleTenantUsageController(wsgi.Controller):
                 # instance is still running, so charge them up to current time
                 stop = period_stop
             dt = stop - start
-            seconds = (dt.days * 3600 * 24 + dt.seconds +
-                       dt.microseconds / 100000.0)
-
-            return seconds / 3600.0
+            return dt.total_seconds() / 3600.0
         else:
             # instance hasn't launched, so no charge
             return 0
@@ -150,7 +147,7 @@ class SimpleTenantUsageController(wsgi.Controller):
             else:
                 delta = now - info['started_at']
 
-            info['uptime'] = delta.days * 24 * 3600 + delta.seconds
+            info['uptime'] = int(delta.total_seconds())
 
             if info['tenant_id'] not in rval:
                 summary = {}
@@ -231,7 +228,7 @@ class SimpleTenantUsageController(wsgi.Controller):
         except exception.InvalidStrTime as e:
             raise exc.HTTPBadRequest(explanation=e.format_message())
 
-        now = timeutils.parse_isotime(timeutils.strtime())
+        now = timeutils.parse_isotime(timeutils.utcnow().isoformat())
         if period_stop > now:
             period_stop = now
         usages = self._tenant_usages_for_period(context,
@@ -254,7 +251,7 @@ class SimpleTenantUsageController(wsgi.Controller):
         except exception.InvalidStrTime as e:
             raise exc.HTTPBadRequest(explanation=e.format_message())
 
-        now = timeutils.parse_isotime(timeutils.strtime())
+        now = timeutils.parse_isotime(timeutils.utcnow().isoformat())
         if period_stop > now:
             period_stop = now
         usage = self._tenant_usages_for_period(context,
@@ -263,7 +260,7 @@ class SimpleTenantUsageController(wsgi.Controller):
                                                tenant_id=tenant_id,
                                                detailed=True)
         if len(usage):
-            usage = usage[0]
+            usage = list(usage)[0]
         else:
             usage = {}
         return {'tenant_usage': usage}

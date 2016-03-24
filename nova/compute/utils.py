@@ -24,7 +24,6 @@ from oslo_log import log
 import six
 
 from nova import block_device
-from nova.compute import flavors
 from nova.compute import power_state
 from nova.compute import task_states
 from nova import exception
@@ -41,7 +40,7 @@ CONF.import_opt('host', 'nova.netconf')
 LOG = log.getLogger(__name__)
 
 
-def exception_to_dict(fault):
+def exception_to_dict(fault, message=None):
     """Converts exceptions to a dict for use in notifications."""
     # TODO(johngarbutt) move to nova/exception.py to share with wrap_exception
 
@@ -52,7 +51,8 @@ def exception_to_dict(fault):
     # get the message from the exception that was thrown
     # if that does not exist, use the name of the exception class itself
     try:
-        message = fault.format_message()
+        if not message:
+            message = fault.format_message()
     # These exception handlers are broad so we don't fail to log the fault
     # just because there is an unexpected error retrieving the message
     except Exception:
@@ -81,13 +81,14 @@ def _get_fault_details(exc_info, error_code):
     return six.text_type(details)
 
 
-def add_instance_fault_from_exc(context, instance, fault, exc_info=None):
+def add_instance_fault_from_exc(context, instance, fault, exc_info=None,
+                                fault_message=None):
     """Adds the specified fault to the database."""
 
     fault_obj = objects.InstanceFault(context=context)
     fault_obj.host = CONF.host
     fault_obj.instance_uuid = instance.uuid
-    fault_obj.update(exception_to_dict(fault))
+    fault_obj.update(exception_to_dict(fault, message=fault_message))
     code = fault_obj.code
     fault_obj.details = _get_fault_details(exc_info, code)
     fault_obj.create()
@@ -135,7 +136,6 @@ def get_next_device_name(instance, device_name_list,
     /dev/vdc is specified but the backend uses /dev/xvdc), the device
     name will be converted to the appropriate format.
     """
-    is_xen = driver.compute_driver_matches('xenapi.XenAPIDriver')
 
     req_prefix = None
     req_letter = None
@@ -156,7 +156,7 @@ def get_next_device_name(instance, device_name_list,
         raise exception.InvalidDevicePath(path=root_device_name)
 
     # NOTE(vish): remove this when xenapi is setting default_root_device
-    if is_xen:
+    if driver.is_xenapi():
         prefix = '/dev/xvd'
 
     if req_prefix != prefix:
@@ -170,7 +170,7 @@ def get_next_device_name(instance, device_name_list,
 
     # NOTE(vish): remove this when xenapi is properly setting
     #             default_ephemeral_device and default_swap_device
-    if is_xen:
+    if driver.is_xenapi():
         flavor = instance.get_flavor()
         if flavor.ephemeral_gb:
             used_letters.add('b')
@@ -492,28 +492,6 @@ def reserve_quota_delta(context, deltas, instance):
         quotas.reserve(project_id=project_id, user_id=user_id,
                        **deltas)
     return quotas
-
-
-def get_inst_attrs_from_migration(migration, instance):
-    """Get the instance vcpus and memory_mb attributes.
-
-    Provides instance vcpus and memory_mb attributes according to
-    old flavor type using migration object if old flavor exists.
-    """
-    instance_vcpus = instance.vcpus
-    instance_memory_mb = instance.memory_mb
-
-    old_inst_type_id = migration.old_instance_type_id
-    try:
-        old_inst_type = flavors.get_flavor(old_inst_type_id)
-    except exception.FlavorNotFound:
-        LOG.warning(_LW("Flavor %d not found"), old_inst_type_id)
-    else:
-        instance_vcpus = old_inst_type.vcpus
-        vram_mb = old_inst_type.extra_specs.get('hw_video:ram_max_mb', 0)
-        instance_memory_mb = old_inst_type.memory_mb + vram_mb
-
-    return instance_vcpus, instance_memory_mb
 
 
 def remove_shelved_keys_from_system_metadata(instance):

@@ -18,9 +18,13 @@ Unit tests for the Hyper-V Driver.
 """
 
 import platform
+import sys
 
 import mock
+from os_win import exceptions as os_win_exc
 
+from nova import exception
+from nova import safe_utils
 from nova.tests.unit import fake_instance
 from nova.tests.unit.virt.hyperv import test_base
 from nova.virt import driver as base_driver
@@ -29,7 +33,10 @@ from nova.virt.hyperv import driver
 
 class HyperVDriverTestCase(test_base.HyperVBaseTestCase):
 
-    def setUp(self):
+    FAKE_WIN_2008R2_VERSION = '6.0.0'
+
+    @mock.patch.object(driver.HyperVDriver, '_check_minimum_windows_version')
+    def setUp(self, mock_check_minimum_windows_version):
         super(HyperVDriverTestCase, self).setUp()
 
         self.context = 'context'
@@ -42,9 +49,64 @@ class HyperVDriverTestCase(test_base.HyperVBaseTestCase):
         self.driver._migrationops = mock.MagicMock()
         self.driver._rdpconsoleops = mock.MagicMock()
 
+    @mock.patch.object(driver.utilsfactory, 'get_hostutils')
+    def test_check_minimum_windows_version(self, mock_get_hostutils):
+        mock_hostutils = mock_get_hostutils.return_value
+        mock_hostutils.check_min_windows_version.return_value = False
+
+        self.assertRaises(exception.HypervisorTooOld,
+                          self.driver._check_minimum_windows_version)
+
     def test_public_api_signatures(self):
-        self.assertPublicAPISignatures(base_driver.ComputeDriver(None),
-                                       self.driver)
+        # NOTE(claudiub): wrapped functions do not keep the same signature in
+        # Python 2.7, which causes this test to fail. Instead, we should
+        # compare the public API signatures of the unwrapped methods.
+
+        for attr in driver.HyperVDriver.__dict__:
+            class_member = getattr(driver.HyperVDriver, attr)
+            if callable(class_member):
+                mocked_method = mock.patch.object(
+                    driver.HyperVDriver, attr,
+                    safe_utils.get_wrapped_function(class_member))
+                mocked_method.start()
+                self.addCleanup(mocked_method.stop)
+
+        self.assertPublicAPISignatures(base_driver.ComputeDriver,
+                                       driver.HyperVDriver)
+
+    def test_converted_exception(self):
+        self.driver._vmops.get_info.side_effect = (
+            os_win_exc.OSWinException)
+        self.assertRaises(exception.NovaException,
+                          self.driver.get_info, mock.sentinel.instance)
+
+        self.driver._vmops.get_info.side_effect = os_win_exc.HyperVException
+        self.assertRaises(exception.NovaException,
+                          self.driver.get_info, mock.sentinel.instance)
+
+        self.driver._vmops.get_info.side_effect = (
+            os_win_exc.HyperVVMNotFoundException(vm_name='foofoo'))
+        self.assertRaises(exception.InstanceNotFound,
+                          self.driver.get_info, mock.sentinel.instance)
+
+    def test_assert_original_traceback_maintained(self):
+        def bar(self):
+            foo = "foofoo"
+            raise os_win_exc.HyperVVMNotFoundException(vm_name=foo)
+
+        self.driver._vmops.get_info.side_effect = bar
+        try:
+            self.driver.get_info(mock.sentinel.instance)
+            self.fail("Test expected exception, but it was not raised.")
+        except exception.InstanceNotFound:
+            # exception has been raised as expected.
+            _, _, trace = sys.exc_info()
+            while trace.tb_next:
+                # iterate until the original exception source, bar.
+                trace = trace.tb_next
+
+            # original frame will contain the 'foo' variable.
+            self.assertEqual('foofoo', trace.tb_frame.f_locals['foo'])
 
     @mock.patch.object(driver.eventhandler, 'InstanceEventHandler')
     def test_init_host(self, mock_InstanceEventHandler):
@@ -65,8 +127,7 @@ class HyperVDriverTestCase(test_base.HyperVBaseTestCase):
         self.driver.list_instances()
         self.driver._vmops.list_instances.assert_called_once_with()
 
-    @mock.patch.object(driver.objects.ImageMeta, 'from_dict')
-    def test_spawn(self, mock_meta_from_dict):
+    def test_spawn(self):
         self.driver.spawn(
             mock.sentinel.context, mock.sentinel.instance,
             mock.sentinel.image_meta, mock.sentinel.injected_files,
@@ -75,7 +136,7 @@ class HyperVDriverTestCase(test_base.HyperVBaseTestCase):
 
         self.driver._vmops.spawn.assert_called_once_with(
             mock.sentinel.context, mock.sentinel.instance,
-            mock_meta_from_dict.return_value, mock.sentinel.injected_files,
+            mock.sentinel.image_meta, mock.sentinel.injected_files,
             mock.sentinel.admin_password, mock.sentinel.network_info,
             mock.sentinel.block_device_info)
 
@@ -336,8 +397,7 @@ class HyperVDriverTestCase(test_base.HyperVBaseTestCase):
             mock.sentinel.network_info, mock.sentinel.block_device_info,
             mock.sentinel.power_on)
 
-    @mock.patch.object(driver.objects.ImageMeta, 'from_dict')
-    def test_finish_migration(self, mock_meta_from_dict):
+    def test_finish_migration(self):
         self.driver.finish_migration(
             mock.sentinel.context, mock.sentinel.migration,
             mock.sentinel.instance, mock.sentinel.disk_info,
@@ -348,7 +408,7 @@ class HyperVDriverTestCase(test_base.HyperVBaseTestCase):
         self.driver._migrationops.finish_migration.assert_called_once_with(
             mock.sentinel.context, mock.sentinel.migration,
             mock.sentinel.instance, mock.sentinel.disk_info,
-            mock.sentinel.network_info, mock_meta_from_dict.return_value,
+            mock.sentinel.network_info, mock.sentinel.image_meta,
             mock.sentinel.resize_instance, mock.sentinel.block_device_info,
             mock.sentinel.power_on)
 

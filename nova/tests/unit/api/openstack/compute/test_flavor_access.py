@@ -26,7 +26,6 @@ from nova.api.openstack.compute.legacy_v2.contrib import flavor_access \
         as flavor_access_v2
 from nova.api.openstack.compute.legacy_v2 import flavors as flavors_api
 from nova import context
-from nova import db
 from nova import exception
 from nova import test
 from nova.tests.unit.api.openstack import fakes
@@ -139,12 +138,15 @@ class FlavorAccessTestV21(test.NoDBTestCase):
         self.req = FakeRequest()
         self.req.environ = {"nova.context": context.RequestContext('fake_user',
                                                                    'fake')}
-        self.stubs.Set(db, 'flavor_get_by_flavor_id',
-                       fake_get_flavor_by_flavor_id)
-        self.stubs.Set(db, 'flavor_get_all',
-                       fake_get_all_flavors_sorted_list)
-        self.stubs.Set(db, 'flavor_access_get_by_flavor_id',
-                       fake_get_flavor_access_by_flavor_id)
+        self.stub_out('nova.db.flavor_get_by_flavor_id',
+                      fake_get_flavor_by_flavor_id)
+        self.stub_out('nova.db.flavor_get_all',
+                      fake_get_all_flavors_sorted_list)
+        self.stub_out('nova.db.flavor_access_get_by_flavor_id',
+                      fake_get_flavor_access_by_flavor_id)
+        # Simulate no API flavors right now
+        self.stub_out('nova.objects.flavor._flavor_get_all_from_db',
+                      lambda *a, **k: [])
 
         self.flavor_access_controller = self.FlavorAccessController()
         self.flavor_action_controller = self.FlavorActionController()
@@ -156,13 +158,17 @@ class FlavorAccessTestV21(test.NoDBTestCase):
         for d1, d2 in zip(result, expected):
             self.assertEqual(d1['id'], d2['id'])
 
-    def test_list_flavor_access_public(self):
+    @mock.patch('nova.objects.Flavor._flavor_get_by_flavor_id_from_db',
+                side_effect=exception.FlavorNotFound(flavor_id='foo'))
+    def test_list_flavor_access_public(self, mock_api_get):
         # query os-flavor-access on public flavor should return 404
         self.assertRaises(exc.HTTPNotFound,
                           self.flavor_access_controller.index,
                           self.req, '1')
 
-    def test_list_flavor_access_private(self):
+    @mock.patch('nova.objects.Flavor._flavor_get_by_flavor_id_from_db',
+                side_effect=exception.FlavorNotFound(flavor_id='foo'))
+    def test_list_flavor_access_private(self, mock_api_get):
         expected = {'flavor_access': [
             {'flavor_id': '2', 'tenant_id': 'proj2'},
             {'flavor_id': '2', 'tenant_id': 'proj3'}]}
@@ -284,12 +290,14 @@ class FlavorAccessTestV21(test.NoDBTestCase):
         else:
             return self.flavor_action_controller._removeTenantAccess
 
-    def test_add_tenant_access(self):
+    @mock.patch('nova.objects.Flavor._flavor_get_by_flavor_id_from_db',
+                side_effect=exception.FlavorNotFound(flavor_id='foo'))
+    def test_add_tenant_access(self, mock_api_get):
         def stub_add_flavor_access(context, flavorid, projectid):
             self.assertEqual('3', flavorid, "flavorid")
             self.assertEqual("proj2", projectid, "projectid")
-        self.stubs.Set(db, 'flavor_access_add',
-                       stub_add_flavor_access)
+        self.stub_out('nova.db.flavor_access_add',
+                      stub_add_flavor_access)
         expected = {'flavor_access':
             [{'flavor_id': '3', 'tenant_id': 'proj3'}]}
         body = {'addTenantAccess': {'tenant': 'proj2'}}
@@ -321,29 +329,35 @@ class FlavorAccessTestV21(test.NoDBTestCase):
         self.assertRaises(self.validation_ex,
                           add_access, req, '2', body=body)
 
-    def test_add_tenant_access_with_already_added_access(self):
+    @mock.patch('nova.objects.Flavor._flavor_get_by_flavor_id_from_db',
+                side_effect=exception.FlavorNotFound(flavor_id='foo'))
+    def test_add_tenant_access_with_already_added_access(self, mock_api_get):
         def stub_add_flavor_access(context, flavorid, projectid):
             raise exception.FlavorAccessExists(flavor_id=flavorid,
                                                project_id=projectid)
-        self.stubs.Set(db, 'flavor_access_add',
-                       stub_add_flavor_access)
+        self.stub_out('nova.db.flavor_access_add',
+                      stub_add_flavor_access)
         body = {'addTenantAccess': {'tenant': 'proj2'}}
         add_access = self._get_add_access()
         self.assertRaises(exc.HTTPConflict,
                           add_access, self.req, '3', body=body)
 
-    def test_remove_tenant_access_with_bad_access(self):
+    @mock.patch('nova.objects.Flavor._flavor_get_by_flavor_id_from_db',
+                side_effect=exception.FlavorNotFound(flavor_id='foo'))
+    def test_remove_tenant_access_with_bad_access(self, mock_api_get):
         def stub_remove_flavor_access(context, flavorid, projectid):
             raise exception.FlavorAccessNotFound(flavor_id=flavorid,
                                                  project_id=projectid)
-        self.stubs.Set(db, 'flavor_access_remove',
-                       stub_remove_flavor_access)
+        self.stub_out('nova.db.flavor_access_remove',
+                      stub_remove_flavor_access)
         body = {'removeTenantAccess': {'tenant': 'proj2'}}
         remove_access = self._get_remove_access()
         self.assertRaises(exc.HTTPNotFound,
                           remove_access, self.req, '3', body=body)
 
-    def test_add_tenant_access_is_public(self):
+    @mock.patch('nova.objects.Flavor._flavor_get_by_flavor_id_from_db',
+                side_effect=exception.FlavorNotFound(flavor_id='foo'))
+    def test_add_tenant_access_is_public(self, mock_api_get):
         body = {'addTenantAccess': {'tenant': 'proj2'}}
         req = fakes.HTTPRequest.blank(self._prefix + '/flavors/2/action',
                                       use_admin_context=True)
@@ -352,7 +366,9 @@ class FlavorAccessTestV21(test.NoDBTestCase):
         self.assertRaises(exc.HTTPConflict,
                           add_access, req, '1', body=body)
 
-    def test_delete_tenant_access_with_no_tenant(self):
+    @mock.patch('nova.objects.Flavor._flavor_get_by_flavor_id_from_db',
+                side_effect=exception.FlavorNotFound(flavor_id='foo'))
+    def test_delete_tenant_access_with_no_tenant(self, mock_api_get):
         req = fakes.HTTPRequest.blank(self._prefix + '/flavors/2/action',
                                       use_admin_context=True)
         remove_access = self._get_remove_access()

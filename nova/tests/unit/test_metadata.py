@@ -39,18 +39,16 @@ from nova import block_device
 from nova.compute import flavors
 from nova.conductor import api as conductor_api
 from nova import context
-from nova import db
-from nova.db.sqlalchemy import api
 from nova import exception
 from nova.network import api as network_api
 from nova.network import model as network_model
 from nova.network.neutronv2 import api as neutronapi
+from nova.network.security_group import openstack_driver
 from nova import objects
 from nova import test
 from nova.tests.unit.api.openstack import fakes
 from nova.tests.unit import fake_block_device
 from nova.tests.unit import fake_network
-from nova.tests.unit.objects import test_security_group
 from nova.virt import netutils
 
 CONF = cfg.CONF
@@ -85,13 +83,13 @@ def fake_inst_obj(context):
         default_ephemeral_device=None,
         default_swap_device=None,
         system_metadata={},
+        security_groups=objects.SecurityGroupList(),
         availability_zone=None)
     nwinfo = network_model.NetworkInfo([])
     inst.info_cache = objects.InstanceInfoCache(context=context,
                                                 instance_uuid=inst.uuid,
                                                 network_info=nwinfo)
-    with mock.patch.object(inst, 'save'):
-        inst.set_flavor(flavors.get_default_flavor())
+    inst.flavor = flavors.get_default_flavor()
     return inst
 
 
@@ -112,13 +110,13 @@ def fake_InstanceMetadata(stubs, inst_data, address=None,
     content = content or []
     extra_md = extra_md or {}
     if sgroups is None:
-        sgroups = [dict(test_security_group.fake_secgroup,
-                        name='default')]
+        sgroups = [{'name': 'default'}]
 
     def sg_get(*args, **kwargs):
         return sgroups
 
-    stubs.Set(api, 'security_group_get_by_instance', sg_get)
+    secgroup_api = openstack_driver.get_openstack_security_group_driver()
+    stubs.Set(secgroup_api.__class__, 'get_instance_security_groups', sg_get)
     return base.InstanceMetadata(inst_data, address=address,
         content=content, extra_md=extra_md,
         vd_driver=vd_driver, network_info=network_info,
@@ -163,7 +161,7 @@ class MetadataTestCase(test.TestCase):
         self.flags(use_local=True, group='conductor')
         self.keypair = fake_keypair_obj(self.instance.key_name,
                                         self.instance.key_data)
-        fake_network.stub_out_nw_api_get_instance_nw_info(self.stubs)
+        fake_network.stub_out_nw_api_get_instance_nw_info(self)
 
     def test_can_pickle_metadata(self):
         # Make sure that InstanceMetadata is possible to pickle. This is
@@ -187,15 +185,21 @@ class MetadataTestCase(test.TestCase):
             md.get_ec2_metadata(version='2009-04-04').get('user-data', obj),
             obj)
 
-    def test_security_groups(self):
+    def _test_security_groups(self):
         inst = self.instance.obj_clone()
-        sgroups = [dict(test_security_group.fake_secgroup, name='default'),
-                   dict(test_security_group.fake_secgroup, name='other')]
+        sgroups = [{'name': name} for name in ('default', 'other')]
         expected = ['default', 'other']
 
         md = fake_InstanceMetadata(self.stubs, inst, sgroups=sgroups)
         data = md.get_ec2_metadata(version='2009-04-04')
         self.assertEqual(data['meta-data']['security-groups'], expected)
+
+    def test_security_groups(self):
+        self._test_security_groups()
+
+    def test_neutron_security_groups(self):
+        self.flags(security_group_api='neutron')
+        self._test_security_groups()
 
     def test_local_hostname_fqdn(self):
         md = fake_InstanceMetadata(self.stubs, self.instance.obj_clone())
@@ -205,7 +209,6 @@ class MetadataTestCase(test.TestCase):
 
     def test_format_instance_mapping(self):
         # Make sure that _format_instance_mappings works.
-        ctxt = None
         instance_ref0 = objects.Instance(**{'id': 0,
                          'uuid': 'e5fe5518-0288-4fa3-b0c4-c79764101b85',
                          'root_device_name': None,
@@ -217,7 +220,7 @@ class MetadataTestCase(test.TestCase):
                          'default_ephemeral_device': None,
                          'default_swap_device': None})
 
-        def fake_bdm_get(ctxt, uuid, use_slave=False):
+        def fake_bdm_get(ctxt, uuid):
             return [fake_block_device.FakeDbBlockDeviceDict(
                     {'volume_id': 87654321,
                      'snapshot_id': None,
@@ -245,8 +248,8 @@ class MetadataTestCase(test.TestCase):
                      'delete_on_termination': None,
                      'device_name': '/dev/sdb'})]
 
-        self.stubs.Set(db, 'block_device_mapping_get_all_by_instance',
-                       fake_bdm_get)
+        self.stub_out('nova.db.block_device_mapping_get_all_by_instance',
+                      fake_bdm_get)
 
         expected = {'ami': 'sda1',
                     'root': '/dev/sda1',
@@ -256,9 +259,9 @@ class MetadataTestCase(test.TestCase):
 
         conductor_api.LocalAPI()
 
-        self.assertEqual(base._format_instance_mapping(ctxt,
+        self.assertEqual(base._format_instance_mapping(self.context,
                          instance_ref0), block_device._DEFAULT_MAPPINGS)
-        self.assertEqual(base._format_instance_mapping(ctxt,
+        self.assertEqual(base._format_instance_mapping(self.context,
                          instance_ref1), expected)
 
     def test_pubkey(self):
@@ -308,15 +311,14 @@ class MetadataTestCase(test.TestCase):
 
         self.assertTrue(md._check_version('2009-04-04', '2009-04-04'))
 
-    def test_InstanceMetadata_uses_passed_network_info(self):
+    @mock.patch('nova.virt.netutils.get_injected_network_template')
+    def test_InstanceMetadata_uses_passed_network_info(self, mock_get):
         network_info = []
-
-        self.mox.StubOutWithMock(netutils, "get_injected_network_template")
-        netutils.get_injected_network_template(network_info).AndReturn(False)
-        self.mox.ReplayAll()
+        mock_get.return_value = False
 
         base.InstanceMetadata(fake_inst_obj(self.context),
                               network_info=network_info)
+        mock_get.assert_called_once_with(network_info)
 
     @mock.patch.object(netutils, "get_network_metadata", autospec=True)
     def test_InstanceMetadata_gets_network_metadata(self, mock_netutils):
@@ -330,23 +332,43 @@ class MetadataTestCase(test.TestCase):
         fakes.stub_out_key_pair_funcs(self.stubs)
         inst = self.instance.obj_clone()
         inst_md = base.InstanceMetadata(inst)
+        expected_paths = [
+            'ec2/2009-04-04/user-data',
+            'ec2/2009-04-04/meta-data.json',
+            'ec2/latest/user-data',
+            'ec2/latest/meta-data.json',
+            'openstack/2012-08-10/meta_data.json',
+            'openstack/2012-08-10/user_data',
+            'openstack/2013-04-04/meta_data.json',
+            'openstack/2013-04-04/user_data',
+            'openstack/2013-10-17/meta_data.json',
+            'openstack/2013-10-17/user_data',
+            'openstack/2013-10-17/vendor_data.json',
+            'openstack/2015-10-15/meta_data.json',
+            'openstack/2015-10-15/user_data',
+            'openstack/2015-10-15/vendor_data.json',
+            'openstack/2015-10-15/network_data.json',
+            'openstack/latest/meta_data.json',
+            'openstack/latest/user_data',
+            'openstack/latest/vendor_data.json',
+            'openstack/latest/network_data.json',
+        ]
+        actual_paths = []
         for (path, value) in inst_md.metadata_for_config_drive():
+            actual_paths.append(path)
             self.assertIsNotNone(path)
+        self.assertEqual(expected_paths, actual_paths)
 
-    def test_InstanceMetadata_queries_network_API_when_needed(self):
+    @mock.patch('nova.virt.netutils.get_injected_network_template')
+    def test_InstanceMetadata_queries_network_API_when_needed(self, mock_get):
         network_info_from_api = []
 
-        self.mox.StubOutWithMock(netutils, "get_injected_network_template")
-
-        netutils.get_injected_network_template(
-            network_info_from_api).AndReturn(False)
-
-        self.mox.ReplayAll()
-
+        mock_get.return_value = False
         base.InstanceMetadata(fake_inst_obj(self.context))
+        mock_get.assert_called_once_with(network_info_from_api)
 
     def test_local_ipv4(self):
-        nw_info = fake_network.fake_get_instance_nw_info(self.stubs,
+        nw_info = fake_network.fake_get_instance_nw_info(self,
                                                           num_networks=2)
         expected_local = "192.168.1.100"
         md = fake_InstanceMetadata(self.stubs, self.instance,
@@ -355,7 +377,7 @@ class MetadataTestCase(test.TestCase):
         self.assertEqual(expected_local, data['meta-data']['local-ipv4'])
 
     def test_local_ipv4_from_nw_info(self):
-        nw_info = fake_network.fake_get_instance_nw_info(self.stubs,
+        nw_info = fake_network.fake_get_instance_nw_info(self,
                                                          num_networks=2)
         expected_local = "192.168.1.100"
         md = fake_InstanceMetadata(self.stubs, self.instance,
@@ -373,8 +395,8 @@ class MetadataTestCase(test.TestCase):
     @mock.patch.object(base64, 'b64encode', lambda data: FAKE_SEED)
     @mock.patch('nova.cells.rpcapi.CellsAPI.get_keypair_at_top')
     @mock.patch.object(objects.KeyPair, 'get_by_name')
-    @mock.patch.object(jsonutils, 'dumps')
-    def _test_as_json_with_options(self, mock_json_dumps,
+    @mock.patch.object(jsonutils, 'dump_as_bytes')
+    def _test_as_json_with_options(self, mock_json_dump_as_bytes,
                           mock_keypair, mock_cells_keypair,
                           is_cells=False, os_version=base.GRIZZLY):
         if is_cells:
@@ -422,7 +444,7 @@ class MetadataTestCase(test.TestCase):
             self.assertIsInstance(mock_keypair.call_args[0][0],
                                   context.RequestContext)
         self.assertEqual(md.md_mimetype, base.MIME_TYPE_APPLICATION_JSON)
-        mock_json_dumps.assert_called_once_with(expected_metadata)
+        mock_json_dump_as_bytes.assert_called_once_with(expected_metadata)
 
     def test_as_json(self):
         for os_version in base.OPENSTACK_VERSIONS:
@@ -440,7 +462,7 @@ class OpenStackMetadataTestCase(test.TestCase):
         self.context = context.RequestContext('fake', 'fake')
         self.instance = fake_inst_obj(self.context)
         self.flags(use_local=True, group='conductor')
-        fake_network.stub_out_nw_api_get_instance_nw_info(self.stubs)
+        fake_network.stub_out_nw_api_get_instance_nw_info(self)
 
     def test_top_level_listing(self):
         # request for /openstack/<version>/ should show metadata.json
@@ -713,7 +735,7 @@ class MetadataHandlerTestCase(test.TestCase):
     def setUp(self):
         super(MetadataHandlerTestCase, self).setUp()
 
-        fake_network.stub_out_nw_api_get_instance_nw_info(self.stubs)
+        fake_network.stub_out_nw_api_get_instance_nw_info(self)
         self.context = context.RequestContext('fake', 'fake')
         self.instance = fake_inst_obj(self.context)
         self.flags(use_local=True, group='conductor')
@@ -775,7 +797,7 @@ class MetadataHandlerTestCase(test.TestCase):
         self.assertTrue(response_ctype.startswith("application/json"))
 
     def test_user_data_non_existing_fixed_address(self):
-        self.stubs.Set(network_api.API, 'get_fixed_ip_by_address',
+        self.stub_out('nova.network.api.get_fixed_ip_by_address',
                        return_non_existing_address)
         response = fake_request(None, self.mdinst, "/2009-04-04/user-data",
                                 "127.1.1.1")
@@ -821,7 +843,7 @@ class MetadataHandlerTestCase(test.TestCase):
                                 headers=None)
         self.assertEqual(response.status_int, 500)
 
-    @mock.patch('nova.utils.constant_time_compare')
+    @mock.patch('oslo_utils.secretutils.constant_time_compare')
     def test_by_instance_id_uses_constant_time_compare(self, mock_compare):
         mock_compare.side_effect = test.TestingException
 
@@ -1179,11 +1201,61 @@ class MetadataHandlerTestCase(test.TestCase):
                      'X-Metadata-Provider-Signature': signature})
         self.assertEqual(403, response.status_int)
 
+    @mock.patch.object(context, 'get_admin_context')
+    @mock.patch.object(network_api, 'API')
+    def test_get_metadata_by_address(self, mock_net_api, mock_get_context):
+        mock_get_context.return_value = 'CONTEXT'
+        api = mock.Mock()
+        fixed_ip = objects.FixedIP(
+            instance_uuid='2bfd8d71-6b69-410c-a2f5-dbca18d02966')
+        api.get_fixed_ip_by_address.return_value = fixed_ip
+        mock_net_api.return_value = api
+
+        with mock.patch.object(base, 'get_metadata_by_instance_id') as gmd:
+            base.get_metadata_by_address('foo')
+
+        api.get_fixed_ip_by_address.assert_called_once_with(
+            'CONTEXT', 'foo')
+        gmd.assert_called_once_with(fixed_ip.instance_uuid, 'foo', 'CONTEXT')
+
+    @mock.patch.object(context, 'get_admin_context')
+    @mock.patch.object(objects.Instance, 'get_by_uuid')
+    def test_get_metadata_by_instance_id(self, mock_uuid, mock_context):
+        inst = objects.Instance()
+        mock_uuid.return_value = inst
+
+        with mock.patch.object(base, 'InstanceMetadata') as imd:
+            base.get_metadata_by_instance_id('foo', 'bar', ctxt='CONTEXT')
+
+        self.assertFalse(mock_context.called, "get_admin_context() should not"
+                         "have been called, the context was given")
+        mock_uuid.assert_called_once_with('CONTEXT', 'foo',
+            expected_attrs=['ec2_ids', 'flavor', 'info_cache', 'metadata',
+                            'system_metadata', 'security_groups'])
+        imd.assert_called_once_with(inst, 'bar')
+
+    @mock.patch.object(context, 'get_admin_context')
+    @mock.patch.object(objects.Instance, 'get_by_uuid')
+    def test_get_metadata_by_instance_id_null_context(self,
+            mock_uuid, mock_context):
+        inst = objects.Instance()
+        mock_uuid.return_value = inst
+        mock_context.return_value = 'CONTEXT'
+
+        with mock.patch.object(base, 'InstanceMetadata') as imd:
+            base.get_metadata_by_instance_id('foo', 'bar')
+
+        mock_context.assert_called_once_with()
+        mock_uuid.assert_called_once_with('CONTEXT', 'foo',
+            expected_attrs=['ec2_ids', 'flavor', 'info_cache', 'metadata',
+                            'system_metadata', 'security_groups'])
+        imd.assert_called_once_with(inst, 'bar')
+
 
 class MetadataPasswordTestCase(test.TestCase):
     def setUp(self):
         super(MetadataPasswordTestCase, self).setUp()
-        fake_network.stub_out_nw_api_get_instance_nw_info(self.stubs)
+        fake_network.stub_out_nw_api_get_instance_nw_info(self)
         self.context = context.RequestContext('fake', 'fake')
         self.instance = fake_inst_obj(self.context)
         self.flags(use_local=True, group='conductor')

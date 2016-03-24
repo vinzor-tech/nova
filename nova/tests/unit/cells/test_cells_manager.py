@@ -19,12 +19,12 @@ import copy
 import datetime
 
 import mock
-from oslo_config import cfg
 from oslo_utils import timeutils
 from six.moves import range
 
 from nova.cells import messaging
 from nova.cells import utils as cells_utils
+import nova.conf
 from nova import context
 from nova import objects
 from nova import test
@@ -33,7 +33,7 @@ from nova.tests.unit import fake_instance
 from nova.tests.unit import fake_server_actions
 from nova.tests.unit.objects import test_flavor
 
-CONF = cfg.CONF
+CONF = nova.conf.CONF
 CONF.import_opt('compute_topic', 'nova.compute.rpcapi')
 
 
@@ -247,7 +247,7 @@ class CellsManagerClassTestCase(test.NoDBTestCase):
         self.stubs.Set(timeutils, 'utcnow', utcnow)
 
         self.cells_manager._heal_instances(fake_context)
-        self.assertEqual(True, call_info['shuffle'])
+        self.assertTrue(call_info['shuffle'])
         self.assertIsNone(call_info['project_id'])
         self.assertEqual(updated_since, call_info['updated_since'])
         self.assertEqual(1, call_info['get_instances'])
@@ -256,7 +256,7 @@ class CellsManagerClassTestCase(test.NoDBTestCase):
 
         call_info['sync_instances'] = []
         self.cells_manager._heal_instances(fake_context)
-        self.assertEqual(True, call_info['shuffle'])
+        self.assertTrue(call_info['shuffle'])
         self.assertIsNone(call_info['project_id'])
         self.assertEqual(updated_since, call_info['updated_since'])
         self.assertEqual(2, call_info['get_instances'])

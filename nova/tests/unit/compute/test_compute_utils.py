@@ -21,7 +21,6 @@ import string
 import uuid
 
 import mock
-from oslo_config import cfg
 from oslo_serialization import jsonutils
 from oslo_utils import importutils
 import six
@@ -30,8 +29,8 @@ from nova.compute import flavors
 from nova.compute import power_state
 from nova.compute import task_states
 from nova.compute import utils as compute_utils
+import nova.conf
 from nova import context
-from nova import db
 from nova import exception
 from nova.image import glance
 from nova.network import api as network_api
@@ -48,11 +47,11 @@ from nova.tests.unit import fake_server_actions
 import nova.tests.unit.image.fake
 from nova.tests.unit.objects import test_flavor
 from nova.tests.unit.objects import test_migration
-from nova.virt import driver
+from nova.tests import uuidsentinel as uuids
 
-CONF = cfg.CONF
+
+CONF = nova.conf.CONF
 CONF.import_opt('compute_manager', 'nova.service')
-CONF.import_opt('compute_driver', 'nova.virt.driver')
 
 
 def create_instance(context, user_id='fake', project_id='fake', params=None):
@@ -97,31 +96,13 @@ class ComputeValidateDeviceTestCase(test.NoDBTestCase):
 
         flavor = objects.Flavor(**test_flavor.fake_flavor)
         self.instance.system_metadata = {}
-        with mock.patch.object(self.instance, 'save'):
-            self.instance.set_flavor(flavor)
+        self.instance.flavor = flavor
         self.instance.default_swap_device = None
 
         self.data = []
 
-        self.stubs.Set(db, 'block_device_mapping_get_all_by_instance',
-                       lambda context, instance, use_slave=False: self.data)
-
-    def _update_flavor(self, flavor_info):
-        self.flavor = {
-            'id': 1,
-            'name': 'foo',
-            'memory_mb': 128,
-            'vcpus': 1,
-            'root_gb': 10,
-            'ephemeral_gb': 10,
-            'flavorid': 1,
-            'swap': 0,
-            'rxtx_factor': 1.0,
-            'vcpu_weight': 1,
-            }
-        self.flavor.update(flavor_info)
-        with mock.patch.object(self.instance, 'save'):
-            self.instance.set_flavor(self.flavor)
+        self.stub_out('nova.db.block_device_mapping_get_all_by_instance',
+                      lambda context, instance: self.data)
 
     def _validate_device(self, device=None):
         bdms = objects.BlockDeviceMappingList.get_by_instance_uuid(
@@ -215,42 +196,26 @@ class ComputeValidateDeviceTestCase(test.NoDBTestCase):
         self.assertEqual(device, '/dev/vdc')
 
     def test_ephemeral_xenapi(self):
-        self._update_flavor({
-                'ephemeral_gb': 10,
-                'swap': 0,
-                })
-        self.stubs.Set(flavors, 'get_flavor',
-                       lambda instance_type_id, ctxt=None: self.flavor)
+        self.instance.flavor.ephemeral_gb = 10
+        self.instance.flavor.swap = 0
         device = self._validate_device()
         self.assertEqual(device, '/dev/xvdc')
 
     def test_swap_xenapi(self):
-        self._update_flavor({
-                'ephemeral_gb': 0,
-                'swap': 10,
-                })
-        self.stubs.Set(flavors, 'get_flavor',
-                       lambda instance_type_id, ctxt=None: self.flavor)
+        self.instance.flavor.ephemeral_gb = 0
+        self.instance.flavor.swap = 10
         device = self._validate_device()
         self.assertEqual(device, '/dev/xvdb')
 
     def test_swap_and_ephemeral_xenapi(self):
-        self._update_flavor({
-                'ephemeral_gb': 10,
-                'swap': 10,
-                })
-        self.stubs.Set(flavors, 'get_flavor',
-                       lambda instance_type_id, ctxt=None: self.flavor)
+        self.instance.flavor.ephemeral_gb = 10
+        self.instance.flavor.swap = 10
         device = self._validate_device()
         self.assertEqual(device, '/dev/xvdd')
 
     def test_swap_and_one_attachment_xenapi(self):
-        self._update_flavor({
-                'ephemeral_gb': 0,
-                'swap': 10,
-                })
-        self.stubs.Set(flavors, 'get_flavor',
-                       lambda instance_type_id, ctxt=None: self.flavor)
+        self.instance.flavor.ephemeral_gb = 0
+        self.instance.flavor.swap = 10
         device = self._validate_device()
         self.assertEqual(device, '/dev/xvdb')
         self.data.append(self._fake_bdm(device))
@@ -271,7 +236,8 @@ class DefaultDeviceNamesForInstanceTestCase(test.NoDBTestCase):
         self.ephemerals = block_device_obj.block_device_make_list(
                 self.context,
                 [fake_block_device.FakeDbBlockDeviceDict(
-                 {'id': 1, 'instance_uuid': 'fake-instance',
+                 {'id': 1,
+                  'instance_uuid': uuids.block_device_instance,
                   'device_name': '/dev/vdb',
                   'source_type': 'blank',
                   'destination_type': 'local',
@@ -282,7 +248,8 @@ class DefaultDeviceNamesForInstanceTestCase(test.NoDBTestCase):
         self.swap = block_device_obj.block_device_make_list(
                 self.context,
                 [fake_block_device.FakeDbBlockDeviceDict(
-                 {'id': 2, 'instance_uuid': 'fake-instance',
+                 {'id': 2,
+                  'instance_uuid': uuids.block_device_instance,
                   'device_name': '/dev/vdc',
                   'source_type': 'blank',
                   'destination_type': 'local',
@@ -293,43 +260,37 @@ class DefaultDeviceNamesForInstanceTestCase(test.NoDBTestCase):
         self.block_device_mapping = block_device_obj.block_device_make_list(
                 self.context,
                 [fake_block_device.FakeDbBlockDeviceDict(
-                 {'id': 3, 'instance_uuid': 'fake-instance',
+                 {'id': 3,
+                  'instance_uuid': uuids.block_device_instance,
                   'device_name': '/dev/vda',
                   'source_type': 'volume',
                   'destination_type': 'volume',
                   'volume_id': 'fake-volume-id-1',
                   'boot_index': 0}),
                  fake_block_device.FakeDbBlockDeviceDict(
-                 {'id': 4, 'instance_uuid': 'fake-instance',
+                 {'id': 4,
+                  'instance_uuid': uuids.block_device_instance,
                   'device_name': '/dev/vdd',
                   'source_type': 'snapshot',
                   'destination_type': 'volume',
                   'snapshot_id': 'fake-snapshot-id-1',
                   'boot_index': -1}),
                  fake_block_device.FakeDbBlockDeviceDict(
-                 {'id': 5, 'instance_uuid': 'fake-instance',
+                 {'id': 5,
+                  'instance_uuid': uuids.block_device_instance,
                   'device_name': '/dev/vde',
                   'source_type': 'blank',
                   'destination_type': 'volume',
                   'boot_index': -1})])
-        self.instance = {'uuid': 'fake_instance', 'ephemeral_gb': 2}
+        self.instance = {'uuid': uuids.instance,
+                         'ephemeral_gb': 2}
         self.is_libvirt = False
         self.root_device_name = '/dev/vda'
         self.update_called = False
 
-        def fake_driver_matches(driver_string):
-            if driver_string == 'libvirt.LibvirtDriver':
-                return self.is_libvirt
-            return False
-
         self.patchers = []
         self.patchers.append(
                 mock.patch.object(objects.BlockDeviceMapping, 'save'))
-        self.patchers.append(
-                mock.patch.object(driver,
-                                  'compute_driver_matches',
-                                  new=mock.Mock(
-                                      side_effect=fake_driver_matches)))
         for patcher in self.patchers:
             patcher.start()
 
@@ -428,7 +389,7 @@ class UsageInfoTestCase(test.TestCase):
     def setUp(self):
         def fake_get_nw_info(cls, ctxt, instance):
             self.assertTrue(ctxt.is_admin)
-            return fake_network.fake_get_instance_nw_info(self.stubs, 1, 1)
+            return fake_network.fake_get_instance_nw_info(self, 1, 1)
 
         super(UsageInfoTestCase, self).setUp()
         self.stubs.Set(network_api.API, 'get_instance_nw_info',
@@ -450,7 +411,7 @@ class UsageInfoTestCase(test.TestCase):
 
         self.stubs.Set(nova.tests.unit.image.fake._FakeImageService,
                        'show', fake_show)
-        fake_network.set_stub_network_methods(self.stubs)
+        fake_network.set_stub_network_methods(self)
         fake_server_actions.stub_out_action_events(self.stubs)
 
     def test_notify_usage_exists(self):
@@ -769,48 +730,3 @@ class ComputeUtilsQuotaDeltaTestCase(test.TestCase):
         compute_utils.reserve_quota_delta(self.context, deltas, inst)
         mock_reserve.assert_called_once_with(project_id=inst.project_id,
                                              user_id=inst.user_id, **deltas)
-
-
-class ComputeUtilsMigrationTestCase(test.TestCase):
-    def setUp(self):
-        super(ComputeUtilsMigrationTestCase, self).setUp()
-        self.context = context.RequestContext('fake', 'fake')
-
-    def _test_get_resources(self):
-        old_flavor = flavors.get_flavor_by_name('m1.tiny')
-        new_flavor = flavors.get_flavor_by_name('m1.medium')
-
-        params = {'flavor': new_flavor, 'old_flavor': old_flavor,
-                  'new_flavor': new_flavor, 'vcpus': new_flavor['vcpus'],
-                  'memory_mb': new_flavor['memory_mb']}
-        instance = create_instance(self.context, params=params)
-
-        updates = {'old_instance_type_id': old_flavor['id'],
-                   'new_instance_type_id': new_flavor['id']}
-
-        fake_migration = test_migration.fake_db_migration(**updates)
-        migration = objects.Migration._from_db_object(self.context,
-                                                      objects.Migration(),
-                                                      fake_migration)
-        return old_flavor, migration, instance
-
-    @mock.patch.object(objects.Flavor, 'get_by_id')
-    def test_get_inst_attrs_from_migration(self, mock_get_flavor):
-        old_flavor, migration, instance = self._test_get_resources()
-        expected_result = (old_flavor['vcpus'], old_flavor['memory_mb'])
-
-        mock_get_flavor.return_value = old_flavor
-        result = compute_utils.get_inst_attrs_from_migration(migration,
-                                                             instance)
-        self.assertEqual(expected_result, result)
-
-    @mock.patch.object(objects.Flavor, 'get_by_id')
-    def test_get_inst_attrs_from_migration_flavor_not_found(
-            self, mock_get_flavor):
-        old_flavor, migration, instance = self._test_get_resources()
-        expected_result = (instance.vcpus, instance.memory_mb)
-
-        mock_get_flavor.side_effect = exception.FlavorNotFound(old_flavor.id)
-        result = compute_utils.get_inst_attrs_from_migration(migration,
-                                                             instance)
-        self.assertEqual(expected_result, result)

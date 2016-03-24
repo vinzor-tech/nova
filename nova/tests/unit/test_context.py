@@ -12,10 +12,12 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+import mock
 from oslo_context import context as o_context
 from oslo_context import fixture as o_fixture
 
 from nova import context
+from nova import objects
 from nova import test
 
 
@@ -40,28 +42,28 @@ class ContextTestCase(test.NoDBTestCase):
         ctxt = context.RequestContext('111',
                                       '222',
                                       roles=['admin', 'weasel'])
-        self.assertEqual(ctxt.is_admin, True)
+        self.assertTrue(ctxt.is_admin)
 
     def test_request_context_sets_is_admin_by_role(self):
         ctxt = context.RequestContext('111',
                                       '222',
                                       roles=['administrator'])
-        self.assertEqual(ctxt.is_admin, True)
+        self.assertTrue(ctxt.is_admin)
 
     def test_request_context_sets_is_admin_upcase(self):
         ctxt = context.RequestContext('111',
                                       '222',
                                       roles=['Admin', 'weasel'])
-        self.assertEqual(ctxt.is_admin, True)
+        self.assertTrue(ctxt.is_admin)
 
     def test_request_context_read_deleted(self):
         ctxt = context.RequestContext('111',
                                       '222',
                                       read_deleted='yes')
-        self.assertEqual(ctxt.read_deleted, 'yes')
+        self.assertEqual('yes', ctxt.read_deleted)
 
         ctxt.read_deleted = 'no'
-        self.assertEqual(ctxt.read_deleted, 'no')
+        self.assertEqual('no', ctxt.read_deleted)
 
     def test_request_context_read_deleted_invalid(self):
         self.assertRaises(ValueError,
@@ -80,10 +82,12 @@ class ContextTestCase(test.NoDBTestCase):
     def test_extra_args_to_context_get_logged(self):
         info = {}
 
-        def fake_warn(log_msg):
+        def fake_warn(log_msg, *args):
+            if args:
+                log_msg = log_msg % args
             info['log_msg'] = log_msg
 
-        self.stubs.Set(context.LOG, 'warning', fake_warn)
+        self.stub_out('nova.context.LOG.warning', fake_warn)
 
         c = context.RequestContext('user', 'project',
                 extra_arg1='meow', extra_arg2='wuff')
@@ -93,15 +97,15 @@ class ContextTestCase(test.NoDBTestCase):
 
     def test_service_catalog_default(self):
         ctxt = context.RequestContext('111', '222')
-        self.assertEqual(ctxt.service_catalog, [])
+        self.assertEqual([], ctxt.service_catalog)
 
         ctxt = context.RequestContext('111', '222',
                 service_catalog=[])
-        self.assertEqual(ctxt.service_catalog, [])
+        self.assertEqual([], ctxt.service_catalog)
 
         ctxt = context.RequestContext('111', '222',
                 service_catalog=None)
-        self.assertEqual(ctxt.service_catalog, [])
+        self.assertEqual([], ctxt.service_catalog)
 
     def test_service_catalog_cinder_only(self):
         service_catalog = [
@@ -118,7 +122,7 @@ class ContextTestCase(test.NoDBTestCase):
         volume_catalog = [{u'type': u'volume', u'name': u'cinder'}]
         ctxt = context.RequestContext('111', '222',
                 service_catalog=service_catalog)
-        self.assertEqual(ctxt.service_catalog, volume_catalog)
+        self.assertEqual(volume_catalog, ctxt.service_catalog)
 
     def test_to_dict_from_dict_no_log(self):
         warns = []
@@ -128,7 +132,7 @@ class ContextTestCase(test.NoDBTestCase):
                 a = a[0]
             warns.append(str(msg) % a)
 
-        self.stubs.Set(context.LOG, 'warn', stub_warn)
+        self.stub_out('nova.context.LOG.warning', stub_warn)
 
         ctxt = context.RequestContext('111',
                                       '222',
@@ -136,7 +140,7 @@ class ContextTestCase(test.NoDBTestCase):
 
         context.RequestContext.from_dict(ctxt.to_dict())
 
-        self.assertEqual(len(warns), 0, warns)
+        self.assertEqual(0, len(warns), warns)
 
     def test_store_when_no_overwrite(self):
         # If no context exists we store one even if overwrite is false
@@ -217,9 +221,22 @@ class ContextTestCase(test.NoDBTestCase):
                   'request_id': 'req-956637ad-354a-4bc5-b969-66fd1cc00f50',
                   'user_domain': None}
         ctx = context.RequestContext.from_dict(values)
-        self.assertEqual(ctx.user, '111')
-        self.assertEqual(ctx.tenant, '222')
-        self.assertEqual(ctx.user_id, '111')
-        self.assertEqual(ctx.project_id, '222')
+        self.assertEqual('111', ctx.user)
+        self.assertEqual('222', ctx.tenant)
+        self.assertEqual('111', ctx.user_id)
+        self.assertEqual('222', ctx.project_id)
         values2 = ctx.to_dict()
         self.assertEqual(values, values2)
+
+    @mock.patch('nova.db.create_context_manager')
+    def test_target_cell(self, mock_create_ctxt_mgr):
+        mock_create_ctxt_mgr.return_value = mock.sentinel.cm
+        ctxt = context.RequestContext('111',
+                                      '222',
+                                      roles=['admin', 'weasel'])
+        # Verify the existing db_connection, if any, is restored
+        ctxt.db_connection = mock.sentinel.db_conn
+        mapping = objects.CellMapping(database_connection='fake://')
+        with context.target_cell(ctxt, mapping):
+            self.assertEqual(ctxt.db_connection, mock.sentinel.cm)
+        self.assertEqual(mock.sentinel.db_conn, ctxt.db_connection)

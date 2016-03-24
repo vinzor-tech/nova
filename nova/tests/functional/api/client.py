@@ -116,14 +116,18 @@ class TestOpenStackClient(object):
 
     """
 
-    def __init__(self, auth_user, auth_key, auth_uri):
+    def __init__(self, auth_user, auth_key, auth_uri,
+                 project_id=None):
         super(TestOpenStackClient, self).__init__()
         self.auth_result = None
         self.auth_user = auth_user
         self.auth_key = auth_key
         self.auth_uri = auth_uri
-        # default project_id
-        self.project_id = 'openstack'
+        if project_id is None:
+            self.project_id = "6f70656e737461636b20342065766572"
+        else:
+            self.project_id = project_id
+        self.microversion = None
 
     def request(self, url, method='GET', body=None, headers=None):
         _headers = {'Content-Type': 'application/json'}
@@ -167,6 +171,8 @@ class TestOpenStackClient(object):
 
         headers = kwargs.setdefault('headers', {})
         headers['X-Auth-Token'] = auth_result['x-auth-token']
+        if self.microversion:
+            headers['X-OpenStack-Nova-API-Version'] = self.microversion
 
         response = self.request(full_uri, **kwargs)
 
@@ -299,17 +305,17 @@ class TestOpenStackClient(object):
                              flavor_id, spec)
 
     def get_volume(self, volume_id):
-        return self.api_get('/volumes/%s' % volume_id).body['volume']
+        return self.api_get('/os-volumes/%s' % volume_id).body['volume']
 
     def get_volumes(self, detail=True):
-        rel_url = '/volumes/detail' if detail else '/volumes'
+        rel_url = '/os-volumes/detail' if detail else '/os-volumes'
         return self.api_get(rel_url).body['volumes']
 
     def post_volume(self, volume):
-        return self.api_post('/volumes', volume).body['volume']
+        return self.api_post('/os-volumes', volume).body['volume']
 
     def delete_volume(self, volume_id):
-        return self.api_delete('/volumes/%s' % volume_id)
+        return self.api_delete('/os-volumes/%s' % volume_id)
 
     def get_server_volume(self, server_id, attachment_id):
         return self.api_get('/servers/%s/os-volume_attachments/%s' %
@@ -335,8 +341,12 @@ class TestOpenStackClient(object):
         return self.api_post('/servers/%s/metadata' % server_id,
                              post_body).body['metadata']
 
-    def get_server_groups(self):
-        return self.api_get('/os-server-groups').body['server_groups']
+    def get_server_groups(self, all_projects=None):
+        if all_projects:
+            return self.api_get(
+                '/os-server-groups?all_projects').body['server_groups']
+        else:
+            return self.api_get('/os-server-groups').body['server_groups']
 
     def get_server_group(self, group_id):
         return self.api_get('/os-server-groups/%s' %
@@ -348,3 +358,7 @@ class TestOpenStackClient(object):
 
     def delete_server_group(self, group_id):
         self.api_delete('/os-server-groups/%s' % group_id)
+
+    def get_instance_actions(self, server_id):
+        return self.api_get('/servers/%s/os-instance-actions' %
+                            (server_id)).body['instanceActions']

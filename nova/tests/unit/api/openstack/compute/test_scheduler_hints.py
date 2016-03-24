@@ -15,6 +15,7 @@
 
 import datetime
 
+import mock
 from oslo_config import cfg
 from oslo_serialization import jsonutils
 
@@ -25,7 +26,7 @@ from nova.api.openstack.compute import servers as servers_v21
 from nova.api.openstack import extensions
 import nova.compute.api
 from nova.compute import flavors
-from nova import db
+from nova import exception
 from nova import test
 from nova.tests.unit.api.openstack import fakes
 from nova.tests.unit import fake_instance
@@ -46,11 +47,11 @@ class SchedulerHintsTestCaseV21(test.TestCase):
         self._set_up_router()
 
     def _set_up_router(self):
-        self.app = compute.APIRouterV3(init_only=('servers',
-                                                  'os-scheduler-hints'))
+        self.app = compute.APIRouterV21(init_only=('servers',
+                                                   'os-scheduler-hints'))
 
     def _get_request(self):
-        return fakes.HTTPRequest.blank('/servers')
+        return fakes.HTTPRequest.blank('/fake/servers')
 
     def test_create_server_without_hints(self):
 
@@ -69,14 +70,14 @@ class SchedulerHintsTestCaseV21(test.TestCase):
                   'flavorRef': '1',
                }}
 
-        req.body = jsonutils.dumps(body)
+        req.body = jsonutils.dump_as_bytes(body)
         res = req.get_response(self.app)
         self.assertEqual(202, res.status_int)
 
-    def test_create_server_with_hints(self):
+    def _test_create_server_with_hint(self, hint):
 
         def fake_create(*args, **kwargs):
-            self.assertEqual(kwargs['scheduler_hints'], {'group': 'foo'})
+            self.assertEqual(kwargs['scheduler_hints'], hint)
             return ([self.fake_instance], '')
 
         self.stubs.Set(nova.compute.api.API, 'create', fake_create)
@@ -90,12 +91,27 @@ class SchedulerHintsTestCaseV21(test.TestCase):
                   'imageRef': 'cedef40a-ed67-4d10-800e-17455edce175',
                   'flavorRef': '1',
             },
-            'os:scheduler_hints': {'group': 'foo'},
+            'os:scheduler_hints': hint,
         }
 
-        req.body = jsonutils.dumps(body)
+        req.body = jsonutils.dump_as_bytes(body)
         res = req.get_response(self.app)
         self.assertEqual(202, res.status_int)
+
+    def test_create_server_with_group_hint(self):
+        self._test_create_server_with_hint({'group': UUID})
+
+    def test_create_server_with_non_uuid_group_hint(self):
+        self._create_server_with_scheduler_hints_bad_request(
+                {'group': 'non-uuid'})
+
+    def test_create_server_with_different_host_hint(self):
+        self._test_create_server_with_hint(
+            {'different_host': '9c47bf55-e9d8-42da-94ab-7f9e80cd1857'})
+
+        self._test_create_server_with_hint(
+            {'different_host': ['9c47bf55-e9d8-42da-94ab-7f9e80cd1857',
+                                '82412fa6-0365-43a9-95e4-d8b20e00c0de']})
 
     def _create_server_with_scheduler_hints_bad_request(self, param):
         req = self._get_request()
@@ -109,7 +125,7 @@ class SchedulerHintsTestCaseV21(test.TestCase):
             },
             'os:scheduler_hints': param,
         }
-        req.body = jsonutils.dumps(body)
+        req.body = jsonutils.dump_as_bytes(body)
         res = req.get_response(self.app)
         self.assertEqual(400, res.status_int)
 
@@ -118,6 +134,13 @@ class SchedulerHintsTestCaseV21(test.TestCase):
 
     def test_create_server_bad_hints_long_group(self):
         param = {'group': 'a' * 256}
+        self._create_server_with_scheduler_hints_bad_request(param)
+
+    def test_create_server_with_bad_different_host_hint(self):
+        param = {'different_host': 'non-server-id'}
+        self._create_server_with_scheduler_hints_bad_request(param)
+
+        param = {'different_host': ['non-server-id01', 'non-server-id02']}
         self._create_server_with_scheduler_hints_bad_request(param)
 
 
@@ -137,6 +160,18 @@ class SchedulerHintsTestCaseV2(SchedulerHintsTestCaseV21):
         # NOTE: v2.0 API cannot handle this bad request case now.
         # We skip this test for v2.0.
         pass
+
+    def test_create_server_with_bad_different_host_hint(self):
+        # NOTE: v2.0 API cannot handle this bad request case now.
+        # We skip this test for v2.0.
+        pass
+
+    @mock.patch(
+            'nova.api.openstack.compute.legacy_v2.servers.Controller.create')
+    def test_create_server_with_non_uuid_group_hint(self, mock_create):
+        mock_create.side_effect = exception.InvalidInput(reason='')
+        self._create_server_with_scheduler_hints_bad_request(
+                {'group': 'non-uuid'})
 
 
 class ServersControllerCreateTestV21(test.TestCase):
@@ -175,8 +210,8 @@ class ServersControllerCreateTestV21(test.TestCase):
 
             return instance
 
-        fake.stub_out_image_service(self.stubs)
-        self.stubs.Set(db, 'instance_create', instance_create)
+        fake.stub_out_image_service(self)
+        self.stub_out('nova.db.instance_create', instance_create)
 
     def _set_up_controller(self):
         ext_info = extension_info.LoadedExtensionInfo()
@@ -198,7 +233,7 @@ class ServersControllerCreateTestV21(test.TestCase):
         body.update(params)
         req = self._get_request()
         req.method = 'POST'
-        req.body = jsonutils.dumps(body)
+        req.body = jsonutils.dump_as_bytes(body)
         req.headers["content-type"] = "application/json"
         server = self.no_scheduler_hints_controller.create(
                      req, body=body).obj['server']

@@ -38,5 +38,14 @@ migrate_live = {
     'additionalProperties': False,
 }
 
-host = copy.deepcopy(parameter_types.hostname)
-host['type'] = ['string', 'null']
+block_migration = copy.deepcopy(parameter_types.boolean)
+block_migration['enum'].append('auto')
+
+migrate_live_v2_25 = copy.deepcopy(migrate_live)
+
+del migrate_live_v2_25['properties']['os-migrateLive']['properties'][
+    'disk_over_commit']
+migrate_live_v2_25['properties']['os-migrateLive']['properties'][
+    'block_migration'] = block_migration
+migrate_live_v2_25['properties']['os-migrateLive']['required'] = (
+    ['block_migration', 'host'])

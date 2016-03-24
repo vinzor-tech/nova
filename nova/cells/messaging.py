@@ -31,7 +31,6 @@ import sys
 import traceback
 
 from eventlet import queue
-from oslo_config import cfg
 from oslo_log import log as logging
 import oslo_messaging as messaging
 from oslo_serialization import jsonutils
@@ -48,6 +47,7 @@ from nova import compute
 from nova.compute import rpcapi as compute_rpcapi
 from nova.compute import task_states
 from nova.compute import vm_states
+import nova.conf
 from nova.consoleauth import rpcapi as consoleauth_rpcapi
 from nova import context
 from nova.db import base
@@ -58,19 +58,7 @@ from nova.objects import base as objects_base
 from nova import rpc
 from nova import utils
 
-
-cell_messaging_opts = [
-    cfg.IntOpt('max_hop_count',
-            default=10,
-            help='Maximum number of hops for cells routing.'),
-    cfg.StrOpt('scheduler',
-            default='nova.cells.scheduler.CellsScheduler',
-            help='Cells scheduler to use')]
-
-CONF = cfg.CONF
-CONF.import_opt('name', 'nova.cells.opts', group='cells')
-CONF.import_opt('call_timeout', 'nova.cells.opts', group='cells')
-CONF.register_opts(cell_messaging_opts, group='cells')
+CONF = nova.conf.CONF
 
 LOG = logging.getLogger(__name__)
 
@@ -1165,11 +1153,15 @@ class _BroadcastMessageMethods(_BaseMessageMethods):
         for key in items_to_remove:
             bdm.pop(key, None)
         if create is None:
+            LOG.debug('Calling db.block_device_mapping_update_or_create from '
+                      'API cell with values: %s', bdm)
             self.db.block_device_mapping_update_or_create(message.ctxt,
                                                           bdm,
                                                           legacy=False)
             return
         elif create is True:
+            LOG.debug('Calling db.block_device_mapping_create from API '
+                      'cell with values: %s', bdm)
             self.db.block_device_mapping_create(message.ctxt, bdm,
                                                 legacy=False)
             return
@@ -1189,6 +1181,8 @@ class _BroadcastMessageMethods(_BaseMessageMethods):
             LOG.warning(_LW("No match when trying to update BDM: %(bdm)s"),
                         dict(bdm=bdm))
             return
+        LOG.debug('Calling db.block_device_mapping_update from API cell with '
+                  'bdm id %s and values: %s', instance_bdm['id'], bdm)
         self.db.block_device_mapping_update(message.ctxt,
                                             instance_bdm['id'], bdm,
                                             legacy=False)
@@ -1208,8 +1202,7 @@ class _BroadcastMessageMethods(_BaseMessageMethods):
                     message.ctxt, instance_uuid, volume_id)
 
     def get_migrations(self, message, filters):
-        context = message.ctxt
-        return self.compute_api.get_migrations(context, filters)
+        return self.compute_api.get_migrations(message.ctxt, filters)
 
     def get_keypair_at_top(self, message, user_id, name):
         """Get keypair in API cells by name. Just return None if there is

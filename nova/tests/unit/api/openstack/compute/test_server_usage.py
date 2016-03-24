@@ -16,10 +16,10 @@
 import datetime
 
 from oslo_serialization import jsonutils
+from oslo_utils import fixture as utils_fixture
 from oslo_utils import timeutils
 
 from nova import compute
-from nova import db
 from nova import exception
 from nova import objects
 from nova.objects import instance as instance_obj
@@ -62,7 +62,7 @@ class ServerUsageTestV21(test.TestCase):
 
     def setUp(self):
         super(ServerUsageTestV21, self).setUp()
-        fakes.stub_out_nw_api(self.stubs)
+        fakes.stub_out_nw_api(self)
         self.stubs.Set(compute.api.API, 'get', fake_compute_get)
         self.stubs.Set(compute.api.API, 'get_all', fake_compute_get_all)
         self.flags(
@@ -70,7 +70,7 @@ class ServerUsageTestV21(test.TestCase):
                 'nova.api.openstack.compute.contrib.select_extensions'],
             osapi_compute_ext_list=['Server_usage'])
         return_server = fakes.fake_instance_get()
-        self.stubs.Set(db, 'instance_get_by_uuid', return_server)
+        self.stub_out('nova.db.instance_get_by_uuid', return_server)
 
     def _make_request(self, url):
         req = fakes.HTTPRequest.blank(url)
@@ -102,8 +102,7 @@ class ServerUsageTestV21(test.TestCase):
         res = self._make_request(url)
 
         self.assertEqual(res.status_int, 200)
-        now = timeutils.utcnow()
-        timeutils.set_time_override(now)
+        self.useFixture(utils_fixture.TimeFixture())
         self.assertServerUsage(self._get_server(res.body),
                                launched_at=DATE1,
                                terminated_at=DATE2)
